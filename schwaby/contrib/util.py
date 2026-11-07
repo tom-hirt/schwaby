@@ -64,7 +64,7 @@ MAX_EXPONENT = 64
 #: ``+``, and every Unicode decimal digit, so ``'\u0663'`` is three and
 #: ``'\uff11\uff12'`` is twelve. Each of those is a corrupt field decoding as
 #: a confident wrong number, which is the same defect the mantissa members
-#: are validated against; the two paths refuse the same tokens now.
+#: are validated against, so the two paths refuse the same tokens.
 #:
 #: The exponent is bounded here, at four significant digits, and not left to
 #: the magnitude check after construction: an exponent near 10**18 or beyond
@@ -407,8 +407,8 @@ def decode_decimal(value):
     a 96-bit integer mantissa, which arrives whole in ``lo`` as a string of
     digits, and a ``signScale`` packing the scale in its magnitude and the
     sign in its parity. The conversion is undocumented publicly; Schwab's
-    Trader API support has confirmed it, and it reproduces every captured
-    payload, including Schwab's own worked example
+    Trader API support has confirmed it, and it reproduces every payload it
+    has been checked against, including Schwab's own worked example
     ``{"lo": "40000000", "signScale": 13}`` -> ``Decimal('-40.000000')``.
 
     Five things this gets right that a first attempt usually does not, each of
@@ -438,8 +438,8 @@ def decode_decimal(value):
 
     :param value: A decimal object, or a number or string. A non-object is
                   validated and returned as a :class:`~decimal.Decimal`. That
-                  path is defensive rather than observed: every money and
-                  quantity field in every capture this was checked against
+                  path is defensive rather than observed: in the captures
+                  this was checked against, every money and quantity field
                   is an object, on every message. What *is* measured is the
                   empty string, which arrives as the ``SUBSCRIBED`` ack's
                   ``MESSAGE_DATA`` and reaches here from any consumer
@@ -652,7 +652,7 @@ def decode_decimal(value):
         # it as zero.
         #
         # Returning `Decimal(0)` rather than falling through is normalisation
-        # and only that, now the scale above is validated either way: falling
+        # and only that, since the scale above is validated either way: falling
         # through gives `Decimal('0.000000')` at scale 12, and
         # `Decimal('-0.000000')` at scale 13. Both compare equal to zero, and
         # the second one *prints* as a negative quantity.

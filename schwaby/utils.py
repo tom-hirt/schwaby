@@ -157,9 +157,10 @@ class SchwabError(Exception):
     you is the ability to catch the library's own failures *without* also
     catching every ``int()`` and ``float()`` in the same block.
 
-    Two of the order exceptions additionally inherit ``ValueError``, so code
-    catching them that way works. :class:`OrderIdNotFoundError` deliberately
-    does not: see its own documentation.
+    Two of the order exceptions additionally inherit ``ValueError``, so that
+    code written to catch them as ``ValueError`` before this class existed
+    still catches them. :class:`OrderIdNotFoundError` deliberately does not:
+    see its own documentation.
     '''
 
     def __reduce__(self):
@@ -795,8 +796,8 @@ def _expiry_authlib_acts_on(expires_at):
     ``_LONGEST_EXPIRY`` is refused. The check on a token response and the
     classification of a stored token both ask this, so that they cannot
     disagree: otherwise a response with a milliseconds expiry could be refused
-    as never reached while a stored token with the same expiry was reported as
-    retryable on every call.
+    as never reached while a stored token with the same expiry would be
+    reported as retryable on every call.
     '''
     return (isinstance(expires_at, int)
             and expires_at <= time.time() + _LONGEST_EXPIRY)

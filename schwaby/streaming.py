@@ -70,11 +70,9 @@ class _BaseFieldEnum(Enum):
             # `StreamJsonDecoder` is a public extension point that parses the
             # whole frame, and a decoder normalising numeric field keys to
             # ints is a plausible thing to write. Keyed on the raw object,
-            # such a message would go unrelabeled, `.isdigit()` below would
+            # such a message would go unrelabeled: `.isdigit()` below would
             # raise AttributeError on it, and the relabel guard would absorb
-            # that and drop the whole message -- after reporting field 1 as
-            # one schwaby "has no name for", which would be a wrong warning
-            # besides.
+            # that and drop the whole message.
             try:
                 # A plain str: a decoder's subclass could answer isdigit for
                 # itself, and put a forged line in the warning below.
@@ -192,9 +190,10 @@ _reported_fields = set()
 #: log is process-wide. This one drives `add_error_handler`, which is per
 #: client, so a second client in the same process has its own handlers and
 #: must hear about a dropped service for itself. With process-wide dedup, a
-#: second client hears about only some of the names -- three of five with one
-#: frame per name, two of five with four -- because what leaks through is
-#: `_absorb`'s per-kind coalescing rather than anything about the names.
+#: second client would hear about only some of the names (measured: three of
+#: five with one frame per name, two of five with four), because what leaks
+#: through is `_absorb`'s per-kind coalescing rather than anything about the
+#: names.
 _MAX_REPORTED_SHAPES = 64
 
 
@@ -1300,11 +1299,11 @@ class StreamClient(EnumEnforcer):
                 # The containing frame, not the offending value, because the
                 # value is often None -- a null channel, a null element -- and
                 # a report of (None, None) is the signature the logout-close
-                # failure already uses. A consumer discriminating on "both
-                # None" would file a dead feed under "could not close after
-                # logout". Where there is no containing frame, the offender is
-                # the frame, and `isinstance(exception, UnusableMessage)` is
-                # the discriminator the docs now point at.
+                # failure uses. A caller discriminating on "both None" would
+                # file a dead feed under "could not close after logout".
+                # Where there is no containing frame, the offender is the
+                # frame, and `isinstance(exception, UnusableMessage)` is the
+                # discriminator the docs point at.
                 frame if frame is not None else offender))
 
     def _iter_channel(self, msg, channel):
@@ -3936,10 +3935,10 @@ class StreamClient(EnumEnforcer):
     # It is not added because a validator that rejects what Schwab accepts is
     # worse than none: it reads as a configuration error rather than as two
     # documents disagreeing, and there is no way for the caller to get past
-    # it. The documented vocabulary is incomplete and easy to get wrong:
-    # `$SPX.X` looks like a plausible key and is not a valid prefix. Roughly
-    # eight prefixes have been tried against the live service, out of a set
-    # whose size nobody knows.
+    # it. Schwab does not publish the full vocabulary, and it is easy to get
+    # wrong: `$SPX.X` looks like a plausible key and is not a valid prefix.
+    # Roughly eight prefixes have been tried against the live service, out of
+    # a set whose size nobody knows.
     #
     # A validator would first need checking against real traffic, long enough
     # to say whether the documented set is the actual set. Until then the key
