@@ -14,14 +14,14 @@ test that passes both ways is worse than none, because it looks like protection.
 **A negative result about an installed package is not a result until you know
 which directory produced it.** `sys.path[0]` is the current directory, so
 `import schwaby` run from the repository reads the working tree and ignores what
-pip installed. Three consecutive reproductions of a reported install collision
-came back "does not reproduce" that way, while inspecting the source tree. `cd`
-somewhere else first, and check `schwaby.__file__` before believing the answer.
+pip installed. A reproduction of an install problem run from inside the
+repository inspects the source tree, and reports "does not reproduce" whatever
+is installed. `cd` somewhere else first, and check `schwaby.__file__` before believing the answer.
 
-**And an editable install goes stale on its own.** `.venv` held an editable
-`schwaby` 3.0.2 whose finder mapped the name `schwab` to a directory 4.0.0 had
-renamed away, so `import schwaby` *and* `import schwab` both raised
-`ModuleNotFoundError` from outside the repo while the suite passed --- pytest
+**And an editable install goes stale on its own.** An editable install made
+before a package directory was renamed goes on mapping the old name to a
+directory that no longer exists, so `import schwaby` raises
+`ModuleNotFoundError` from outside the repo while the suite passes --- pytest
 runs from the root, where the working tree is on the path regardless. The rule
 above sends you out of the repo to get a trustworthy answer and this is what
 you find when you get there. `pip install -e .` after anything that moves a
@@ -29,14 +29,12 @@ package, and before believing an import failure you did not expect.
 
 **A red-proof that greps for `FAILED` cannot see a `subTest`.** pytest reports
 a failing subtest as `SUBFAILED(...)`, so a harness matching `FAILED .*::` calls
-it green. One mutation was reported as unnoticed here and was in fact caught,
-by a subtest, which is the worst direction for that error: it invites deleting a
-guard that works.
+it green. So a mutation a subtest caught is reported as unnoticed, which is the
+worst direction for that error: it invites deleting a guard that works.
 
 **Use `tools/redproof.py` rather than a shell loop.** It checks pytest's
 return code; a grep for `FAILED` misses `SUBFAILED`, and it requires the failure
-to carry the message you named. Adding cases for one release's work immediately
-caught two claims that were wrong about which message a mutation produced. The
+to carry the message you named. The
 entries live in `tools/redproof_cases.py`; add one when you fix something, and
 run it with `python -I -B tools/redproof.py --name <part of its name>`. It
 works on copies, so the working tree is never touched.
@@ -78,8 +76,8 @@ and stopped, while `find_packages()` was also shipping `tests/`.
 **Ask what the bug was covering for.** Several times now a correctness fix has
 exposed something worse the defect had been masking. Truncating prices hid that a
 `Decimal` built from a float renders its 57-character binary expansion. Migrating
-to `httpx2` for correct types flipped the exception hierarchy under a caller's
-retry code. The question belongs in the fix, not the postmortem.
+to `httpx2` for correct types flipped the exception hierarchy under any retry
+code catching `httpx` exceptions. The question belongs in the fix, not the postmortem.
 
 **An assertion about an empty result needs a positive control.**
 `assertEqual([], offenders)` holds when the guard works *and* when the input
@@ -87,8 +85,8 @@ never reached it. Prove the collection found something, in the same test.
 
 **A statement is made where it lands, not where you stand.** This has cost twice
 now: a diff range measured as `vPREV..HEAD` and asserted about `vPREV..vNEXT`,
-and a patch written against the unreleased version and handed to someone running
-the released one, where `str(None)` quietly became the string `"None"`. Both
+and a patch written against the unreleased version and applied to the released
+one, where `str(None)` quietly became the string `"None"`. Both
 were true where they were written. Before sending or committing a claim, ask
 which version, which range, and which machine it will be read on.
 
@@ -111,14 +109,11 @@ behind before anyone noticed, and the only symptom was a deprecation warning
 inside a job annotation nobody reads.
 
 **A `dependabot.yml` in the repository is not the mechanism, only half of it.**
-This file was committed the day the repository was created and produced nothing
-for a month --- the first Dependabot run of any kind was 2026-09-09, twelve
-seconds after the dependency graph was switched on in the repository's own
-settings. So the file sat there saying it watched the CI actions while
-`upload-artifact` stayed three majors behind, and what actually surfaced that
-was a deprecation annotation. Same shape as every other guard here that looked
-present and did nothing: check that the thing has run, not that the config
-exists.
+Dependabot does nothing until the dependency graph is switched on in the
+repository's own settings. Until then the file says it watches the CI actions
+while they fall majors behind, and the only symptom is a deprecation
+annotation. Same shape as every other guard here that looks present and does
+nothing: check that the thing has run, not that the config exists.
 
 **Dependabot offers one action per pull request, and two of these only work
 in pairs.** `upload-artifact` and `download-artifact` are versioned separately
@@ -164,10 +159,9 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
    The first should be empty. Prose naming a version is worse than a pin,
    because it will not match a pin grep and the release may land under a
    different number than the one written. That is not hypothetical: "Since
-   3.0.1 `import schwab` warns" was written into `README.md` and
-   `docs/getting-started.rst` while preparing 3.0.2 and survived a review
-   round, because this step only looked for pins. It was caught before the
-   tag, which is luck rather than process.
+   3.0.1 `import schwab` warns" was once written into `README.md` and
+   `docs/getting-started.rst`, and this step, which then looked only for
+   pins, could not catch it.
 
    `tests/` is in the walk because a test docstring named the release before
    the tag existed --- "4.1.0 made this raise", written while the number was
@@ -190,13 +184,12 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
 
    Should be empty. A finding measured against a live account is worth
    recording as a finding; the date it was measured is not. Documentation
-   describes how the API behaves in this version, and a reader hitting
-   "measured 2026-09-08" has to decide whether it still holds --- which is a
+   describes how the API behaves in this version, and a reader hitting a
+   measurement date has to decide whether it still holds --- which is a
    question they cannot answer and which the sentence invites. Say what the
    behaviour is, and say it was measured rather than inferred if that matters.
 
-   Dates belong in `CHANGELOG.md`, which is a dated record by construction, and
-   in `~/schwab/` working notes, which are not shipped.
+   Dates belong in `CHANGELOG.md`, which is a dated record by construction.
 
 5. **For a documentation-only release, prove it rather than asserting it.**
 
@@ -240,8 +233,8 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
    only executable difference --- which is the safest shape a bump can have.
 
    Say which method established it in the release notes, not just the verdict.
-   A caller pinning this for live trading should be able to re-run
-   the check rather than trust the claim.
+   Anyone pinning a release should be able to re-run the check rather than
+   trust the claim.
 
 6. Verify, on **3.11, 3.12 and 3.14** — 3.14 is the newest Python supported,
    and `asyncio` semantics differ below 3.12 as well as above it:
@@ -274,9 +267,8 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
    entry must be PROVEN, SUPERSEDED or REMOVED, and no run may write to a
    tracked file or go unchecked for one.
 
-   **Nothing is tagged until the release is signed off.** The maintainer, or
-   whoever they have delegated release approval to, approves it having seen
-   the results above for the exact commit that will be tagged. A result from
+   **Nothing is tagged until the release is signed off.** The maintainer
+   approves it having seen the results above for the exact commit that will be tagged. A result from
    an earlier commit does not count: the release commit itself is the one that
    changes `version.py`. The same approval covers the PyPI upload, which
    waits at the publish workflow's `pypi` environment until someone approves
@@ -338,9 +330,8 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
    to care — does this artifact match the tag I audited — is exactly the one
    that gets a confident wrong answer.
 
-   A consumer hit this within the hour and had already written "the published
-   wheel does not match its own git tag" into their pin comments as a lost
-   property. The fetch that fixes it:
+   Anyone who audited the old tag will conclude, confidently and wrongly, that
+   the published wheel does not match its own git tag. The fetch that fixes it:
 
    ```shell
    git fetch origin --prune-tags --force --tags
@@ -353,9 +344,9 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
 
    The range available while preparing a release is `vPREV..HEAD`, which excludes
    the commit that bumps `version.py` — so the convenient measurement is
-   systematically the one that flatters the claim. "v2.4.1 touches nothing under
-   `schwab/`" was measured that way, asserted about `v2.4.0..v2.4.1`, and a
-   consumer ran the command and found `schwab/version.py`.
+   systematically the one that flatters the claim. "This release touches nothing
+   under the package", measured over `vPREV..HEAD`, is false over
+   `vPREV..vNEXT`, which includes `version.py`.
 
 ## The distribution name and the import name
 
@@ -363,7 +354,7 @@ Both are `schwaby`, as of 4.0.0. `pip install schwaby` then `import schwaby`,
 and there is nothing further to explain to a reader.
 
 They used to differ: the distribution was renamed to `schwaby` at 2.6.0 and the
-package stayed `schwab`, so that a consumer moving over changed one line of
+package stayed `schwab`, so that moving over meant changing one line of
 `requirements.txt` and nothing else. The cost was that `schwaby` and `schwab-py`
 both provided a directory called `schwab`, so whichever pip installed second
 silently overwrote the other's files --- no warning, no failure at install time,

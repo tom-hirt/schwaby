@@ -82,10 +82,9 @@ Where this came from
 ``schwaby`` began from `alexgolec/schwab-py
 <https://github.com/alexgolec/schwab-py>`__, an MIT-licensed library by Alex
 Golec which gave this project its shape and most of its code. It became a
-separate project because running systematic strategies against funded accounts
-imposes requirements a general-purpose wrapper has no particular reason to
-prioritise --- prices that are never silently altered, a token file that
-survives a crash, a stream that reports what it absorbs. Alex Golec's copyright
+separate project to prioritise what matters when real orders depend on it ---
+prices that are never silently altered, a token file that survives a crash, a
+stream that reports what it absorbs. Alex Golec's copyright
 notice is retained unchanged and the licence is the same MIT one he chose.
 
 See the `changelog

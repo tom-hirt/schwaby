@@ -7,10 +7,9 @@
 # documentation build imports something which is not there.
 #
 # This is the subset of setup.py's install_requires that sphinx has to import,
-# not all of it. `flask`, `multiprocess` and `psutil` became hard dependencies
-# again in 3.0.0 and are deliberately still absent: they are imported inside
-# the functions that use them, so autodoc reads those docstrings without the
-# packages present.
+# not all of it. `flask`, `multiprocess` and `psutil` are hard dependencies
+# but deliberately absent here: they are imported inside the functions that
+# use them, so autodoc reads those docstrings without the packages present.
 #
 # That makes this file a check on those imports staying function-local. Move
 # one to module scope and the documentation build is where it fails, with

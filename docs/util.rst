@@ -75,8 +75,8 @@ What it rests on was measured read-only over 423 orders:
 
 - 8 ETF orders filled in two executions, and 387 orders in one. Each leg's
   fills added up to ``filledQuantity``, each activity's quantity to its
-  execution legs, and the weighted price was within 0.2% of the placing
-  program's own recorded fill price for every order it had a record of.
+  execution legs, and the weighted price was within 0.2% of an
+  independently recorded fill price for every order that had one.
 - 3 option orders. One was a vertical spread with equal leg quantities, filled
   in a single execution: its one activity carried an execution leg per leg, and
   both ``filledQuantity`` and the activity's ``quantity`` counted spreads.
@@ -124,8 +124,8 @@ described in the :ref:`Client documentation <orders-section>`.
   So a dictionary keyed by whatever one call site produced misses lookups from
   another, and it misses them silently --- the symptom arrives much later, as
   an order you placed that you have no record of. Pick one representation and
-  convert at every boundary; one caller running this for live trading
-  normalises to ``str`` at the single point every placement passes through.
+  convert at every boundary. Normalising to ``str`` at the single point every
+  placement passes through is one way to do it.
 
 Every outcome other than success raises, so there is no ``None`` to check for.
 The one worth handling deliberately is
@@ -137,9 +137,9 @@ handle on it.
 
   This raises rather than returning ``None``, which means
   **anything between the call and its return value is skipped** on the
-  failing path rather than running with a ``None`` in hand. In one caller's
-  program that was the bookkeeping which records an order as the program's
-  own, and skipping it made the system report its own orders as manual trades.
+  failing path rather than running with a ``None`` in hand. If that is the
+  bookkeeping which records an order as your program's own, skipping it makes
+  the program report its own orders as manual trades.
   If you have code in that position, move it or catch around it.
 
 .. code-block:: python
@@ -254,9 +254,9 @@ Every exception class this library *defines* inherits
 all of them. It is not everything the library can raise: argument validation
 still raises builtin ``ValueError`` --- a negative quantity, a float price, a
 strike finer than the symbol format carries --- and a builtin describes those
-correctly. Two of the order exceptions additionally inherit ``ValueError``
-because they always did; :class:`~schwaby.utils.OrderIdNotFoundError`
-deliberately does not.
+correctly. Two of the order exceptions additionally inherit ``ValueError``,
+so existing ``except ValueError`` handlers keep catching them;
+:class:`~schwaby.utils.OrderIdNotFoundError` deliberately does not.
 
 .. py:exception:: schwaby.utils.HTTPStatusError
 

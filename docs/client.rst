@@ -280,8 +280,8 @@ list of the most interesting bits:
 
 .. note::
 
-   ``cashAvailableForTrading`` **was present as** ``0.0`` **on an account
-   holding no cash**, not omitted. It sits under
+   ``cashAvailableForTrading`` **was present as** ``0.0`` **when the value
+   was zero**, not omitted. It sits under
    ``securitiesAccount.currentBalances`` in :meth:`get_account
    <schwaby.client.Client.get_account>`'s response. That was one live account,
    and which ``fields`` were requested was not recorded. A check for the key
@@ -322,8 +322,8 @@ to read the documentation below to learn how much data is available.
    the range requested. No ``period`` is sent alongside it:
    :meth:`Client.get_price_history` documents that the two should not be
    combined, and what Schwab does when they are is not consistent across
-   accounts --- it has been reported disregarding the range, and measured
-   honouring it. How far back the candles returned can reach is a separate
+   accounts --- it has been seen both disregarding the range and honouring
+   it. How far back the candles returned can reach is a separate
    limit, in the next note.
 
 .. note::
@@ -448,9 +448,8 @@ Orders
   Both arguments are opaque strings, so swapping them raises nothing locally.
   It sends a well-formed request naming the wrong account or the wrong order,
   and you find out from the response --- or from a cancel that quietly did not
-  cancel what you meant. One caller running this for live trading keeps a
-  regression test pinning the argument order of each of these, which is a
-  fair signal of how easy the mistake is.
+  cancel what you meant. A regression test pinning the argument order of
+  each call you make is cheap insurance against it.
 
 
 .. _placing_new_orders:
@@ -489,9 +488,9 @@ instead of creating your own order specs.
   with no error. While a placement is still in flight, not recognising an id
   does not mean the order is not yours.
 
-  :ref:`Seen once, not reproduced <confidence_tags>`. The ordering is what a
-  consumer observed, not a measurement of when Schwab sent each message, and
-  how often it happens is not known.
+  :ref:`Seen once, not reproduced <confidence_tags>`. The ordering is the order the
+  receiving program saw, not a measurement of when Schwab sent each message,
+  and how often it happens is not known.
 
 **Testing an order without placing it.** Schwab will tell you whether it would
 accept an order, and what it would become, without sending it to the market.

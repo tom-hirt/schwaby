@@ -306,9 +306,8 @@ It is called for four things: a stream handler which raised, a late rejection of
 a request nobody was waiting on, a connection which failed to close after logout,
 and a message this client cannot use at all. :meth:`add_error_handler
 <schwaby.streaming.StreamClient.add_error_handler>` below enumerates that last
-group; it is the canonical one, because this page and two docstrings each
-carried their own copy and only one of the three was widened when the list
-grew. :class:`UnusableMessage`'s own docstring describes the type rather than
+group; it is the canonical list, and this page does not repeat it.
+:class:`UnusableMessage`'s own docstring describes the type rather than
 the list, and says so. That group arrives as ``UnusableMessage``, whose
 ``message``
 attribute is the offending value as it arrived --- the sorted list of names,
@@ -950,10 +949,9 @@ down by exchange:
   field tables and delivered no per-exchange entries when tried, so none of
   this was measured there.
 
-  It answers to ``QUOTE_TIME``. This library called it ``SEQUENCE`` until the
-  rename, which is what Schwab's field *number* had been read as; the venue's
-  own table calls index 2 the quote time for this market maker's quote, and
-  the measurement agrees with the table.
+  It answers to ``QUOTE_TIME``. Index 2 is not a sequence number: the venue's
+  own table calls it the quote time for this market maker's quote, and the
+  measurement agrees with the table.
 
 Note that ``BIDS`` names two different things one level apart: the list of price
 levels, and the per-exchange breakdown inside each level. That is Schwab's
@@ -1060,8 +1058,8 @@ and frequency is:
   cap itself and not a number read off one refusal's arithmetic, on both
   screeners. Measured against a live account: the equity walk with nothing
   else subscribed, the option walk alongside a news subscription. Sixty
-  identical twelve-key equity refusals in ordinary use corroborate the equity
-  figure separately.
+  identical twelve-key equity refusals in a separate long-running capture
+  corroborate the equity figure.
 
   **The ten belongs to this service, not to the connection.** Schwab's table
   calls code 19 ``REACHED_SYMBOL_LIMIT``, "Subscribe or Add command has
@@ -1092,7 +1090,7 @@ and frequency is:
 .. note::
 
   **A refused screener SUBS is answered twice, and the one refused ADD was
-  too.** On a live account in ordinary use, sixty code-19 refusals were each
+  too.** In a long-running live capture, sixty code-19 refusals were each
   followed within the same second by a second response to the same request:
   ``code: 0, "SUBS command succeeded"`` --- sixty rejections, sixty late
   successes, one-to-one. A probe that went on reading after each refusal saw
@@ -1535,7 +1533,7 @@ all 218 fill items in a recorded archive --- 163 distinct fills, since the
 archive can store one message twice --- and they differed on every one, by
 under a second. Both are strings of the form ``YYYY-MM-DD HH:MM:SS.fff`` with
 no offset. ``ExecutionTimeStamp`` reads as US Eastern time. For 106 of those
-fills the placing program had recorded its own zoned placement time: read as
+fills an independently recorded, zoned placement time was available: read as
 Eastern, all 106 landed within a minute of it, and read as UTC none did. That
 was measured in summer only, so whether it follows daylight saving is not
 established. The venue stamp's time zone was
@@ -1632,8 +1630,7 @@ it refuses costs that field; decoded in one ``try``, it costs the message:
   fill principals equalled price times quantity from the same message. At
   ``signScale`` 12 anything from ``4294.967296`` up needs the extra width, so a
   decoder holding ``lo`` to 32 bits loses any fill principal above roughly
-  $4,295 --- loudly if it refuses one, silently if it wraps it. This library
-  refused such values until it was checked against that archive.
+  $4,295 --- loudly if it refuses one, silently if it wraps it.
 
   ``decode_decimal`` reads a lone ``lo`` as the whole mantissa, up to the 96
   bits the encoding allows. An object that does carry ``mid`` or ``hi`` is read
@@ -1674,10 +1671,10 @@ Confirmed against known truth on a 1-share order at a $6.86 limit:
 ``-6.86`` --- principal on a *buy*, so cash out. **A decoder that handles only
 the even case flips the sign on every cash-direction field, silently.**
 
-The rule itself is not guesswork. **Schwab's Trader API support confirmed the
-conversion in writing**, while stating that it remains undocumented publicly.
-That is the strongest attestation any part of this section has, and it exists
-nowhere official.
+The rule itself is not guesswork. **Schwab's Trader API support has confirmed
+the conversion**, while stating that it remains undocumented publicly. That is
+the strongest attestation any part of this section has, and nothing official
+publishes it.
 
 .. danger::
 
@@ -1716,9 +1713,9 @@ nowhere official.
   Prices scaled by six places, sizes with no scale at all, in the same object.
   $13.72 with 19200 on the ask is a coherent quote; 0.0192 shares is not.
 
-  This library *refused* the shape at first, on the reasoning that a scale
-  which is missing cannot be told from one that was lost --- which sounds
-  careful and cost both sizes on every quote carrying them. If your decoder
+  Refusing the shape, on the reasoning that a missing scale cannot be told
+  from a lost one, sounds careful and costs both sizes on every quote carrying
+  them. If your decoder
   treats an absent ``signScale`` as an error, or guesses 12 because that is
   the common value, ``AskSize`` and ``BidSize`` are what it gets wrong: the
   second guess is off by a factor of a million with nothing raised.
@@ -1740,11 +1737,11 @@ nowhere official.
     {"lo": "6860000", "SignScale": 12}    # a rename, or an addition?
 
   Read as an addition, there is no ``signScale``, so the absent-scale rule
-  applies and a **$6.86 limit price decodes as $6,860,000**. Three attempts at
-  telling the two cases apart each missed a spelling of "missing" --- the key
-  absent, the key present and ``null``, the key present and ``0`` --- and the
-  last of those cannot be told apart at all, because ``signScale: 0``
-  genuinely means scale 0.
+  applies and a **$6.86 limit price decodes as $6,860,000**. Telling the two cases
+  apart means handling three spellings of "missing" --- the key absent, the
+  key present and ``null``, the key present and ``0`` --- and the last of
+  those cannot be told apart at all, because ``signScale: 0`` genuinely means
+  scale 0.
 
   **So the cost is paid deliberately.** A key Schwab adds arrives on every
   decimal object at once, so every money and quantity field raises until
@@ -1914,7 +1911,7 @@ malformed message and should not be reported as one.
 
   The shape is the useful part, because it is recognisable: those three absent
   together is not what a live event looks like. A guard can key on that as well
-  as on execution id, which is what the consumer who reported it does.
+  as on execution id.
 
   **We cannot tell you when this happens.** A later capture is a
   counter-example --- a subscribe on an account with four filled orders that
@@ -1940,9 +1937,8 @@ This section draws on several sources:
   the decimal and ``Mid`` counts come from;
 - option orders placed by hand whose prices were then changed, described
   below;
-- for the batch ordering above, a note: it was observed live without
-  the frame being retained, so it is attested by a note rather than by bytes
-  anyone can still produce.
+- for the batch ordering above, an observation made live without the
+  frame being retained, so no captured bytes back it.
 
 Schwab documents none of it.
 
@@ -2003,9 +1999,8 @@ the only sample, so its absence elsewhere is not evidence.
 ``OrderMonitorCreated`` and ``OrderMonitorCompleted`` have been captured only
 inside changes to an order resting on the book. A marketable option order that
 filled without resting produced neither. Whether an order left resting and
-never changed produces them is not established. A written note from an earlier
-hand-placed order recorded the four change and monitor types in upper case; the
-spellings above are the captured ones.
+never changed produces them is not established. The spellings above are as
+captured on the wire.
 
 A program that never changes a working order will not see the change types
 until someone changes one by hand in the same account, from Schwab's own

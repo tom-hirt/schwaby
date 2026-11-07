@@ -153,8 +153,7 @@ Documentation is checked by the suite as well as by Sphinx, which surprises
 people, so it is worth knowing what is enforced:
 
 - every ``:func:``/``:meth:``/``:class:`` target and every ``autodoc`` directive
-  must resolve to something that exists — ``sphinx -W`` does *not* check this,
-  and a page once told readers to call a method that had never existed
+  must resolve to something that exists — ``sphinx -W`` does *not* check this
 - every keyword argument in a documentation code block, and in ``examples/``,
   must be one the callee actually accepts
 - every URL host must be on an allowlist, and links into this repository must
@@ -174,5 +173,5 @@ Examples
 an *assembly* the reference documentation cannot — a bounded queue in front of a
 stream, a token-expiry loop, an order followed to a terminal state. A sample that
 just repeats a call is already covered by the docs, and an uncovered file is one
-that rots: the streaming example spent four years subscribing to tickers that had
-been delisted.
+that rots: an example nobody runs goes on subscribing to tickers long after they
+are delisted.

@@ -288,8 +288,8 @@ code here is still his, his copyright notice is retained unchanged, and the
 licence is the same MIT one he chose.
 
 It became a separate project for a practical reason rather than a philosophical one.
-This client runs systematic strategies against funded accounts, and that use imposes
-requirements a general-purpose wrapper has no particular reason to prioritise — the
+Code that places real orders imposes requirements a general-purpose wrapper has no
+particular reason to prioritise — the
 guarantees under [Why use it](#why-use-it) above, most of which needed changes to
 existing behaviour rather than additions on top of it.
 

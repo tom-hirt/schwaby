@@ -3,8 +3,7 @@
 Built at the end of the build from the objects autodoc registered, rather than
 written by hand, so a method appears on the page the moment it is documented
 and cannot be listed while it is not. A hand-kept list is sized against the
-methods that existed when it was written, which is the failure this project
-keeps finding in its guards.
+methods that existed when it was written, and silently falls behind.
 
 Grouped by module, then by class, alphabetically at each level. Callables carry
 ``()``. Enum members are not listed one by one --- the streaming field enums

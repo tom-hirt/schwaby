@@ -251,8 +251,7 @@ these methods to do so.
   ``IMMEDIATE_OR_CANCEL`` order without complaint and it fails on the live
   path, at the moment you least want to find out.
 
-  Two consumers have built a time-in-force table from this enum and been wrong.
-  Probe a value against your own account before relying on it, and note these
+  A time-in-force table built from this enum will be wrong. Probe a value against your own account before relying on it, and note these
   results are equities only --- they may well be valid for options, which has
   not been tested.
 
@@ -387,20 +386,19 @@ timezone-aware ``datetime``, and refuses everything above. See
 
   **A normalizer in front of these setters will defeat the** ``bool``
   **rejection.** ``bool`` is refused because ``True`` is an ``int`` subclass
-  and used to build ``{"quantity": true}`` --- a value Schwab's schema does not
+  and would otherwise build ``{"quantity": true}`` --- a value Schwab's schema does not
   call a number, accepted in silence.
 
   It is easy to re-open by accident while trying to be *compatible* with that
-  fix. A consumer taking this release wrote a helper to turn a
-  ``numpy.int64`` quantity into a plain ``int``, since those are refused too.
-  ``float(True)`` is ``1.0`` and ``(1.0).is_integer()`` is ``True``, so the
-  helper turned ``True`` into ``1`` and handed it over laundered --- rebuilding
-  the one-share order this rejection exists to prevent, in code written to
-  accommodate the rejection. Nothing on either side could see it: ``1`` is a
-  perfectly good quantity by the time it arrives.
+  rule. A helper that turns a ``numpy.int64`` quantity into a plain ``int``,
+  since those are refused too, will typically test ``float(x).is_integer()``
+  --- and ``float(True)`` is ``1.0``, so it turns ``True`` into ``1`` and hands
+  it over laundered, rebuilding the one-share order this rejection exists to
+  prevent, in code written to accommodate the rejection. Nothing on either
+  side can see it: ``1`` is a perfectly good quantity by the time it arrives.
 
   If you normalise numeric input before it reaches a setter, exclude ``bool``
-  first. Reported by the consumer it happened to.
+  first.
 
 Everything a setter refuses raises immediately and names the field, rather than
 being serialized as the wrong JSON type or dropped.
@@ -413,9 +411,8 @@ two groups and nothing here establishes that it would refuse the other shape.
 The two halves have two different reasons. A price takes a string or a
 ``Decimal`` because a float cannot carry one exactly, which is what
 :ref:`price_strings` is about. A numeric field takes an ``int`` or a ``float``
-because the four numeric setters used to disagree with each other --- two
-refused a string through a range check and two accepted one because nothing
-downstream compared them --- and agreeing was better than continuing not to.
+so that all four numeric setters apply one rule; there is no venue reason for
+any of them to accept a string.
 
 Worth stating plainly because the reasons are checkable and the schema is not:
 a later reader reconciling these setters "to match Schwab's schema" would be
@@ -443,8 +440,8 @@ the same double a short spelling would -- but ``decimal.Decimal(str(value))``
 is the habit to keep, particularly when the value came from parsed JSON where a
 quote field is already a float.
 
-``schwaby`` does not refuse a price for being deep. It was tried and removed:
-no digit count separates a float's expansion from honest arithmetic. Over
+``schwaby`` does not refuse a price for being deep. A depth limit cannot
+work: no digit count separates a float's expansion from honest arithmetic. Over
 realistic inputs, float-derived values span 0 to 53 decimal places while string
 arithmetic spans 1 to 9, so any threshold either misses contamination or
 refuses a valid computed limit at order-placement time. Rounding a computed
@@ -556,7 +553,7 @@ Either kind of leg takes a ``quantity_type``, sent as the leg's
 
   Until you have placed one and seen what came back, place it small enough
   that both readings are acceptable. A leg built without a ``quantity_type``
-  carries no ``quantityType`` at all, as before.
+  carries no ``quantityType`` at all.
 
 
 

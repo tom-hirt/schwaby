@@ -47,10 +47,10 @@ a way that's appropriate to the context in which you're running:
 
   **For an unattended or long-running process, prefer**
   :func:`~schwaby.auth.client_from_token_file`, which never initiates a login.
-  What ``easy_client`` does when the token ages out is open a browser, and on a
-  daemon that is a window nobody sees --- reported by a caller as an
-  auth screen opening *behind* a running terminal UI while keystrokes went
-  dead. Loading the token directly turns re-authentication into an explicit
+  What ``easy_client`` does when the token ages out is open a browser, and in
+  an unattended process that is a window nobody sees --- under a running
+  terminal UI it can open behind the interface and take the keyboard with it.
+  Loading the token directly turns re-authentication into an explicit
   operator action, and an expired token into an ordinary API exception you can
   alert on.
 
@@ -226,8 +226,8 @@ wrote. If this clock is behind that one's, the age reads low, and negative while
 the creation time is still ahead of this clock, so ``easy_client`` retires the
 token that much later. Such a token is not refused, because a clock that is only
 behind would then fail a working token at startup. An expired refresh token has
-been observed refused as ``invalid_grant`` --- all 1,123 refresh failures one
-consumer logged, over four days --- which sets ``refresh_token_invalid``
+been observed refused as ``invalid_grant`` on every attempt across four days
+of failing refreshes, which sets ``refresh_token_invalid``
 whatever the age says. A refusal under another code does not set it, and the
 seven-day alert in the recipe below then comes that much later.
 
