@@ -278,11 +278,9 @@ class LinkTest(unittest.TestCase):
     reader to `beta-developer.schwab.com` to register their app --- the first
     click in the whole onboarding flow, at a hostname that does not resolve.
 
-    All three were found one at a time, and the first guard against them was a
-    denylist of the hosts already caught, walking only `schwab/` and `bin/`.
-    That is a record, not a check: it could not catch the next one, and the
-    next one was in `docs/`, which is where the clickable links actually are.
-    So this is an allowlist, over every file a reader's link can come from.
+    A denylist of hosts already known would be a record, not a check: it
+    cannot catch the next one, which may be anywhere a reader's link can come
+    from, `docs/` above all. So this is an allowlist, over every such file.
 
     Or the host survives and the target moves. Five of our own links are
     `github.com/.../blob/main/<path>` deep links, one of them an anchor into a

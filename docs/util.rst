@@ -73,7 +73,7 @@ and price per leg. :func:`~schwaby.utils.execution_totals` adds them up in
 
 What it rests on was measured read-only over 423 orders:
 
-- 8 ETF orders filled in two executions, and 387 orders in one. Each leg's
+- 8 orders filled in two executions, and 387 orders in one. Each leg's
   fills added up to ``filledQuantity``, each activity's quantity to its
   execution legs, and the weighted price was within 0.2% of an
   independently recorded fill price for every order that had one.
@@ -85,7 +85,8 @@ What it rests on was measured read-only over 423 orders:
 
 Not observed, so not claimed: a partial fill before a replace, an option order
 filled in more than one execution, a ratio spread, and an order whose
-instrument is plain ``EQUITY`` rather than an ETF.
+instrument is plain ``EQUITY``: every order observed carried another
+instrument type.
 
 .. autofunction:: schwaby.utils.execution_totals
 

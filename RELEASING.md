@@ -15,12 +15,13 @@ test that passes both ways is worse than none, because it looks like protection.
 which directory produced it.** `sys.path[0]` is the current directory, so
 `import schwaby` run from the repository reads the working tree and ignores what
 pip installed. A reproduction of an install problem run from inside the
-repository inspects the source tree, and reports "does not reproduce" whatever
-is installed. `cd` somewhere else first, and check `schwaby.__file__` before believing the answer.
+repository inspects the source tree, and can report "does not reproduce"
+while the installed copy is broken. `cd` somewhere else first, and check `schwaby.__file__` before believing the answer.
 
 **And an editable install goes stale on its own.** An editable install made
-before a package directory was renamed goes on mapping the old name to a
-directory that no longer exists, so `import schwaby` raises
+before a package directory was renamed goes on mapping only the old name, to a
+directory that no longer exists, and maps the new one not at all, so
+`import schwaby` raises
 `ModuleNotFoundError` from outside the repo while the suite passes --- pytest
 runs from the root, where the working tree is on the path regardless. The rule
 above sends you out of the repo to get a trustworthy answer and this is what
@@ -109,9 +110,9 @@ behind before anyone noticed, and the only symptom was a deprecation warning
 inside a job annotation nobody reads.
 
 **A `dependabot.yml` in the repository is not the mechanism, only half of it.**
-Dependabot does nothing until the dependency graph is switched on in the
-repository's own settings. Until then the file says it watches the CI actions
-while they fall majors behind, and the only symptom is a deprecation
+In this repository Dependabot did nothing until the dependency graph was
+switched on in its own settings; until then the file said it watched the CI
+actions while they fell majors behind, and the only symptom was a deprecation
 annotation. Same shape as every other guard here that looks present and does
 nothing: check that the thing has run, not that the config exists.
 
@@ -267,8 +268,8 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
    entry must be PROVEN, SUPERSEDED or REMOVED, and no run may write to a
    tracked file or go unchecked for one.
 
-   **Nothing is tagged until the release is signed off.** The maintainer
-   approves it having seen the results above for the exact commit that will be tagged. A result from
+   **Nothing is tagged until the release is signed off.** The maintainer, or
+   whoever they have delegated release approval to, approves it having seen the results above for the exact commit that will be tagged. A result from
    an earlier commit does not count: the release commit itself is the one that
    changes `version.py`. The same approval covers the PyPI upload, which
    waits at the publish workflow's `pypi` environment until someone approves

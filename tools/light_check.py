@@ -54,8 +54,6 @@ except ImportError:
     api = None
 
 
-
-
 class _Collect:
     '''A pyflakes reporter that keeps the messages.'''
 
@@ -126,7 +124,9 @@ def staged_paths():
 
 def forbidden_words():
     '''This clone's forbidden list, `git config lightcheck.forbidden`, in
-    lower case: nothing when it configures none.'''
+    lower case. A clone that configures none forbids nothing. (A
+    configuration git cannot read fails every git command here, and the
+    check with them.)'''
     out = git('config', '--get-all', 'lightcheck.forbidden', check=False)
     return sorted({w.strip().lower() for w in
                    out.stdout.decode('utf-8', 'replace').splitlines()

@@ -8286,9 +8286,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         # skipped with a warning in one framing and ended the caller's receive
         # loop with an AttributeError in the other.
         #
-        # The element chosen matters. An earlier version of this test used
-        # {'content': None}, which does not raise -- `or {}` turns it into a
-        # code of None and it is skipped as neither a rejection nor a success.
+        # The element chosen matters. {'content': None} would not do: it
+        # does not raise -- `or {}` turns it into a code of None and it is
+        # skipped as neither a rejection nor a success.
         # So the except clause it meant to exercise never ran, and reporting
         # malformed elements instead of skipping them left the test green. A
         # bare string raises on .get, which is the path that matters.
@@ -9192,10 +9192,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_an_unparsable_frame_is_reported_and_still_raised(
             self, ws_connect):
-        # The one failure class that still ends the receive loop. It was also
-        # the one reaching add_error_handler not at all, which is the half that
-        # was an oversight rather than a decision: a consumer who replaced log
-        # scraping with the callback got no signal for it.
+        # The one failure class that still ends the receive loop. It reaches
+        # add_error_handler too, so a caller relying on the callback rather
+        # than the log gets a signal for it.
         socket = await self.login_and_get_socket(ws_connect)
 
         errors = []

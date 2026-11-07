@@ -2,6 +2,7 @@
 warning is refused, and one that only moves code or keeps an old warning is
 not.'''
 
+import importlib.util
 import json
 import os
 import shutil
@@ -24,13 +25,12 @@ PROBE = 'qz' + 'xprobe'
 
 
 def forbidden():
-    # This clone's own list, read the way the check reads it.
-    env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
-    out = subprocess.run(['git', 'config', '--get-all',
-                          'lightcheck.forbidden'], cwd=ROOT, env=env,
-                         capture_output=True, text=True)
-    return sorted({w.strip().lower() for w in out.stdout.splitlines()
-                   if w.strip()})
+    # This clone's own list, read by the check's own function, so the two
+    # cannot disagree about the words.
+    spec = importlib.util.spec_from_file_location('light_check', CHECK)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.forbidden_words()
 
 
 # What a walk of a copy skips: what is not the repository's own.
@@ -79,7 +79,7 @@ def carrying(root, words):
         seen += 1
         rel = rel.replace(os.sep, '/')
         found += [(rel, w) for w in words
-                  if w in rel.lower() or w.encode('ascii') in content]
+                  if w in rel.lower() or w.encode('utf-8') in content]
     return found, seen
 
 
@@ -239,6 +239,16 @@ class LightCheckTest(unittest.TestCase):
         self.assertEqual(1, code, 'a file named like a stage went unchecked: '
                          + out)
         self.assertIn('0:bad.py: syntax error', out)
+
+    def test_a_word_configured_in_any_case_is_forbidden(self):
+        # The list is read in lower case, as names and contents are.
+        self.git('config', '--unset-all', 'lightcheck.forbidden')
+        self.git('config', '--add', 'lightcheck.forbidden', PROBE.upper())
+        self.stage('notes.md', 'a %s job\n' % PROBE)
+        code, out = self.check()
+        self.assertEqual(1, code, 'a word configured in upper case forbade '
+                         'nothing: ' + out)
+        self.assertIn('notes.md: carries %r' % PROBE, out)
 
     def test_a_forbidden_word_already_at_head_still_fails(self):
         # The whole file is read, not the lines a change adds: a commit

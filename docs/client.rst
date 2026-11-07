@@ -322,8 +322,8 @@ to read the documentation below to learn how much data is available.
    the range requested. No ``period`` is sent alongside it:
    :meth:`Client.get_price_history` documents that the two should not be
    combined, and what Schwab does when they are is not consistent across
-   accounts --- it has been seen both disregarding the range and honouring
-   it. How far back the candles returned can reach is a separate
+   accounts --- it has been reported disregarding the range, and measured
+   honouring it. How far back the candles returned can reach is a separate
    limit, in the next note.
 
 .. note::

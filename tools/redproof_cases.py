@@ -1215,7 +1215,7 @@ CASES = [
                  'signScale was refused, on the reasoning that a missing '
                  'scale cannot be told from a lost one. An absent scale is '
                  'zero, like an absent mantissa member: `AskSize` '
-                 '{"lo": "15300"} arrives beside `Ask` '
+                 '{"lo": "15300"} arrives, values invented, beside `Ask` '
                  '{"lo": "21480000", "signScale": 12} on one quote, and '
                  'refusing it would cost both sizes on every quote. '
                  'Replaced by `contrib/decimal-absent-scale-is-zero`.'),

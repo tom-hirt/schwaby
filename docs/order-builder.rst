@@ -391,7 +391,7 @@ timezone-aware ``datetime``, and refuses everything above. See
 
   It is easy to re-open by accident while trying to be *compatible* with that
   rule. A helper that turns a ``numpy.int64`` quantity into a plain ``int``,
-  since those are refused too, will typically test ``float(x).is_integer()``
+  since those are refused too, may well test ``float(x).is_integer()``
   --- and ``float(True)`` is ``1.0``, so it turns ``True`` into ``1`` and hands
   it over laundered, rebuilding the one-share order this rejection exists to
   prevent, in code written to accommodate the rejection. Nothing on either

@@ -37,7 +37,7 @@ class DecodeDecimalTest(unittest.TestCase):
     """
 
     @no_duplicates
-    def test_the_measured_payloads_decode_exactly(self):
+    def test_payloads_in_the_measured_shapes_decode_exactly(self):
         for field, expected, label in (
                 ({'lo': '7350000', 'signScale': 12}, '7.35', 'LimitPrice'),
                 ({'lo': '63451700', 'signScale': 12}, '63.4517', 'AveragePrice'),
@@ -55,7 +55,7 @@ class DecodeDecimalTest(unittest.TestCase):
         # `PrincipalAmmount`, and the estimated amounts on OrderCreated, ten
         # digits at signScale 12 or 13. Read whole, each of the 33 fill
         # principals equalled price times quantity from the same message.
-        # This decoder refused all 129 while it held `lo` to 32 bits.
+        # Holding `lo` to 32 bits would refuse all 129.
         for field, expected in (
                 ({'lo': '4294967296', 'signScale': 12}, '4294.967296'),
                 ({'lo': '7350000000', 'signScale': 12}, '7350'),

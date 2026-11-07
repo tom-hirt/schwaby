@@ -1056,7 +1056,7 @@ class UtilsTest(unittest.TestCase):
     def test_the_two_causes_are_distinguishable(self):
         # Without this, aliasing the two classes together passes every other
         # test here: each raise site names its own class, so both
-        # assertRaises calls still match. Found by mutation, not by reading.
+        # assertRaises calls still match.
         self.assertIsNot(MissingLocationHeaderError, UnrecognizedLocationError)
 
         missing = MockResponse({}, 200, headers={})

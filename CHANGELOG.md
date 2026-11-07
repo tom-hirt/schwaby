@@ -20,6 +20,10 @@ record of anything.
 Getting a fact wrong is the exception. Where an entry says something that was
 untrue when it was written, it gets corrected and the correction says so.
 
+The other exception is privacy. Some wording and the example values in older
+entries were later edited to remove private details. What was measured, and
+what each entry says changed, is the same.
+
 ---
 
 ## 5.3.0
@@ -981,8 +985,8 @@ Measured on a live account, and stated no wider than the evidence:
     one.
 - **Quotes.** `get_quotes` can return HTTP 429. No rate is given, because none
   was measured.
-- **Account balances.** `cashAvailableForTrading` is sent as `0.0` when it is
-  zero, not omitted.
+- **Account balances.** `cashAvailableForTrading` was present as `0.0`, not
+  omitted, on one live account where it was zero.
 
 ## 4.4.2
 
@@ -1494,7 +1498,8 @@ attempt is reliably wrong in at least one of five ways, each of which is a
 - an object with a mantissa and **no `signScale` at all** is scale 0, not an
   error and not the usual 12. `AskSize` and `BidSize` arrive as
   `{"lo": "15300"}` beside an `Ask` of `{"lo": "21480000", "signScale": 12}`
-  in the same quote — $21.48 with 15300 on the ask. Guessing 12 there is
+  in the same quote (values here invented, shapes as sent) — $21.48 with 15300
+  on the ask. Guessing 12 there is
   wrong by a factor of a million; refusing it loses both sizes on every
   quote;
 - `10 ** (signScale // 2)` on a hostile scale builds an astronomical integer

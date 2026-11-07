@@ -1058,7 +1058,7 @@ and frequency is:
   cap itself and not a number read off one refusal's arithmetic, on both
   screeners. Measured against a live account: the equity walk with nothing
   else subscribed, the option walk alongside a news subscription. Sixty
-  identical twelve-key equity refusals in a separate long-running capture
+  identical twelve-key equity refusals in ordinary use, not under a probe
   corroborate the equity figure.
 
   **The ten belongs to this service, not to the connection.** Schwab's table
@@ -1090,7 +1090,7 @@ and frequency is:
 .. note::
 
   **A refused screener SUBS is answered twice, and the one refused ADD was
-  too.** In a long-running live capture, sixty code-19 refusals were each
+  too.** In ordinary live use, not under a probe, sixty code-19 refusals were each
   followed within the same second by a second response to the same request:
   ``code: 0, "SUBS command succeeded"`` --- sixty rejections, sixty late
   successes, one-to-one. A probe that went on reading after each refusal saw
@@ -1515,7 +1515,7 @@ presence of ``OrderUROutCompleted`` alone to tell a cancel from a rejection.
 
 ``PriceImprovement`` **has no established unit.** It sits directly under
 ``BaseEvent/OrderFillCompletedEventOrderLegQuantityInfo``, beside the
-quantities above. It was checked against 188 live ETF fills, dividing it by the
+quantities above. It was checked against 188 live fills, dividing it by the
 shares filled and comparing the result with the improvement over the quote held
 when the order was placed. 94 fitted a total for the whole fill, 9 fitted a
 price per share, 28 looked as though the quote had moved, and 57 fitted
@@ -1700,7 +1700,8 @@ publishes it.
 
   **An absent** ``signScale`` **is scale 0, not a missing scale.** The
   serializer omits whatever is zero, and that applies to the scale exactly as
-  it applies to a mantissa member. One quote, verbatim, is what settles it:
+  it applies to a mantissa member. One quote, in the shape Schwab sends it
+  (the values are invented), is what settles it:
 
   .. code-block:: python
 

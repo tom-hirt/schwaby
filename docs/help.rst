@@ -179,9 +179,9 @@ your token file.
   every value at every level --- ``MESSAGE_DATA`` is a JSON string, so its
   contents are one parse deeper than they look --- and read the list. Better
   still, if you are building a fixture rather than filing a report, emit only
-  the fields the problem needs and drop the rest by construction. A fixture
-  built this way loses nothing a bug report needs, since the shape of a
-  problem rarely depends on an identifier.
+  the fields the problem needs and drop the rest by construction. A problem's
+  shape seldom depends on an identifier, so a fixture built this way usually
+  keeps all a bug report needs.
 
 For completeness, here is this method's documentation:
 
