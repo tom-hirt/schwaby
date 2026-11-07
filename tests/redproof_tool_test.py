@@ -1081,6 +1081,17 @@ class ChangedSetTest(unittest.TestCase):
                          self.chosen('tests/d_test.py'),
                          'an entry was not chosen by its second test')
 
+    def test_an_entry_is_chosen_by_what_its_test_reads(self):
+        # By tools/reads.json: e_test reads schwaby/z.py, which nothing
+        # else names.
+        reads = json.dumps({'tests/e_test.py': ['tests/e_test.py',
+                                                'schwaby/z.py']}).encode()
+        self.assertEqual((['e/untouched'], []), self.chosen(
+            'schwaby/z.py', files={'tools/reads.json': reads}),
+            'an entry was not chosen by a file its test reads')
+        self.assertEqual(([], []), self.chosen('schwaby/z.py'),
+                         'an entry was chosen by a read with no map')
+
     def test_a_changed_helper_chooses_every_entry(self):
         for helper in ('tests/utils.py', 'tests/conftest.py',
                        'tests/orders/__init__.py',
@@ -1171,8 +1182,8 @@ class ChangedSetTest(unittest.TestCase):
     def test_the_line_says_what_was_chosen(self):
         one = self.entries()[:1]
         self.assertEqual(
-            'redproof: touching main: 1 entry test or mutate a test file the '
-            'branch changes', redproof.touching_line('main', one, []))
+            'redproof: touching main: 1 entry reaches a file the branch '
+            'changes', redproof.touching_line('main', one, []))
         self.assertEqual(
             'redproof: touching main: a shared test helper changed '
             '(tests/utils.py), so the changed set is every entry, a '
@@ -1303,8 +1314,8 @@ class ChangedSetTest(unittest.TestCase):
             return out.returncode, out.stdout + out.stderr
 
         code, out = run('--touching', 'main')
-        self.assertIn('touching main: 0 entries test or mutate a test file '
-                      'the branch changes', out,
+        self.assertIn('touching main: 0 entries reach a file the branch '
+                      'changes', out,
                       'a branch with no test change chose entries')
         self.assertEqual(0, code, 'a branch with no test change did not '
                          'stop at the selection: ' + out)
@@ -1323,8 +1334,8 @@ class ChangedSetTest(unittest.TestCase):
         # Past the selection to the first thing it can refuse without
         # running an entry.
         code, out = run('--touching', 'main', '--name', 'two')
-        self.assertIn('touching main: 1 entry test or mutate a test file '
-                      'the branch changes', out,
+        self.assertIn('touching main: 1 entry reaches a file the branch '
+                      'changes', out,
                       'the changed set was not chosen')
         self.assertIn("no entry of the changed set has a name that contains "
                       "'two'", out,

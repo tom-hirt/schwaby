@@ -30,6 +30,8 @@ class EntrypointTest(unittest.TestCase):
         'test_redproof_audit_runs_as_a_script',
         'repeat.py': 'entrypoints_test.py::EntrypointTest::'
         'test_repeat_runs_as_a_script',
+        'reads.py': 'entrypoints_test.py::EntrypointTest::'
+        'test_reads_runs_as_a_script',
         'hooks/pre-commit': 'light_check_test.py::LightCheckTest::'
         'test_a_commit_or_merge_through_the_hooks_is_refused_and_named',
         'hooks/pre-merge-commit': 'light_check_test.py::LightCheckTest::'
@@ -137,6 +139,12 @@ class EntrypointTest(unittest.TestCase):
             written = json.load(f)['written']
         self.assertIn(os.path.join(os.path.realpath(self.cwd), 'made'),
                       [os.path.realpath(w) for w in written])
+
+    def test_reads_runs_as_a_script(self):
+        # Its check, on this checkout: past its imports and its walk of the
+        # tree, to the map's answer.
+        run = self.run_tool(os.path.join(TOOLS, 'reads.py'), '--check')
+        self.assertEqual(0, run.returncode, run.stdout + run.stderr)
 
     @unittest.skipIf(os.name == 'nt', 'repeat.py runs on POSIX only')
     def test_repeat_runs_as_a_script(self):

@@ -21,9 +21,12 @@ commit will contain:
    names of private infrastructure, which this repository never carries.
    The whole file, not only its added lines, and any case.
 
+It names the test modules the commit reaches, from the index's
+tools/reads.json: those whose reads include a file it changes. They are the
+tests a batch runs before it merges.
+
 When the commit changes a file under tests/, it names the red-proof entries
-whose test file, or the file they mutate, is one of them, by
-tools/redproof.py's own rule: the release red-proof runs them, and
+it reaches too, by tools/redproof.py's own rule: the release red-proof runs them, and
 `tools/redproof.py --touching main` runs the whole branch's set, these among
 them, to see early. That is a note, not a failure, and so is not being able
 to work it out.
@@ -192,6 +195,35 @@ def changed_entries():
     return [c.name for c in selected], helpers
 
 
+def _load(path):
+    spec = importlib.util.spec_from_file_location(
+        os.path.basename(path)[:-3], path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def reached_tests():
+    '''The test modules this commit reaches: those whose reads, by the
+    index's tools/reads.json, include a file it changes, and a new test
+    module. They are the touched tests a batch runs before it merges.
+    Nothing when the checkout has no map, or no tools to read it with.'''
+    here = os.path.dirname(os.path.abspath(__file__))
+    tools = [os.path.join(here, name) for name in ('redproof.py', 'reads.py')]
+    if not all(map(os.path.isfile, tools)):
+        return []
+    redproof, reads = (_load(path) for path in tools)
+
+    def read(path):
+        return blob(':0:' + path)
+    found = redproof.reads_map(read)
+    if not found:
+        return []
+    names = git('diff', '--cached', '-z', '--name-only', '--no-renames')
+    changed = {os.fsdecode(p) for p in names.stdout.split(b'\0') if p}
+    return reads.reached(found, changed, redproof.test_patterns(read))
+
+
 def main():
     if api is None:
         print('light check: pyflakes is not installed for %s; '
@@ -214,6 +246,17 @@ def main():
                                 check.stdout.decode('utf-8', 'replace')))
         failed = True
     try:
+        tests = reached_tests()
+    except (Exception, SystemExit) as e:
+        print('light check: could not name the tests this commit reaches '
+              '(%s: %s); tools/reads.json is the map' % (type(e).__name__, e))
+        tests = []
+    if tests:
+        print('light check: %d test module%s read a file this commit changes; '
+              'run them before the batch merges: python -m pytest %s' % (
+                  len(tests), '' if len(tests) == 1 else 's',
+                  ' '.join(tests)))
+    try:
         names, helpers = changed_entries()
     except (Exception, SystemExit) as e:
         # Executing the entries can fail on what the commit stages; that is
@@ -229,10 +272,11 @@ def main():
               'runs them, and --touching would be a release-sized run'
               % ', '.join(helpers))
     elif names:
-        print('light check: %d red-proof entr%s test or mutate a test file '
-              'this commit changes; the release red-proof runs them, and '
+        print('light check: %d red-proof %s a file this commit changes; '
+              'the release red-proof runs them, and '
               "`tools/redproof.py --touching main` runs the branch's set:" % (
-                  len(names), 'y' if len(names) == 1 else 'ies'))
+                  len(names),
+                  'entry reaches' if len(names) == 1 else 'entries reach'))
         for name in names:
             print('light check:   ' + name)
     if failed:

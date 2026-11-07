@@ -3,6 +3,7 @@ warning is refused, and one that only moves code or keeps an old warning is
 not.'''
 
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -271,8 +272,8 @@ class LightCheckTest(unittest.TestCase):
         code, out = self.check()
         self.assertEqual(0, code, 'naming the changed set failed the '
                          'commit: ' + out)
-        self.assertIn('1 red-proof entry test or mutate a test file this '
-                      'commit changes', out, out)
+        self.assertIn('1 red-proof entry reaches a file this commit '
+                      'changes', out, out)
         self.assertIn('light check:   a/one\n', out)
         self.assertNotIn('b/two', out, 'an entry whose test is unchanged '
                          'was named')
@@ -342,6 +343,21 @@ class LightCheckTest(unittest.TestCase):
                       '(tests/test_helpers.py)', out,
                       'a staged helper named like a test was taken for a '
                       'test: ' + out)
+
+    def test_the_tests_a_commit_reaches_are_named_from_the_map(self):
+        os.makedirs(os.path.join(self.repo, 'tools'))
+        self.stage('tools/reads.json', json.dumps({
+            'tests/a_test.py': ['tests/a_test.py', 'mod.py'],
+            'tests/b_test.py': ['tests/b_test.py']}))
+        self.git('commit', '-q', '-m', 'map')
+        self.stage('mod.py', 'import os\n\n\ndef f():\n    return 2\n')
+        code, out = self.check()
+        self.assertEqual(0, code, out)
+        self.assertIn('1 test module read a file this commit changes; run '
+                      'them before the batch merges: python -m pytest '
+                      'tests/a_test.py\n', out,
+                      'the tests a commit reaches were not named: ' + out)
+        self.assertNotIn('tests/b_test.py', out)
 
     def test_a_changed_test_helper_says_the_set_is_release_sized(self):
         self.changed_set_checkout()

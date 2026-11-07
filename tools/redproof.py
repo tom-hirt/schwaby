@@ -7,8 +7,9 @@ to arrive on the assertion you named.
     .venv/bin/python -I -B tools/redproof.py --shard 2/3     # one slice of three
     .venv/bin/python -I -B tools/redproof.py --touching main # the changed set
 
---touching chooses the entries whose test file, or the file they mutate, is
-one the branch changes under tests/ since it left that base; when there are
+--touching chooses the entries a branch reaches since it left that base:
+whose test file, or the file they mutate, is one it changes under tests/,
+or whose tests read a file it changes by tools/reads.json; when there are
 none it runs nothing and exits 0.
 
 A test that passes whether or not the fix is there is worse than none, because
@@ -858,23 +859,45 @@ def is_test_module(path, read, patterns):
     return source is None or defines_a_test(source)
 
 
+#: The map of what each test module reads (tools/reads.py).
+READS = 'tools/reads.json'
+
+
+def reads_map(read):
+    '''tools/reads.json as `read` gives it: test module to the repository
+    files it reads, or nothing when it is missing or not that shape.'''
+    try:
+        reads = json.loads((read(READS) or b'{}').decode('utf-8'))
+    except (ValueError, UnicodeDecodeError):
+        return {}
+    if not isinstance(reads, dict):
+        return {}
+    return {k: set(v) for k, v in reads.items() if isinstance(v, list)}
+
+
 def changed_set(cases, changed, read):
     '''The entries a change to `changed` (repository paths) can break, and
     the shared helpers among those paths, reading each file's content with
     `read` (a path's bytes, or None). An entry is chosen by its own test
-    files and the file it mutates, under tests/; a test module that imports
-    another is not followed. A helper, any file under tests/ that is not a
-    test module (conftest.py, utils.py, a package's __init__.py, data), may
-    be read by every test, so a changed one chooses every entry.'''
+    files and the file it mutates, under tests/, and by any file its tests
+    read by tools/reads.json, code included. A helper, any file under tests/
+    that is not a test module (conftest.py, utils.py, a package's
+    __init__.py, data), may be read by every test, so a changed one chooses
+    every entry.'''
+    changed = set(changed)
     sentinels = {p for p in changed if p.startswith('tests/')}
     patterns = test_patterns(read)
     helpers = sorted(p for p in sentinels
                      if not is_test_module(p, read, patterns))
     if helpers:
         return list(cases), helpers
+    reads = reads_map(read)
+
+    def reaches(test):
+        module = test.split('::')[0]
+        return module in sentinels or bool(changed & reads.get(module, set()))
     return [c for c in cases
-            if c.path in sentinels
-            or any(t.split('::')[0] in sentinels for t in tests_of(c))], []
+            if c.path in sentinels or any(map(reaches, tests_of(c)))], []
 
 
 def changed_since(base, cwd=ROOT):
@@ -902,9 +925,9 @@ def touching_line(base, selected, helpers):
         return ('redproof: touching %s: a shared test helper changed (%s), '
                 'so the changed set is every entry, a release-sized run'
                 % (base, ', '.join(helpers)))
-    return ('redproof: touching %s: %d entr%s test or mutate a test file '
-            'the branch changes' % (base, len(selected),
-                                    'y' if len(selected) == 1 else 'ies'))
+    return ('redproof: touching %s: %d %s a file the branch changes' % (
+        base, len(selected),
+        'entry reaches' if len(selected) == 1 else 'entries reach'))
 
 
 def judge_all(run, args, started):

@@ -8214,15 +8214,15 @@ CASES.extend([
     # for each commit.
     Case('changed-set/an-entry-is-chosen-by-what-it-mutates',
          'tools/redproof.py',
-         '            if c.path in sentinels\n            or any(',
-         '            if any(',
+         '            if c.path in sentinels or any(map(reaches, tests_of(c)))]',
+         '            if any(map(reaches, tests_of(c)))]',
          'tests/redproof_tool_test.py::ChangedSetTest'
          '::test_an_entry_is_chosen_by_the_test_file_it_mutates',
          'an entry was not chosen by the test file it mutates'),
     Case('changed-set/an-entry-is-chosen-by-any-of-its-tests',
          'tools/redproof.py',
-         "any(t.split('::')[0] in sentinels for t in tests_of(c))",
-         "tests_of(c)[0].split('::')[0] in sentinels",
+         'any(map(reaches, tests_of(c)))',
+         'reaches(tests_of(c)[0])',
          'tests/redproof_tool_test.py::ChangedSetTest'
          '::test_an_entry_is_chosen_by_any_of_its_tests',
          'an entry was not chosen by its second test'),
@@ -8361,8 +8361,8 @@ CASES.extend([
          'the refusal did not say where it looked'),
     Case('changed-set/light-check-a-failure-to-name-is-a-note',
          'tools/light_check.py',
-         '    except (Exception, SystemExit) as e:\n',
-         '    except (ImportError, SystemExit) as e:\n',
+         '    except (Exception, SystemExit) as e:\n        # Executing the entries',
+         '    except (ImportError, SystemExit) as e:\n        # Executing the entries',
          'tests/light_check_test.py::LightCheckTest'
          '::test_entries_that_cannot_be_read_do_not_refuse_the_commit',
          'entries that could not be read refused the commit'),
@@ -8376,8 +8376,8 @@ CASES.extend([
 
     Case('changed-set/light-check-an-exit-in-the-entries-decides-nothing',
          'tools/light_check.py',
-         '    except (Exception, SystemExit) as e:\n',
-         '    except Exception as e:\n',
+         '    except (Exception, SystemExit) as e:\n        # Executing the entries',
+         '    except Exception as e:\n        # Executing the entries',
          'tests/light_check_test.py::LightCheckTest'
          '::test_entries_that_exit_do_not_decide_the_check',
          'entries that exited let a new warning through'),
