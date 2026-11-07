@@ -24,11 +24,11 @@ def _scale_strike(strike_price):
     is exact, so it should not depend on a setting made elsewhere.
     '''
     # A fresh Context, not localcontext() with prec set: localcontext copies
-    # the ambient one, so Emax, Emin and the traps came along. Under
-    # Context(prec=28, Emax=3, Emin=-3) a strike of '500' raised
+    # the ambient one, so Emax, Emin and the traps come along. Under
+    # Context(prec=28, Emax=3, Emin=-3) a strike of '500' would raise
     # decimal.Overflow out of the constructor, and with Overflow untrapped it
-    # returned Infinity, which is integral -- so the granularity check passed
-    # it and build() died on `cannot convert Infinity to integer`.
+    # would return Infinity, which is integral -- so the granularity check
+    # would pass it and build() die on `cannot convert Infinity to integer`.
     with decimal.localcontext(decimal.Context(prec=28)):
         return decimal.Decimal(strike_price) * 1000
 
@@ -133,9 +133,9 @@ class OptionSymbol:
             # arguments, naming neither the strike nor the symbol.
             pass
         # math.isfinite as well as the positivity check: float('nan') parses,
-        # and `nan <= 0` is False, so a strike of 'nan' or 'inf' used to pass
-        # here and fail later inside build() -- as `cannot convert NaN to
-        # integer`, naming neither the strike nor the symbol.
+        # and `nan <= 0` is False, so a strike of 'nan' or 'inf' would
+        # otherwise pass here and fail later inside build() -- as `cannot
+        # convert NaN to integer`, naming neither the strike nor the symbol.
         if (strike is None or not _is_instance(strike_price_as_string, str)
                 or not math.isfinite(strike) or strike <= 0):
             raise ValueError(
@@ -150,10 +150,10 @@ class OptionSymbol:
             strike_price_as_string = strike_copy[:-1]
 
         # The symbol encodes the strike in thousandths, so anything finer than
-        # a tenth of a cent cannot be represented. int() used to drop it
-        # silently: '2.0019' became 00002001, a $2.001 contract rather than the
-        # one asked for, and '0.0005' became 00000000, a strike of zero. Both
-        # name a different contract or none, and neither said so. Refused here
+        # a tenth of a cent cannot be represented, and int() would drop it
+        # silently: '2.0019' would become 00002001, a $2.001 contract rather
+        # than the one asked for, and '0.0005' 00000000, a strike of zero. Both
+        # name a different contract or none, and neither says so. Refused here
         # rather than in build(), where the strike is no longer in hand.
         # Read off the parsed value's own digits rather than the scaled
         # product. Multiplying consults the decimal context, and no fixed
@@ -179,7 +179,7 @@ class OptionSymbol:
 
         # The symbol's strike field is eight digits of thousandths, so it tops
         # out just under $100,000. Beyond that the format silently widens:
-        # '700000' produced a 22-character symbol with a nine-digit strike.
+        # '700000' produces a 22-character symbol with a nine-digit strike.
         # The realistic way to arrive here is a strike already expressed in
         # cents or thousandths -- '250000' meaning $250.00 -- which deserves
         # the same clear refusal as the too-fine case rather than a malformed
@@ -213,8 +213,8 @@ class OptionSymbol:
         # Every field is read from a fixed position. A symbol of another
         # length, or with anything but spaces padding the root, shifts a digit
         # from one field into the next and parses as a different contract: one
-        # space of padding turned a 2026 expiration into 2061, and a
-        # seven-digit strike turned 125 into 12.5.
+        # space of padding turns a 2026 expiration into 2061, and a
+        # seven-digit strike turns 125 into 12.5.
         layout_error_str = format_error_str + ', 21 characters in all'
         # The type through type(), which a class cannot fake the way it can
         # fake __class__ for isinstance; then a plain str, so that a subclass
@@ -257,9 +257,9 @@ class OptionSymbol:
             # 2.01 * 1000 is 2009.9999999999998, so int() gives 2009 and the
             # symbol names a strike a tenth of a cent low -- a different
             # contract, or none. 590 of the 100,000 cent-granular strikes
-            # between $0.01 and $1000.00 were affected. strike_price is
-            # validated as a string on the way in, so Decimal() reads it
-            # exactly as written.
+            # between $0.01 and $1000.00 come out wrong that way.
+            # strike_price is validated as a string on the way in, so
+            # Decimal() reads it exactly as written.
             int(_scale_strike(self.strike_price))
         )
 

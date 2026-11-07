@@ -484,10 +484,11 @@ def websocket_logger(logger=None):
     '''The logger handed to ``websockets`` for the stream's connection.
 
     A caller's own ``logger``, or by default ``websockets.client``, the one
-    websockets uses when given none -- so records come from the same logger
-    as before and every configuration of it, its level, handlers, filters and
-    ``disabled``, applies exactly as it did. Either way it is wrapped in
-    :class:`FrameRedactingAdapter`, which is what makes the frames safe to log.
+    websockets uses when given none -- so records come from the logger
+    websockets would use anyway, and every configuration of it, its level,
+    handlers, filters and ``disabled``, applies unchanged. Either way it is
+    wrapped in :class:`FrameRedactingAdapter`, which is what makes the frames
+    safe to log.
     websockets elides the middle of a long frame by default, which happens to
     hide the LOGIN token -- and at some sizes of its documented
     ``WEBSOCKETS_MAX_LOG_SIZE`` cuts inside the token instead, leaving its

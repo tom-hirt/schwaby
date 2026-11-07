@@ -343,8 +343,8 @@ class BaseClient(EnumEnforcer):
         Schwab's date parameters name an instant, and a datetime with no
         timezone does not. Naive means ``utcoffset()`` returns ``None``,
         Python's own definition: a ``tzinfo`` that returns no offset is naive
-        despite being set, and keying on ``tzinfo`` alone let such a value
-        pass silently and be read as the host's local time.
+        despite being set, and keying on ``tzinfo`` alone would let such a
+        value pass silently and be read as the host's local time.
 
         The two encodings resolve the ambiguity
         differently -- the epoch-millisecond parameters read a naive datetime
@@ -1163,16 +1163,16 @@ class BaseClient(EnumEnforcer):
             # Explicitly UTC. A naive default would warn the caller about a
             # datetime they never passed -- every call which omits the dates,
             # which is most of them -- and would put the epoch millis this
-            # turns into at the mercy of the host's offset, which is the same
-            # defect the end_datetime default was changed to avoid.
+            # turns into at the mercy of the host's offset, the defect the
+            # end_datetime default below avoids the same way.
             start_datetime = datetime.datetime(
                     year=1971, month=1, day=1, tzinfo=datetime.timezone.utc)
         if end_datetime is None:
-            # utcnow() is deprecated, and returns a naive datetime holding a UTC
-            # wall time. _format_date_as_millis converts with dt.timestamp(),
-            # which reads a naive datetime as local time, so the result was off
-            # by the host's UTC offset. An aware datetime converts correctly.
-            # _make_order_query already does it this way.
+            # Aware, not utcnow(): utcnow() is deprecated and returns a naive
+            # datetime holding a UTC wall time, which _format_date_as_millis
+            # (dt.timestamp()) would read as local time, off by the host's UTC
+            # offset. An aware datetime converts correctly, as in
+            # _make_order_query.
             end_datetime = (datetime.datetime.now(datetime.timezone.utc) +
                     datetime.timedelta(days=7))
 
@@ -1456,10 +1456,9 @@ class BaseClient(EnumEnforcer):
         :param frequency: Requested time bucket, in minutes, ``0`` meaning the
                           whole session. See :class:`Movers.Frequency` for
                           valid values. **Ignored by Schwab** --- see the
-                          warning above. (It is a bucket, not a threshold; an
-                          earlier version of this docstring described it as
-                          "movers that saw this magnitude or greater", which
-                          it never was.)
+                          warning above. (A bucket, not a threshold: it does
+                          not select movers that saw this magnitude or
+                          greater.)
         '''
         index = self.convert_enum(index, self.Movers.Index)
         sort_order = self.convert_enum(sort_order, self.Movers.SortOrder)

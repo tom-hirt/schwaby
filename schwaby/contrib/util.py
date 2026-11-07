@@ -35,8 +35,8 @@ class HeuristicJsonDecoder(StreamJsonDecoder):
         except json.decoder.JSONDecodeError:  # pragma: no cover
             if isinstance(raw, (bytes, bytearray)):
                 # The repair works on text. Replacing in bytes with str
-                # arguments raised TypeError, which ended the receive loop
-                # unreported, so a bytes frame keeps its decode error.
+                # arguments raises TypeError, which would end the receive
+                # loop unreported, so a bytes frame keeps its decode error.
                 raise
             raw = raw.replace('\\\\', '\\')
 
@@ -114,8 +114,8 @@ def _report_unknown_keys(unknown):
     # Normalised to `str` on the way in so a non-string key cannot slip the
     # dedup by being unequal to its own spelling, and truncated to the room
     # left rather than after the fact: the cap is justified by input nobody
-    # here controls, and `update` before the check let one object carrying
-    # 500 unknown keys put all 500 in a set bounded at 32.
+    # here controls, and `update` before the check would let one object
+    # carrying 500 unknown keys put all 500 in a set bounded at 32.
     fresh = sorted({_safe_key(k) for k in unknown} - _reported_keys)[:room]
     if not fresh:
         return
@@ -166,15 +166,15 @@ class UnusableDecimalScale(SchwabError, ValueError):
 def _safe_keys(unknown):
     """The unknown keys as one bounded phrase.
 
-    Bounded in count as well as per key: `_safe_key` caps each name, and the
-    join did not, so an object carrying 100,000 unknown keys produced a
-    2.9 MB exception message. Transient rather than retained, which is why
-    it is a smaller problem than the sets -- but an exception a caller logs
-    is retained by whatever logs it.
+    Bounded in count as well as per key: `_safe_key` caps each name but not
+    the join, and an object carrying 100,000 unknown keys would otherwise
+    produce a 2.9 MB exception message. Transient rather than retained, which
+    is why it is a smaller problem than the sets -- but an exception a caller
+    logs is retained by whatever logs it.
     """
     # Quoted, like the once-per-key log line. A key is venue text, and
-    # joined bare a newline in one forged a second line wherever the
-    # exception was logged -- including through the recipe the streaming
+    # joined bare, a newline in one would forge a second line wherever the
+    # exception is logged -- including through the recipe the streaming
     # docs give for logging it.
     names = [_quoted(name) for name in sorted(map(_safe_key, unknown))]
     if len(names) <= 8:
@@ -272,12 +272,12 @@ def _decode_bare(value):
     This path is defensive: no captured payload has carried a money or
     quantity field as a bare number or string, and the docstring above says
     so rather than implying otherwise. It carries the same untrusted text as
-    the mantissa members either way, and for three review rounds it was the
-    permissive one.
-    `decimal.Decimal`'s parser accepts more than `int`'s does, so every token
-    `_unsigned` refuses decoded here instead: ``'1_0'`` as ten,
-    ``'\u0663'`` as three, ``' 12 '`` and ``'+12'`` and ``'\uff11\uff12'``
-    as twelve. All of them are `json.loads`-reachable and none of them raised.
+    the mantissa members, so it is validated as strictly.
+    `decimal.Decimal`'s parser accepts more than `int`'s does, so unchecked,
+    every token `_unsigned` refuses would decode here instead: ``'1_0'`` as
+    ten, ``'\u0663'`` as three, ``' 12 '`` and ``'+12'`` and
+    ``'\uff11\uff12'`` as twelve. All of them are `json.loads`-reachable and
+    none of them would raise.
     """
     kind = type(value)   # not `isinstance`; see `decode_decimal`
     if issubclass(kind, bool) or value is None:
@@ -296,9 +296,8 @@ def _decode_bare(value):
     elif issubclass(kind, int):
         value = int.__index__(value)
         # Bounded before conversion, cheaply. `decimal.Decimal(int)` is
-        # fine at any width -- measured, and the comment here said otherwise
-        # for one commit; it is `str()` and `repr()` that raise a bare
-        # `ValueError` past `sys.get_int_max_str_digits()`. `_safe_repr`
+        # fine at any width (measured); it is `str()` and `repr()` that raise
+        # a bare `ValueError` past `sys.get_int_max_str_digits()`. `_safe_repr`
         # handles that where it matters, so this is a cheap pre-check rather
         # than the thing standing between a caller and an escape. 256 bits is
         # 78 digits, well outside the bound below, so it refuses only what
@@ -408,8 +407,8 @@ def decode_decimal(value):
     a 96-bit integer mantissa, which arrives whole in ``lo`` as a string of
     digits, and a ``signScale`` packing the scale in its magnitude and the
     sign in its parity. The conversion is undocumented publicly; Schwab's
-    Trader API support confirmed it in writing, and it reproduces every
-    payload anyone here has captured, including Schwab's own worked example
+    Trader API support has confirmed it, and it reproduces every captured
+    payload, including Schwab's own worked example
     ``{"lo": "40000000", "signScale": 13}`` -> ``Decimal('-40.000000')``.
 
     Five things this gets right that a first attempt usually does not, each of
@@ -430,8 +429,7 @@ def decode_decimal(value):
       much as to a mantissa member: ``AskSize`` and ``BidSize`` arrive as
       ``{"lo": "19200"}`` beside an ``Ask`` of
       ``{"lo": "13720000", "signScale": 12}`` on the same quote. Refusing
-      the shape --- which this function did until it was checked against a
-      capture --- costs both sizes on every quote it appears in.
+      the shape costs both sizes on every quote it appears in.
     * **A** ``Decimal`` **is returned, never a float.** These are money;
       :meth:`OrderBuilder.set_price
       <schwaby.orders.generic.OrderBuilder.set_price>` refuses floats for the
@@ -441,11 +439,11 @@ def decode_decimal(value):
     :param value: A decimal object, or a number or string. A non-object is
                   validated and returned as a :class:`~decimal.Decimal`. That
                   path is defensive rather than observed: every money and
-                  quantity field in the one capture on hand is an object, on
-                  every message. What *is* measured is the empty string,
-                  which arrives as the ``SUBSCRIBED`` ack's ``MESSAGE_DATA``
-                  and reaches here from any consumer decoding fields
-                  generically.
+                  quantity field in every capture this was checked against
+                  is an object, on every message. What *is* measured is the
+                  empty string, which arrives as the ``SUBSCRIBED`` ack's
+                  ``MESSAGE_DATA`` and reaches here from any consumer
+                  decoding fields generically.
     :raises UnusableDecimalScale: if a lone ``lo`` is not an unsigned
                                   integer below ``2 ** 96``, if any member
                                   of a ``mid`` or ``hi`` layout is not an
@@ -508,10 +506,10 @@ def decode_decimal(value):
 
     # Routed on `type()`, not `isinstance`, here and in the helpers: an
     # `isinstance` check also believes an object's `__class__`, so a mock or a
-    # proxy claiming to be a dict passed it and then failed dict's own
+    # proxy claiming to be a dict would pass it and then fail dict's own
     # methods with a bare TypeError. Any `Mapping` is a decimal object, not
-    # only a dict -- a `UserDict` or a `mappingproxy` was refused as "not a
-    # number".
+    # only a dict, so a `UserDict` or a `mappingproxy` is accepted rather than
+    # refused as "not a number".
     try:
         is_mapping = issubclass(type(value), collections.abc.Mapping)
     except Exception:
@@ -522,12 +520,12 @@ def decode_decimal(value):
         return _decode_bare(value)
 
     # Read once, through the mapping's own `items()`, into a plain dict, and
-    # every read below is from that copy: a `get` that answered differently
-    # the second time chose the lone-lo layout and dropped `mid`. Through the
-    # mapping's own method rather than `dict.items`, which reads dict's
-    # storage directly and so saw nothing in a dict subclass keeping its data
-    # elsewhere -- measured, `DotMap` decoded a $5,000 principal as a clean
-    # zero. A mapping whose `items()` cannot be read is refused.
+    # every read below is from that copy: a `get` that answers differently
+    # the second time could choose the lone-lo layout and drop `mid`. Through
+    # the mapping's own method rather than `dict.items`, which reads dict's
+    # storage directly and so sees nothing in a dict subclass keeping its data
+    # elsewhere -- measured, `DotMap` read that way decodes a $5,000 principal
+    # as a clean zero. A mapping whose `items()` cannot be read is refused.
     #
     # JSON object keys are always strings. A str key is reduced to its plain
     # text before it is compared, so a subclass cannot run its own `__eq__` or
@@ -556,22 +554,20 @@ def decode_decimal(value):
         # Any unrecognised key refuses the object. Outright, with no attempt
         # to decode around it.
         #
-        # This was three attempts at something cleverer, and the record is
-        # the argument. The clever version ignored a key on an object that
-        # looked complete and refused one where a component was missing, on
-        # the reasoning that the unknown key might be that component renamed.
-        # It could not be made to work, because "missing" has more spellings
-        # than anyone enumerates: the key absent, the key present and null,
-        # the key present and zero. Three review rounds found those three,
-        # each a $6.86 limit price decoding as $6,860,000, and the third
-        # cannot be closed at all -- `signScale: 0` genuinely means scale 0,
+        # Decoding around an unknown key -- ignoring one on an object that
+        # looks complete, refusing one where a component is missing, on the
+        # reasoning that the key might be that component renamed -- cannot be
+        # made safe, because "missing" has more spellings than can be listed:
+        # the key absent, the key present and null, the key present and zero.
+        # Each can turn a $6.86 limit price into $6,860,000, and the last
+        # cannot be guarded at all -- `signScale: 0` genuinely means scale 0,
         # so refusing it would refuse a real `AskSize`.
         #
-        # Measured against a real capture, the clever version also bought
-        # nothing: against a rename that keeps the old key at its default,
-        # 27 of 37 objects decoded to a wrong number, which is exactly what
-        # no guard at all does. It had the cost of refusing and the risk of
-        # not refusing.
+        # Measured against a real capture, that approach also buys nothing:
+        # against a rename that keeps the old key at its default, 27 of 37
+        # objects decode to a wrong number, which is exactly what no guard at
+        # all does. It has the cost of refusing and the risk of not
+        # refusing.
         #
         # So: the cost of this is that a key Schwab *adds* -- which arrives
         # on every decimal object at once -- makes every money and quantity
@@ -592,11 +588,11 @@ def decode_decimal(value):
                         _safe_repr(value)))
         # Reported here and not above the raise: this branch is the venue
         # changing under everyone, and the one above is a caller handing this
-        # function the wrong object. Reporting both put the second one's key
-        # names into a set that is bounded, module-level and never cleared --
-        # measured, one real ACCT_ACTIVITY frame walked generically filled all
-        # 32 slots with `AccountNumber`, `BaseEvent`, `EventType` and the
-        # like, after which a genuine schema addition logged nothing at all.
+        # function the wrong object. Reporting both would put the second
+        # one's key names into a set that is bounded, module-level and never
+        # cleared -- measured, one real ACCT_ACTIVITY frame walked generically
+        # fills all 32 slots with `AccountNumber`, `BaseEvent`, `EventType`
+        # and the like, after which a genuine schema addition logs nothing.
         # The report is the whole of what this adds over refusing silently,
         # and non-schema input could consume all of it for the life of the
         # process.
@@ -611,23 +607,24 @@ def decode_decimal(value):
 
     # The scale is read, validated and bounded *before* the mantissa-less
     # shortcut, not after. That shortcut returns without looking at anything
-    # else, so `{"signScale": "garbage"}` -- or 1.9, or -1, or 65 -- decoded
-    # as a clean zero while the identical corruption one key over raised. No
-    # wrong number came of it, since a mantissa-less object is zero at any
-    # scale, but it discarded the only signal that the message was corrupt.
+    # else, so read after it, `{"signScale": "garbage"}` -- or 1.9, or -1, or
+    # 65 -- would decode as a clean zero while the identical corruption one
+    # key over raises. No wrong number would come of it, since a
+    # mantissa-less object is zero at any scale, but it would discard the
+    # only signal that the message is corrupt.
     #
     # An absent `signScale` is scale 0, by the same rule as an absent
-    # mantissa member: the serializer omits what is zero. This was a raise
-    # until it was checked against a capture, on the reasoning that a missing
-    # scale could not be told from a lost one -- but `AskSize` and `BidSize`
-    # arrive as `{"lo": "19200"}` with no scale at all, beside an `Ask` of
-    # `{"lo": "13720000", "signScale": 12}` on the same quote. $13.72 and
-    # 19200 shares, which is coherent; 0.0192 shares is not. So the shape is
-    # ordinary traffic, and refusing it cost both sizes on every quote.
+    # mantissa member: the serializer omits what is zero. A missing scale
+    # looks as though it cannot be told from a lost one, but `AskSize` and
+    # `BidSize` arrive as `{"lo": "19200"}` with no scale at all, beside an
+    # `Ask` of `{"lo": "13720000", "signScale": 12}` on the same quote.
+    # $13.72 and 19200 shares, which is coherent; 0.0192 shares is not. So
+    # the shape is ordinary traffic, and refusing it would cost both sizes on
+    # every quote.
     #
     # `.get` on the plain copy, so an absent key and an explicit JSON `null`
     # are one absence here, exactly as they are in the member loop: the two
-    # follow one rule and briefly did not.
+    # follow one rule.
     scale_member = fields.get('signScale')
     scale = _unsigned(0 if scale_member is None else scale_member,
                       'signScale', value, 32)
@@ -661,13 +658,12 @@ def decode_decimal(value):
         # the second one *prints* as a negative quantity.
         return decimal.Decimal(0)
 
-    # Validated by shape rather than coerced and caught. Three rounds of
-    # review found the same class here: `int()` raises a bare `ValueError` on
-    # a non-numeric string, a `TypeError` on a non-scalar and an
-    # `OverflowError` on an infinite float -- and where it does *not* raise it
-    # is worse, because `int(1.9)` is 1 and `int('1_0')` is 10, so corruption
-    # becomes a confident wrong number. Each fix enumerated one more exception
-    # type and the next round found another shape.
+    # Validated by shape rather than coerced and caught. `int()` raises a
+    # bare `ValueError` on a non-numeric string, a `TypeError` on a
+    # non-scalar and an `OverflowError` on an infinite float -- and where it
+    # does *not* raise it is worse, because `int(1.9)` is 1 and `int('1_0')`
+    # is 10, so corruption becomes a confident wrong number. Listing
+    # exception types cannot close that set.
     #
     # So this asks what a member *is* instead: an unsigned integer of a
     # stated width. Anything else is refused, once, here.
@@ -676,10 +672,10 @@ def decode_decimal(value):
     # `lo`, as a string of digits -- measured on 5,843 objects from a
     # recorded ACCT_ACTIVITY archive, none of which carried `mid` or
     # `hi` -- and a fill principal above 4294.967295 at signScale 12 needs
-    # more than 32 bits to do it. This used to read `lo` as the first of a
-    # .NET Decimal's three 32-bit members and refused every such object: 129
-    # in that archive, 33 of them fill principals, each of which equalled
-    # price times quantity from the same message once read whole. A lone
+    # more than 32 bits to do it. Reading `lo` as the first of a .NET
+    # Decimal's three 32-bit members would refuse every such object: 129 in
+    # that archive, 33 of them fill principals, each of which equals price
+    # times quantity from the same message when `lo` is read whole. A lone
     # `lo` is bounded by the .NET mantissa itself, 96 bits.
     #
     # An object that carries `mid` or `hi` is read as the three-member
@@ -690,7 +686,7 @@ def decode_decimal(value):
     # `mid` alone, `{"lo": ..., "hi": 1}` would read `lo` whole and drop `hi`
     # without a word.
     #
-    # An absent `lo` is zero here too, as an absent member always has been.
+    # An absent `lo` is zero here too, as an absent member is everywhere.
     # The shortcut above has already returned for that case, but it is
     # normalisation only, and the arithmetic must not depend on it: read
     # unconditionally, a mantissa-less object that reached this line would
@@ -718,9 +714,9 @@ def decode_decimal(value):
     # `set_price`.
     #
     # The sign is part of that. `-result` is `Decimal.__neg__`, which is a
-    # context-aware operation and rounds -- so an earlier version of this was
-    # exact for positive values and rounded negative ones, which is the branch
-    # `EstimatedPrincipalAmount` arrives on.
+    # context-aware operation and rounds -- so negating after construction
+    # would be exact for positive values and round negative ones, which is
+    # the branch `EstimatedPrincipalAmount` arrives on.
     return decimal.Decimal('{}{}E-{}'.format(
             '-' if scale % 2 else '', mantissa, scale // 2))
 

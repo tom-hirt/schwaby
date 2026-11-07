@@ -14,12 +14,12 @@ import time
 # `raise_for_status()` on a response from any client call raises
 # `httpx2.HTTPStatusError`. That package shares no exception hierarchy with
 # `httpx`, so a handler written against the other one never runs -- no error,
-# the `except` simply does not match, and nothing reports that it didn't. A
-# consumer was left probing which HTTP package happened to be installed in
-# order to know what to catch. Measured: `httpx2` is the only HTTP dependency
-# declared, `httpx` is not installed alongside it, and a 429 driven through the
-# real session stack raises this class. Re-exported rather than subclassed, so
-# `isinstance` against the original still holds.
+# the `except` simply does not match, and nothing reports that it didn't.
+# Catching this name means a caller never has to find out which HTTP package
+# is installed to know what to catch. Measured: `httpx2` is the only HTTP
+# dependency declared, `httpx` is not installed alongside it, and a 429 driven
+# through the real session stack raises this class. Re-exported rather than
+# subclassed, so `isinstance` against the original still holds.
 from . import _redact
 from httpx2 import HTTPStatusError
 
@@ -157,10 +157,9 @@ class SchwabError(Exception):
     you is the ability to catch the library's own failures *without* also
     catching every ``int()`` and ``float()`` in the same block.
 
-    Two of the order exceptions additionally inherit ``ValueError``, because
-    they did before this class existed and code catching them that way still
-    works. :class:`OrderIdNotFoundError` deliberately does not: see its own
-    documentation.
+    Two of the order exceptions additionally inherit ``ValueError``, so code
+    catching them that way works. :class:`OrderIdNotFoundError` deliberately
+    does not: see its own documentation.
     '''
 
     def __reduce__(self):
@@ -168,8 +167,8 @@ class SchwabError(Exception):
         # argument -- a response, an order id, a raw frame -- and pass only the
         # message up to BaseException. The default __reduce__ reconstructs by
         # calling __init__ with self.args, which is just the message, so a copy
-        # or a pickle either raised TypeError for the missing positionals or,
-        # worse, succeeded with the message bound to the response and the
+        # or a pickle would either raise TypeError for the missing positionals
+        # or, worse, succeed with the message bound to the response and the
         # message itself lost.
         #
         # Nothing in this library moves an exception across a boundary --
@@ -284,19 +283,19 @@ class AccountHashMismatchException(SchwabError, ValueError):
 
     .. warning::
 
-       This inherits ``ValueError``, as it did before :class:`SchwabError`
-       existed, so a broad ``except ValueError`` around order building will
-       swallow it. Given what it means, narrow that.
+       This also inherits ``ValueError``, so a broad ``except ValueError``
+       around order building will swallow it. Given what it means, narrow that.
     '''
 
-    # expected_account_hash is keyword-only, and that is not stylistic. Added
-    # ahead of *args it took the slot the message had been passed in, so the
-    # four-argument call that already existed bound the message to it and left
+    # expected_account_hash is keyword-only, and that is not stylistic. Placed
+    # positionally ahead of *args it would take the slot the message is passed
+    # in, so a four-argument call would bind the message to it and leave
     # self.args empty -- an exception whose str() is '' on the one failure that
     # means an order is live on the wrong account. That is the same
     # succeeded-while-losing-the-message defect this class's __reduce__ exists
-    # to fix, through a different door. UnusableMessage and TokenRefreshError
-    # in this file already take their extras keyword-only for this reason.
+    # to prevent, through a different door. TokenRefreshError in this file and
+    # UnusableMessage in streaming.py take their extras keyword-only for the
+    # same reason.
     def __init__(self, response, order_id, account_hash, *args,
                  expected_account_hash=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -323,10 +322,10 @@ def _is_instance(value, types):
     '''``isinstance``, for a value a caller passed in.
 
     ``isinstance`` asks ``value.__class__`` when the value's own type does not
-    match, and a class can make that raise, so a wrong type reached the caller
-    as that exception instead of the refusal naming it. The real type answers
-    then. Everything else is ``isinstance`` exactly: a mock with a ``spec``,
-    which reports the class it imitates, still passes where it did.
+    match, and a class can make that raise, so a wrong type would reach the
+    caller as that exception instead of the refusal naming it. The real type
+    answers then. Everything else is ``isinstance`` exactly: a mock with a
+    ``spec``, which reports the class it imitates, still passes.
     '''
     try:
         return isinstance(value, types)
@@ -370,7 +369,7 @@ def _format_iso_instant(dt):
     # and the one `_cancel_time_string` refuses against. A `tzinfo` whose
     # `utcoffset` returns None is naive despite being set, and `astimezone`
     # reads such a value as the host's local time -- so keying on `tzinfo`
-    # alone sent a different instant from each machine, silently.
+    # alone would send a different instant from each machine, silently.
     if dt.utcoffset() is not None:
         dt = dt.astimezone(_datetime.timezone.utc)
 
@@ -745,8 +744,8 @@ def execution_totals(order):
     are exact to 60 significant digits, which a real order does not approach,
     and a number too large, too small or too long for that is refused rather
     than rounded; the average is divided to 60 significant digits. A price is
-    as Schwab quotes it, with no contract multiplier applied; for the ETF fills
-    that were compared with their recorded fill prices, that was per share. A
+    as Schwab quotes it, with no contract multiplier applied; for the equity
+    fills compared against recorded fill prices, that was per share. A
     float is read into ``Decimal`` from its shortest text, which is its JSON
     text for any price of up to 15 significant digits, so a price of
     ``58.1853`` is exactly that. An order with no fills gives an empty dict.
@@ -795,8 +794,8 @@ def _expiry_authlib_acts_on(expires_at):
     refreshes only once it is reached, so one further off than
     ``_LONGEST_EXPIRY`` is refused. The check on a token response and the
     classification of a stored token both ask this, so that they cannot
-    disagree. They did: a response with a milliseconds expiry was refused as
-    never reached, while a stored token with the same expiry was reported as
+    disagree: otherwise a response with a milliseconds expiry could be refused
+    as never reached while a stored token with the same expiry was reported as
     retryable on every call.
     '''
     return (isinstance(expires_at, int)

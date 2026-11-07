@@ -61,11 +61,10 @@ def _build_object(obj):
     # attribute` -- at build() time, naming neither the field nor the type.
     #
     # It is refused rather than rendered. Rendering every Decimal as a string
-    # was wrong for the fields Schwab types as numbers: quantity,
-    # stopPriceOffset and activationPrice would have gone out as "10" and
-    # "0.50", and a non-finite one would have gone out as "sNaN" instead of
-    # failing. Only the price fields take a Decimal, and they convert it where
-    # it is set.
+    # is wrong for the fields Schwab types as numbers: quantity,
+    # stopPriceOffset and activationPrice would go out as "10" and "0.50", and
+    # a non-finite one would go out as "sNaN" instead of failing. Only the
+    # price fields take a Decimal, and they convert it where it is set.
     elif _is_instance(obj, decimal.Decimal):
         raise ValueError(
                 'a decimal.Decimal reached the built order ({}). Only prices '
@@ -103,9 +102,9 @@ def _assert_finite(name, price, *, price_field=False):
     is a string or a ``decimal.Decimal`` in Schwab's schema; a numeric one --
     quantity, the offsets, the activation price -- is a number, and takes an
     ``int`` or a ``float`` and nothing else. Passing a string to a numeric
-    field used to build it straight into the order, so
-    ``set_price_offset('abc')`` produced ``{"priceOffset": "abc"}``; it now
-    raises, and so does every prebuilt template given a string quantity.
+    field raises rather than building it straight into the order, where
+    ``set_price_offset('abc')`` would become ``{"priceOffset": "abc"}``; so
+    does every prebuilt template given a string quantity.
 
     NaN and the infinities do not name a price, a size or an offset, and they
     arrive by computation rather than by typing: a limit derived from a quote
@@ -125,10 +124,9 @@ def _assert_finite(name, price, *, price_field=False):
     ``activation_price <= 0.0`` are both False for NaN, so those guards do not
     fire and the value passes straight through them.
 
-    On a price field, strings are otherwise passed through untouched, as they
-    always have been; only the spellings Python reads as non-finite are
-    refused, because
-    ``str()`` of a computed value is the obvious way to reach here.
+    On a price field, strings are otherwise passed through untouched; only the
+    spellings Python reads as non-finite are refused, because ``str()`` of a
+    computed value is the obvious way to reach here.
     '''
     # Decimal first: float(Decimal('sNaN')) raises ValueError, which the string
     # branch below reads as "not a number at all" and lets through. A
@@ -156,12 +154,12 @@ def _assert_finite(name, price, *, price_field=False):
         # field is not, and only the caller knows which one this is -- so it
         # says, rather than this guessing from the value.
         #
-        # Without it the two offset setters accepted a string and built it
-        # straight into the order: `set_stop_price_offset('abc')` produced
-        # `{"stopPriceOffset": "abc"}` and sent it. They are the two numeric
-        # setters with no comparison after this call to trip over the type,
-        # which is why they took it silently where `set_quantity` at least
-        # raised something.
+        # Without it the two offset setters would accept a string and build
+        # it straight into the order: `set_stop_price_offset('abc')` would
+        # produce `{"stopPriceOffset": "abc"}` and send it. They are the two
+        # numeric setters with no comparison after this call to trip over the
+        # type, so they would take it silently where `set_quantity` at least
+        # raises something.
         if not price_field:
             # Deliberately not justified as "Schwab's schema types this a
             # number". It does -- and it types `price` and `stopPrice` as
@@ -172,11 +170,12 @@ def _assert_finite(name, price, *, price_field=False):
             #
             # The reason is internal consistency, which is checkable. Of the
             # four numeric setters, `set_quantity` and `set_activation_price`
-            # already refused a string -- their `<= 0` comparison raised
-            # TypeError on one. The two offsets took it only because nothing
-            # downstream happens to compare them, so `set_price_offset('abc')`
-            # built `{"priceOffset": "abc"}`. That is an accident of which
-            # setters have a range check, not a decision anyone made.
+            # cannot take a string anyway -- their `<= 0` comparison raises
+            # TypeError on one. The two offsets have no range check, so
+            # without this `set_price_offset('abc')` would build
+            # `{"priceOffset": "abc"}`. Whether a setter takes a string should
+            # not depend on whether it happens to have a range check, so all
+            # four refuse one the same way here.
             raise ValueError(
                     '{} does not take a str; the numeric order fields take an '
                     'int or a float. Got: {!r}'.format(name, price))
@@ -187,28 +186,26 @@ def _assert_finite(name, price, *, price_field=False):
             # Not a number at all. That is between the caller and Schwab.
             return
     else:
-        # Asked as "is this a number", not as "can float() parse it". The
-        # second question is the one this used to ask, by catching TypeError
-        # and returning, and it is the wrong question twice over:
+        # Asked as "is this a number", not as "can float() parse it" -- by
+        # catching TypeError and returning -- which is the wrong question
+        # twice over:
         #
-        #  * things that are not numbers answer no, and returning let them
-        #    through. `set_quantity(None)` then reached `quantity <= 0` and
-        #    raised a bare `TypeError: '<=' not supported between instances of
-        #    'NoneType' and 'int'` -- naming neither the field nor the value,
-        #    which is the failure this function exists to prevent. Worse, the
-        #    two offset setters have no comparison after this call, so they
-        #    *accepted* it: `_build_object` drops a None, so
-        #    `set_stop_price_offset(None)` silently built an order with no
-        #    offset on it and no complaint. That is this function's own stated
-        #    purpose arriving by a route it did not cover -- the docstring
-        #    names a trailing stop offset divided by a size that turned out to
-        #    be zero, which gives NaN and was caught; a lookup that simply
-        #    missed gives None, and was not.
+        #  * things that are not numbers answer no, and returning would let
+        #    them through. `set_quantity(None)` would reach `quantity <= 0`
+        #    and raise a bare `TypeError: '<=' not supported between instances
+        #    of 'NoneType' and 'int'` -- naming neither the field nor the
+        #    value, which is the failure this function exists to prevent.
+        #    Worse, the two offset setters have no comparison after this call,
+        #    so they would *accept* it: `_build_object` drops a None, so
+        #    `set_stop_price_offset(None)` would silently build an order with
+        #    no offset on it and no complaint. The docstring names a trailing
+        #    stop offset divided by a size that turned out to be zero, which
+        #    gives NaN; a lookup that simply missed gives None just as readily.
         #
         #  * things that are not numbers answer *yes*. `float(b'1')` is 1.0,
-        #    so a bytes passed the old check and was stored as bytes, and
-        #    `json.dumps` refuses those -- an order that is not wrong so much
-        #    as unsendable, discovered at the point of sending.
+        #    so a bytes would pass and be stored as bytes, and `json.dumps`
+        #    refuses those -- an order that is not wrong so much as
+        #    unsendable, discovered at the point of sending.
         #
         # `(int, float)` rather than `numbers.Real`, and the pair is copied
         # from `_build_object`'s own first line on purpose: the question this
@@ -223,11 +220,11 @@ def _assert_finite(name, price, *, price_field=False):
         # way to arrive at it.
         # `bool` first, because it is an `int` subclass and so satisfies the
         # test below -- and `_build_object` passes it through unchanged, so
-        # `set_quantity(True)` produced `{"quantity": true}`. A JSON `true` is
-        # not a number in Schwab's schema, which is the same ending as the
-        # bytes case: not wrong so much as unsendable. It arrives realistically
-        # from a column pandas inferred as bool dtype, or a flag threaded into
-        # the wrong argument.
+        # `set_quantity(True)` would produce `{"quantity": true}`. A JSON
+        # `true` is not a number in Schwab's schema, which is the same ending
+        # as the bytes case: not wrong so much as unsendable. It arrives
+        # realistically from a column pandas inferred as bool dtype, or a flag
+        # threaded into the wrong argument.
         if _is_instance(price, bool) or not _is_instance(price, (int, float)):
             raise ValueError(
                     '{} must be a number, got {!r}'.format(name, price))
@@ -241,13 +238,12 @@ def _assert_finite(name, price, *, price_field=False):
             # naming neither the field nor the value, which is the ending
             # every other branch here exists to replace. Absurd as a
             # quantity and cheap to name.
-            # `bit_length()`, not a digit count. `len(str(abs(price)))` was
-            # the first version, and since 3.11 `int.__str__` itself refuses
-            # anything over `sys.get_int_max_str_digits()` -- so at 10**5000
-            # the message builder raised `Exceeds the limit (4300 digits) for
-            # integer string conversion`, chained off the OverflowError and
-            # naming neither the field nor the value. The fix reintroducing
-            # the failure it removes, one magnitude further out.
+            # `bit_length()`, not a digit count. Since 3.11 `int.__str__`
+            # itself refuses anything over `sys.get_int_max_str_digits()`, so
+            # at 10**5000 a digit count such as `len(str(abs(price)))` would
+            # raise `Exceeds the limit (4300 digits) for integer string
+            # conversion` inside the message builder, chained off the
+            # OverflowError and naming neither the field nor the value.
             raise ValueError(
                     '{} is too large to be a price or a size: an integer of '
                     '{} bits'.format(name, price.bit_length())) from None
@@ -271,8 +267,8 @@ def _render_decimal(name, value):
         # which json.dumps emits as invalid JSON and a strict parser rejects,
         # so it cannot quietly become an order. Rendering a non-finite Decimal
         # produces the well-formed string "NaN", which transmits cleanly. That
-        # is a worse outcome than the crash this replaced, and it is not what
-        # skipping validation is supposed to buy.
+        # is worse than an error, and it is not what skipping validation is
+        # supposed to buy.
         if value.is_nan() or value.is_infinite():
             raise ValueError(
                     '{} must be a finite number, got {!r}'.format(name, value))
@@ -322,8 +318,9 @@ def _require_price_string(name, price):
         raise ValueError(
                 '{} must be a string or a decimal.Decimal, got {!r}. How to '
                 'round it is yours to decide -- note that '
-                "'{{:.2f}}'.format(value) rounds, where this library used to "
-                'truncate toward zero, so it is not a drop-in replacement. '
+                "'{{:.2f}}'.format(value) rounds to the nearest cent and does "
+                'not truncate toward zero, so it may not round the way the '
+                'order needs. '
                 'copy_{} sets the field with no validation at all.'.format(
                     name, price, name.replace(' ', '_')))
 
@@ -662,10 +659,9 @@ class OrderBuilder(EnumEnforcer):
         price of a child order in a ``TRIGGER`` strategy, set as an offset from
         the price its parent filled at.
 
-        Note the sibling trio for stop prices already existed
-        (:meth:`set_stop_price_link_basis`, :meth:`set_stop_price_link_type`
-        and :meth:`set_stop_price_offset`); this completes the price-linked one,
-        which had a basis and a type but no offset.
+        It is the price-linked counterpart of
+        :meth:`set_stop_price_link_basis`, :meth:`set_stop_price_link_type`
+        and :meth:`set_stop_price_offset`.
         '''
         _assert_finite('price offset', price_offset)
         self._priceOffset = price_offset
@@ -845,8 +841,8 @@ class OrderBuilder(EnumEnforcer):
             'instrument': instrument,
             'quantity': quantity,
         }
-        # Added only when asked for, so a leg built without one is exactly the
-        # leg every earlier version built.
+        # Added only when asked for, so a leg built without one carries no
+        # `quantityType` key at all.
         if quantity_type is not None:
             leg['quantityType'] = quantity_type
         self._orderLegCollection.append(leg)

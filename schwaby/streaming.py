@@ -70,12 +70,11 @@ class _BaseFieldEnum(Enum):
             # `StreamJsonDecoder` is a public extension point that parses the
             # whole frame, and a decoder normalising numeric field keys to
             # ints is a plausible thing to write. Keyed on the raw object,
-            # such a message went unrelabeled -- and once the check below
-            # existed, `.isdigit()` raised AttributeError on it, which the
-            # relabel guard absorbed, so a message 4.2.0 delivered was
-            # dropped instead. That is the exact direction this change exists
-            # to prevent, and reporting field 1 as one schwaby "has no name
-            # for" would have been a wrong warning besides.
+            # such a message would go unrelabeled, `.isdigit()` below would
+            # raise AttributeError on it, and the relabel guard would absorb
+            # that and drop the whole message -- after reporting field 1 as
+            # one schwaby "has no name for", which would be a wrong warning
+            # besides.
             try:
                 # A plain str: a decoder's subclass could answer isdigit for
                 # itself, and put a forged line in the warning below.
@@ -183,21 +182,19 @@ _MAX_REPORTED_FIELDS = 64
 _reported_fields = set()
 
 #: Services and channels count separately from fields, and against their own
-#: budget. Sharing one made a category that cannot starve itself starve the
-#: other: 254 declared field ids across 14 tables against 64 slots, and one
-#: frame of unknown ids left a new service unnamed -- the very defect the
-#: per-name report was added to close, with the *lesser* event having
-#: consumed the whole budget.
+#: budget. Sharing one would let a category that cannot starve itself starve
+#: the other: 254 declared field ids across 14 tables against 64 slots, so
+#: one frame of unknown ids could leave a new service unnamed, with the
+#: *lesser* event having consumed the whole budget.
 #:
 #: Held per client rather than module-wide, unlike `_reported_fields`. The
 #: field report is log-only, so process-level dedup is right for it -- the
 #: log is process-wide. This one drives `add_error_handler`, which is per
 #: client, so a second client in the same process has its own handlers and
-#: must hear about a dropped service for itself. Measured before this, with
-#: one frame per name: a second client heard about three of five. The exact
-#: number depends on how the frames interleave -- four frames per name gives
-#: two of five -- because what leaks through is `_absorb`'s per-kind
-#: coalescing rather than anything about the names.
+#: must hear about a dropped service for itself. With process-wide dedup, a
+#: second client hears about only some of the names -- three of five with one
+#: frame per name, two of five with four -- because what leaks through is
+#: `_absorb`'s per-kind coalescing rather than anything about the names.
 _MAX_REPORTED_SHAPES = 64
 
 
@@ -358,8 +355,8 @@ def _report_unknown_message_type(name):
     """
     # Folded without cutting again. `name` is already at most 64 characters
     # and folding at most triples one, so what is kept stays bounded -- and
-    # cutting after folding made two different types, 'ß' * 33 + 'A' and
-    # 'ß' * 33 + 'B', share one report.
+    # cutting after folding would make two different types, 'ß' * 33 + 'A'
+    # and 'ß' * 33 + 'B', share one report.
     folded = name.casefold()
     if (folded in _reported_message_types
             or len(_reported_message_types) >= _MAX_REPORTED_MESSAGE_TYPES):
@@ -434,8 +431,8 @@ class UnparsableMessage(SchwabError):
     causes a reconnect and a re-subscribe, which is the one thing that can
     recover state; skipping cannot.
 
-    That is a deliberate choice rather than an oversight, but it was made after
-    2.4.0 rather than during it, and the argument is not one-sided.
+    That is a deliberate choice rather than an oversight, but the argument is
+    not one-sided.
     ``schwaby.contrib.util.HeuristicJsonDecoder`` exists because Schwab really
     does emit JSON this library cannot parse, which is evidence for a
     frame-level quirk rather than a dead stream. If your feed hits this often
@@ -463,8 +460,8 @@ class UnusableMessage(SchwabError):
     the protocol allows, or Schwab added something this version does not
     know. :meth:`add_error_handler
     <schwaby.streaming.StreamClient.add_error_handler>` enumerates the
-    categories and this docstring deliberately does not: it carried its own
-    copy, and that copy went stale while the other grew.
+    categories and this docstring deliberately does not, so there is only one
+    list to keep current.
 
     Reusing ``UnparsableMessage`` would make one type mean two shapes, with
     ``json_parse_exception`` set for one of them and ``None`` for the
@@ -536,9 +533,9 @@ def _prepare_connect_args(websocket_connect_args):
     are refused here with a message naming the replacement, rather than being
     left to surface as an opaque ``TypeError`` from inside ``websockets``.
 
-    Earlier versions translated the renames automatically and warned. That kept
-    working code working, but it also meant the passthrough this argument
-    promises was not a passthrough: the name the caller wrote was not the name
+    They are refused rather than translated. Translating a rename would keep
+    working code working, but the passthrough this argument promises would
+    not be a passthrough: the name the caller wrote would not be the name
     ``websockets`` received, which is a confusing thing for a library to do to
     an argument documented as going straight through.
 
@@ -606,11 +603,11 @@ def _is_mapping(obj):
     '''Whether ``obj`` can be read the way a decoded JSON object is read.
 
     Structural, not ``isinstance(obj, Mapping)``. ``set_json_decoder`` is a
-    public hook promising only "the decoded JSON", and the reads it replaced --
-    ``'response' in frame``, ``msg.get('data')`` -- work on anything providing
-    them. An ABC matches only real subclasses and explicitly registered types,
-    so a lightweight mapping-like object worked before the type checks were
-    added and would have had every frame dropped afterwards.
+    public hook promising only "the decoded JSON", and the reads that follow
+    it -- ``'response' in frame``, ``msg.get('data')`` -- work on anything
+    providing them. An ABC matches only real subclasses and explicitly
+    registered types, so a lightweight mapping-like object that those reads
+    accept would have every frame dropped.
     '''
     return hasattr(obj, 'get') and hasattr(obj, '__contains__')
 
@@ -738,8 +735,8 @@ class StreamClient(EnumEnforcer):
 
         # Guarantees a single reader. websockets raises if two coroutines call
         # recv() concurrently, so exactly one coroutine may be inside a read at
-        # a time -- but unlike the lock this replaces, it is not held while
-        # waiting for a response, so a request does not block message handling.
+        # a time -- but it is not held while waiting for a response, so a
+        # request does not block message handling.
         self._read_lock = asyncio.Lock()
 
         # Keeps one request outstanding at a time, so a response can be matched
@@ -802,7 +799,7 @@ class StreamClient(EnumEnforcer):
                 # is that a formatting failure stays cosmetic. In production
                 # logging swallows it and prints a "--- Logging error ---"
                 # block for every debug line; under pytest's capture handler
-                # it re-raises, which is how this surfaced.
+                # it re-raises.
                 return '<{} that cannot be formatted>'.format(
                         _type_name(obj))
 
@@ -835,7 +832,7 @@ class StreamClient(EnumEnforcer):
             # ValueError covers JSONDecodeError and the UnicodeDecodeError of a
             # binary frame that is not UTF-8; a frame nested past the
             # interpreter's depth raises RecursionError. Each is a frame that
-            # will not parse, and the last two used to end the loop unreported.
+            # will not parse, and each is reported.
             # The text is quoted and cut: the frame is whatever arrived, line
             # breaks and megabytes included, and raw_msg keeps all of it.
             msg = ('Failed to parse message. This often happens with ' +
@@ -910,10 +907,10 @@ class StreamClient(EnumEnforcer):
         # Cleared *after* the new socket is in place, not before. Anything
         # still queued belongs to the connection being replaced: its exception
         # carries a frame from that session, and a stale data frame would reach
-        # handlers as though it were live. Clearing first left a hole -- a
-        # concurrent reader on the old socket appends to _overflow_items while
-        # this coroutine is suspended in close() or connect(), and that frame
-        # would survive into the new session.
+        # handlers as though it were live. Clearing first would leave a hole
+        # -- a concurrent reader on the old socket appends to _overflow_items
+        # while this coroutine is suspended in close() or connect(), and that
+        # frame would survive into the new session.
         #
         # close() clears both too, but a caller reconnecting after a
         # ConnectionClosed may call login() again without closing first, and
@@ -949,21 +946,22 @@ class StreamClient(EnumEnforcer):
         A frame too malformed to check is *returned as* an exception rather
         than raising one. Raising here reaches _read_and_route, which hands it
         to _fail_pending_request and re-raises -- so one unreadable field
-        failed the request with a bare KeyError and ended the caller's receive
-        loop as well. Failing just the request, with an exception that says
-        what was wrong, is what the caller can act on: the answer to their
+        would fail the request with a bare KeyError and end the caller's
+        receive loop as well. Failing just the request, with an exception that
+        says what was wrong, is what the caller can act on: the answer to their
         request really was unusable.
         '''
         try:
             first = resp['response'][0]
             resp_request_id = int(first['requestid'])
 
-            # Compared before the rest is read. Reading all five first meant a
-            # frame carrying an id this client never issued *and* missing some
-            # other field was reported as "malformed response frame: KeyError:
+            # Compared before the rest is read. Reading all five first would
+            # report a frame carrying an id this client never issued *and*
+            # missing some other field as "malformed response frame: KeyError:
             # 'service'". The id mismatch is the more diagnostic fact -- it
             # means the server and this client disagree about what was asked --
-            # and it was hidden behind whichever field happened to be absent.
+            # and it would be hidden behind whichever field happened to be
+            # absent.
             mismatched_id = (resp_request_id
                              if resp_request_id != request_id else None)
 
@@ -1030,8 +1028,8 @@ class StreamClient(EnumEnforcer):
         on it.
 
         ``ROUTED`` rather than ``None`` because ``None`` is a frame a server
-        can send: a top-level JSON ``null`` was indistinguishable from a routed
-        response, so it was dropped without the warning every other unusable
+        can send: a top-level JSON ``null`` would be indistinguishable from a
+        routed response, and dropped without the warning every other unusable
         frame gets.
 
         ``use_overflow`` is ``False`` for a caller waiting on a response, which
@@ -1082,11 +1080,11 @@ class StreamClient(EnumEnforcer):
         # requestid, would take out the in-flight request through
         # _fail_pending_request and end the caller's receive loop, while the
         # identical frame arriving with nothing pending was logged and
-        # harmless. That is the framing dependence this whole change exists to
-        # remove, one level below where it was fixed.
+        # harmless. The outcome would depend on framing, which is what this
+        # routing exists to prevent.
         #
         # Handed back rather than raised: handle_message logs and skips it,
-        # which is what it does with the same frame today when no request is
+        # which is what it does with the same frame when no request is
         # outstanding.
         try:
             response_id = int(frame['response'][0]['requestid'])
@@ -1095,14 +1093,13 @@ class StreamClient(EnumEnforcer):
             # `OverflowError` because `json.loads` maps the bare literals
             # `1e999` and `Infinity` to `float('inf')`, and `int(inf)` raises
             # that rather than ValueError. `NaN` takes the same route and
-            # raises ValueError, which is why one of the two non-finite
-            # spellings was covered and this read as complete.
+            # raises ValueError instead, so both are needed.
             #
             # Through _absorb like every other unusable message, so it is
-            # counted, coalesced and reported. Logged directly, this was the
-            # one such path with no programmatic signal at all -- and it
-            # repeats per re-read, so a venue emitting a non-numeric requestid
-            # produced a continuous warning stream inside a single subscribe.
+            # counted, coalesced and reported. Logged directly, it would have
+            # no programmatic signal at all -- and it repeats per re-read, so
+            # a venue emitting a non-numeric requestid would produce a
+            # continuous warning stream inside a single subscribe.
             self._absorb('a response frame with no usable request id',
                          frame.get('response'), frame=frame)
             return frame
@@ -1152,10 +1149,9 @@ class StreamClient(EnumEnforcer):
         Shared by both framings of the same event -- a late rejection in a
         frame of its own, and one batched behind the answer to a live request
         -- because the contract is that they behave alike, and two loops
-        parsing the same JSON drift. One was hardened against a malformed
-        element and the other was not, so an identical payload was skipped with
-        a warning in one framing and ended the caller's receive loop with an
-        AttributeError in the other.
+        parsing the same JSON drift apart: an identical payload could be
+        skipped with a warning in one framing and end the caller's receive loop
+        with an AttributeError in the other.
 
         Nothing here raises. On the routing path this runs after the waiter's
         future is resolved, so an exception escaping would reach the caller of
@@ -1253,12 +1249,12 @@ class StreamClient(EnumEnforcer):
         self._absorbed_kinds[what] += 1
         n = self._absorbed_kinds[what]
 
-        # Counted per kind, not across all of them. One shared counter meant a
-        # framing change on a few hundred symbols drove the count past a
+        # Counted per kind, not across all of them. With one shared counter, a
+        # framing change on a few hundred symbols would drive the count past a
         # thousand within two ticks, after which a *different* fault -- a
-        # notify frame whose service is a list -- was neither logged nor
-        # reported, so an operator investigating the first outage saw no trace
-        # of the second.
+        # notify frame whose service is a list -- would be neither logged nor
+        # reported, so an operator investigating the first outage would see no
+        # trace of the second.
         #
         # The first few of each kind, then powers of ten. A fixed modulus would
         # go quiet after the third occurrence and say nothing more until the
@@ -1314,12 +1310,11 @@ class StreamClient(EnumEnforcer):
     def _iter_channel(self, msg, channel):
         '''Yields the well-formed elements of ``msg[channel]``.
 
-        The data and notify counterpart of _iter_responses, and added for the
-        same reason: ``d.get('service')`` is evaluated at the call site,
-        *outside* the try in _dispatch_to_handlers, so a non-dict element or a
-        non-list channel ended the caller's receive loop with an AttributeError
-        or a TypeError. The response path was hardened first and this one --
-        three lines below it, and carrying far more traffic -- was not.
+        The data and notify counterpart of _iter_responses, for the same
+        reason: ``d.get('service')`` is evaluated at the call site, *outside*
+        the try in _dispatch_to_handlers, so without this a non-dict element or
+        a non-list channel would end the caller's receive loop with an
+        AttributeError or a TypeError.
 
         A bad element is logged and skipped; the good ones beside it are still
         dispatched.
@@ -1328,9 +1323,8 @@ class StreamClient(EnumEnforcer):
             return
 
         # Distinguished from absence deliberately: `{"data": null}` is a
-        # malformed channel and used to be indistinguishable from a frame with
-        # no data at all, so it was the one shape dropped without a word while
-        # `{"data": 5}` was reported.
+        # malformed channel, not a frame with no data, and is reported like
+        # `{"data": 5}` rather than dropped without a word.
         elements = msg.get(channel)
 
         if not _is_sequence(elements):
@@ -1389,10 +1383,10 @@ class StreamClient(EnumEnforcer):
 
         Called by *both* readers. There are two coroutines which can be holding
         the read lock when a frame arrives -- handle_message and a request
-        waiting on its response -- and the first version of this reported from
-        only one of them. Which one reads any given frame is decided by a lock
-        race the caller cannot see, so a callback wired on one path and not the
-        other fires or does not fire for reasons nothing in the API explains.
+        waiting on its response. Which one reads any given frame is decided by
+        a lock race the caller cannot see, so a callback wired on one path and
+        not the other would fire or not fire for reasons nothing in the API
+        explains.
 
         The caller must invoke this with the read lock released. Reporting from
         inside the block that holds it would run a user handler under the lock,
@@ -1403,9 +1397,8 @@ class StreamClient(EnumEnforcer):
         so it arrives here twice for one bad frame -- and both reports carry an
         identical (None, exc, raw_msg), which a consumer cannot tell from two
         genuinely distinct bad frames. Marking the object is what makes "once"
-        true regardless of which coroutine won the read; the first version of
-        this fix turned "fires or does not fire" into "fires once or twice",
-        which is the same lock race wearing a different symptom.
+        true regardless of which coroutine won the read; without it the same
+        lock race would show as "fires once or twice" instead.
         """
         if getattr(exc, '_schwab_reported', False):
             return
@@ -1605,8 +1598,8 @@ class StreamClient(EnumEnforcer):
             # it read. The caller's exception is element 0's rejection and says
             # nothing about element 1, and a failed subscribe is usually
             # followed by tearing the client down rather than reading it again
-            # -- so draining only on success dropped the batched rejection
-            # exactly when it was least likely to be reported another way.
+            # -- so draining only on success would drop the batched rejection
+            # exactly when it is least likely to be reported another way.
             if not cancelled:
                 try:
                     await self._drain_pending_reports()
@@ -1774,8 +1767,8 @@ class StreamClient(EnumEnforcer):
           of the two above: it is logged as Schwab's error rather than as a
           service to support, and it is coalesced like the malformed kinds.
 
-        Each is logged as it was before. The callback is what makes them
-        something other than a log record.
+        Each is also logged. The callback is what makes them something other
+        than a log record.
 
         The second of those covers a rejection however Schwab frames it. It
         may arrive in a frame of its own, or riding along behind the answer to
@@ -1831,9 +1824,8 @@ class StreamClient(EnumEnforcer):
           :class:`UnparsableMessage` carries the frame as it arrived, text
           or bytes. But that is a
           property of today's call sites, not a contract --- a category added
-          later with nothing to say would join the signature for free, which is
-          how this warning came to be written twice. **Discriminate on the
-          exception type.**
+          later with nothing to say would join the signature for free.
+          **Discriminate on the exception type.**
         * ``exception`` is the exception that was raised.
         * ``message`` is the message being handled, or ``None``.
 
@@ -1858,8 +1850,8 @@ class StreamClient(EnumEnforcer):
         if nobody does. A ``SystemExit`` from an error handler therefore exits
         the process in the first case and not necessarily in the second.
 
-        Handlers are called in registration order, and registering none keeps
-        the current behaviour exactly.
+        Handlers are called in registration order. With none registered,
+        these failures are only logged.
         '''
         if not callable(error_handler):
             raise ValueError('error handler must be callable')
@@ -1901,11 +1893,11 @@ class StreamClient(EnumEnforcer):
         finishes before the call that reported the failure returns, which is
         what makes the report reliable without any machinery to keep the task
         alive: nothing has to be drained at shutdown, so nothing can deadlock
-        draining it, time out draining it, or be cancelled half-drained. An
-        earlier version scheduled these and grew a drain to protect them; the
-        drain went on to leak the socket, deadlock against itself, deadlock
-        against a second copy of itself, and finally to skip the report it
-        existed to protect. Awaiting is the version with none of those.
+        draining it, time out draining it, or be cancelled half-drained.
+        Scheduling them instead would need a drain at shutdown to keep them
+        alive, and a drain can leak the socket, deadlock against itself or
+        against a second closer, or skip the report it exists to protect.
+        Awaiting needs none of that.
         '''
         for error_handler in self._error_handlers:
             try:
@@ -1946,9 +1938,9 @@ class StreamClient(EnumEnforcer):
         except BaseException as exc:
             # Logged and re-raised, not absorbed. SystemExit and friends are
             # control flow rather than a stream failure, so they are not
-            # reported to the error handlers -- but the done callback used to
-            # log them and no longer does, and losing them silently is how a
-            # handler calling sys.exit() becomes a mystery.
+            # reported to the error handlers -- but losing them silently would
+            # make a handler calling sys.exit() a mystery, so they are logged
+            # here.
             self.logger.error(
                     'Asynchronous stream handler raised %s. The message it '
                     'was handling has been dropped, and the exception is '
@@ -1975,18 +1967,18 @@ class StreamClient(EnumEnforcer):
             # raises from the lookup itself, which is evaluated in the `for`
             # header and so sits outside the per-handler try below. Guarded
             # here rather than in each caller: this is the funnel they all go
-            # through, and adding it to one of them is how the response path
-            # got hardened while the data path did not.
+            # through, and guarding one caller would leave the others
+            # unguarded.
             self._absorb('a message whose service is not a name', service,
                          frame=msg)
             return
 
         if service == _INVALID_SERVICE:
             # Not a service Schwab added, so not reported as one: the warning
-            # for a new service asks for an issue, and sent a reader looking
-            # for something to support. Dropped and reported all the same,
-            # since a handler watching the stream needs to know the venue
-            # said something was wrong.
+            # for a new service asks for an issue, and would send a reader
+            # looking for something to support. Dropped and reported all the
+            # same, since a handler watching the stream needs to know the
+            # venue said something was wrong.
             self._absorb('a message naming Schwab\'s error "Invalid Service" '
                          'in place of a service, which Schwab has once sent '
                          'just before closing the connection',
@@ -2025,9 +2017,9 @@ class StreamClient(EnumEnforcer):
             except Exception as exc:
                 # Absorbed, not reported as a handler failure. Relabeling is
                 # this library's work, not the caller's: reporting it as
-                # "your handler raised" blamed the consumer's code for a shape
-                # the venue sent, and did it once per registered handler,
-                # uncounted and uncoalesced. Once per message, and only the
+                # "your handler raised" would blame the caller's code for a
+                # shape the venue sent, once per registered handler, uncounted
+                # and uncoalesced. Once per message, and only the
                 # first handler pays for it.
                 if not relabel_failed:
                     relabel_failed = True
@@ -2131,10 +2123,10 @@ class StreamClient(EnumEnforcer):
             if msg is not ROUTED:
                 break
 
-        # Every read below assumes a mapping. `'data' in msg` happened to
-        # tolerate a top-level JSON array or string; `msg.get('data')` does
-        # not, so hardening the channels made a non-dict frame raise where it
-        # used to be ignored. Guarded once, here, rather than at each read.
+        # Every read below assumes a mapping. `'data' in msg` tolerates a
+        # top-level JSON array or string; `msg.get('data')` does not, so a
+        # non-dict frame would raise. Guarded once, here, rather than at each
+        # read.
         if not _is_mapping(msg):
             self._absorb('a message which is not an object', msg)
             return
@@ -2145,10 +2137,9 @@ class StreamClient(EnumEnforcer):
             # `_is_mapping` is structural on purpose -- `get` and
             # `__contains__`, nothing about iteration -- so a decoder may
             # hand back a mapping this cannot enumerate, or one whose keys
-            # are unhashable. Skipping the check is what happened before the
-            # check existed; letting it out ends the receive loop with a
-            # non-SchwabError, which is the failure this whole series exists
-            # to remove, introduced against a documented extension point.
+            # are unhashable. Skipping the check loses only the
+            # unknown-channel report; letting it out would end the receive
+            # loop with a non-SchwabError over a documented extension point.
             unknown_channels = set()
         if unknown_channels:
             # A whole compartment this version does not read. Every message in
@@ -2364,12 +2355,11 @@ class StreamClient(EnumEnforcer):
         # a live one. Each was logged when it was found, so nothing unwritten
         # is lost.
         #
-        # _overflow_items for the same reason, and it is the older half of the
-        # problem: it holds frames read but not yet handled, including the late
-        # rejections the orphan path reports and data frames handlers would be
-        # given. Clearing only the reports would have left the standalone
-        # framing leaking across sessions while the batched one did not, which
-        # is the asymmetry this whole change exists to remove.
+        # _overflow_items for the same reason: it holds frames read but not
+        # yet handled, including the late rejections the orphan path reports
+        # and data frames handlers would be given. Clearing only the reports
+        # would let the standalone framing leak across sessions while the
+        # batched one did not.
         self._pending_reports.clear()
         self._overflow_items.clear()
         self._absorbed = 0
@@ -2423,8 +2413,8 @@ class StreamClient(EnumEnforcer):
                 # An empty type carrying a notice written as text is not a type
                 # nobody has captured: Schwab's "Feature not supported" notice
                 # arrives that way, as the streaming documentation records.
-                # Reporting it asked for an issue about a documented shape, in
-                # every process that received it, which teaches an operator to
+                # Reporting it would ask for an issue about a documented shape,
+                # in every process that received it, and teach an operator to
                 # acknowledge the one warning that has to be read when a real
                 # new type comes. An empty type carrying a JSON object is not
                 # that shape, and is still reported.
@@ -2530,8 +2520,8 @@ class StreamClient(EnumEnforcer):
         #: value missing for one symbol is a bar that symbol did not get.
         #: Where it starts, and whether it resets, was not measured. Unlike
         #: the book's
-        #: :attr:`StreamClient.PerExchangeBidFields.QUOTE_TIME`, which was
-        #: misread as a sequence number, this one is what its name says.
+        #: :attr:`StreamClient.PerExchangeBidFields.QUOTE_TIME`, which is not
+        #: a sequence number, this one is what its name says.
         SEQUENCE = 1
 
         #: Opening price for the minute
@@ -3946,14 +3936,14 @@ class StreamClient(EnumEnforcer):
     # It is not added because a validator that rejects what Schwab accepts is
     # worse than none: it reads as a configuration error rather than as two
     # documents disagreeing, and there is no way for the caller to get past
-    # it. The evidence that the documented vocabulary is incomplete is this
-    # library's own documentation, which carried `$SPX.X` -- not a valid
-    # prefix -- for years. Roughly eight prefixes have been tried against the
-    # live service, out of a set whose size nobody knows.
+    # it. The documented vocabulary is incomplete and easy to get wrong:
+    # `$SPX.X` looks like a plausible key and is not a valid prefix. Roughly
+    # eight prefixes have been tried against the live service, out of a set
+    # whose size nobody knows.
     #
-    # Revisit when someone has run a validator against real traffic long
-    # enough to say whether the documented set is the actual set. Until then
-    # the key format is documented and the caller decides.
+    # A validator would first need checking against real traffic, long enough
+    # to say whether the documented set is the actual set. Until then the key
+    # format is documented and the caller decides.
     async def screener_equity_subs(self, symbols):
         '''
         Subscribe to Screener Equity.

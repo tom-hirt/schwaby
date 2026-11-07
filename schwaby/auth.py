@@ -226,10 +226,10 @@ def _refuse_unusable_token_response(response):
 
     authlib takes any JSON object without an ``error`` key as the new token,
     sets it on the session and then writes it; JSON that is not an object it
-    sets on the session and then fails on. Measured with a mocked token
-    endpoint: ``{"message": "Unauthorized"}`` was written to the token file,
-    and a list or a string was kept in memory, so every call after either
-    failed without contacting Schwab -- until a new login, or a restart.
+    sets on the session and then fails on. Unchecked, a token endpoint
+    answering ``{"message": "Unauthorized"}`` has that written to the token
+    file, and a list or a string is kept in memory, so every call after either
+    fails without contacting Schwab -- until a new login, or a restart.
 
     Registered as authlib's ``refresh_token_response`` compliance hook, which
     sees the response before it is parsed, so nothing unusable is stored. A
@@ -237,19 +237,19 @@ def _refuse_unusable_token_response(response):
 
     A refusal -- any status from 300 to 499 -- whose body is not JSON is
     refused here, so it reaches the caller as a rejection like any other.
-    authlib changed what it raises for one at 1.9: ``json.JSONDecodeError``
-    before, ``HTTPStatusError`` after, measured against both, so a caller
-    catching what the documentation said stopped catching it on a fresh
-    install. A success whose body is not JSON is left to authlib, which
-    raises a ``ValueError`` for it under either version.
+    authlib raises different things for one depending on its version --
+    ``json.JSONDecodeError`` before 1.9, ``HTTPStatusError`` from 1.9,
+    measured against both -- so refusing it here gives a caller one exception
+    to catch under either. A success whose body is not JSON is left to
+    authlib, which raises a ``ValueError`` for it under either version.
 
     Also registered as ``access_token_response`` on the client that exchanges
-    a login's code, whose token was written the same way.
+    a login's code, whose token would be written the same way.
 
     A usable token is kept only from a success, 200 to 299. authlib keeps
-    one at any status, so a refusal or a redirect carrying one was stored as
-    the new token; here it is refused as ``http_<status>``, like a refusal
-    with no JSON body.
+    one at any status, so without this a refusal or a redirect carrying one
+    would be stored as the new token; here it is refused as
+    ``http_<status>``, like a refusal with no JSON body.
 
     Every refusal raised here carries the response's HTTP status, which
     authlib's errors do not: ``TokenRefreshError`` and ``LoginExchangeError``
@@ -309,7 +309,7 @@ def _refuse_unusable_token_response(response):
 def _stored_token_for_session(token):
     '''The stored token, in the shape authlib needs to send and refresh it.
 
-    Nothing checked it before a session was built on it, and authlib fails on
+    Checked before a session is built on it, because authlib fails on
     a wrong shape with something other than ``OAuthError``, which gets past
     the translation into ``TokenRefreshError``: a mapping that is not a dict
     has no ``is_expired``, a ``token_type`` that is not a string has no
@@ -375,10 +375,9 @@ def _expiry_needs_refreshing_first(token):
 def _new_session(session_class, api_key, app_secret, token, update_token):
     '''The refreshing session every client is built on.
 
-    One builder, because there were two: the check on refresh responses was
-    first added where token files and access functions build their session,
-    and a client returned by a login flow built its own and kept storing
-    whatever the token endpoint returned.
+    One builder for every entry point, so the check on refresh responses
+    cannot be present on one path and missing on another. A client built
+    separately would go on storing whatever the token endpoint returned.
     '''
     session = session_class(api_key,
                             client_secret=app_secret,
@@ -435,7 +434,7 @@ def token_file_writer(token_path):
     '''
     path = os.fspath(token_path)
     # tempfile will not put a str prefix on a bytes directory, so a bytes path
-    # raised at the first write, after the exchange.
+    # would raise at the first write, after the exchange.
     if not issubclass(type(path), str):
         raise TypeError('token_path must be a str or an os.PathLike that '
                         'gives one, not bytes')
@@ -678,8 +677,9 @@ def token_file_age(token_path):
     metadata = TokenMetadata.from_loaded_token(
             __token_loader(token_path, logging.DEBUG)(), None)
     # The check a client applies to the token before building a session on
-    # it. Without it a monitor reported a healthy age for a file every client
-    # build refused. It works on a copy, so the file's token is untouched.
+    # it. Without it a monitor would report a healthy age for a file every
+    # client build refuses. It works on a copy, so the file's token is
+    # untouched.
     _stored_token_for_session(metadata.token)
     return metadata.token_age()
 
@@ -693,14 +693,13 @@ def token_file_age(token_path):
 # route and the probe are 200 lines apart, and a divergence between them does
 # not fail -- it makes the probe miss its own server and time out.
 #
-# The value matters as much as the sharing. It was `/schwab-py-internal/status`
-# through 3.0.3, which is the path `schwab-py` serves for exactly the same
-# purpose -- so a `schwab-py` login flow already holding the port answers this
-# with 200, the guard below reads that as "our server is up", and the browser
-# delivers the authorization code into the other project's queue. That was
-# unreachable while the two could not be installed together and is merely
-# unlikely now, which is the wrong direction for a check whose whole job is to
-# refuse a stranger.
+# The value matters as much as the sharing. It must not be
+# `/schwab-py-internal/status`, the path `schwab-py` serves for exactly the
+# same purpose: a `schwab-py` login flow already holding the port would answer
+# it with 200, the guard below would read that as "our server is up", and the
+# browser would deliver the authorization code into the other project's queue.
+# The two can be installed side by side, so the path has to be one only this
+# library serves.
 INTERNAL_STATUS_PATH = '/schwaby-internal/status'
 
 
@@ -945,7 +944,7 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
                 pass
             # kill() only sends the signal, and the port is not free until
             # the server has exited. Without this a login flow started
-            # straight after found it still held and failed with
+            # straight after can find it still held and fail with
             # RedirectServerExitedError: measured on a loaded machine, at 38
             # of 720 server starts, held by the server killed up to 191ms
             # earlier; with it, none. Bounded so that a child which cannot
@@ -977,15 +976,14 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
             # Attempt to send a request to the server
             try:
                 # verify=False because the callback server presents a
-                # self-signed certificate. httpx2 says nothing about that; the
-                # suppression which used to sit here was for a urllib3 warning
-                # that never reached this code.
+                # self-signed certificate. httpx2 emits no warning for that,
+                # so nothing is suppressed.
                 # A short connect timeout. A socket can be listening before
                 # its server answers -- a held one from before the server
                 # starts, and werkzeug's own while it builds the certificate
                 # -- so a probe gets into its queue and waits for a handshake
-                # nobody answers: five seconds by default, which also ran
-                # past the startup deadline. A timeout is retried.
+                # nobody answers: five seconds by default, which would also
+                # run past the startup deadline. A timeout is retried.
                 resp = httpx2.get(
                         'https://127.0.0.1:{}{}'.format(
                             callback_port, INTERNAL_STATUS_PATH),
@@ -997,8 +995,8 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
                 # rejected -- a firewall, or macOS's behaviour on some
                 # configurations -- it times out instead. ConnectTimeout is a
                 # sibling of ConnectError, not a subclass, so catching only the
-                # latter let that case escape and take down the whole login
-                # flow while the server was still starting.
+                # latter would let that case escape and take down the whole
+                # login flow while the server is still starting.
                 pass
             else:
                 # It answered. Anything other than success means the port is
@@ -1300,11 +1298,9 @@ def client_from_access_functions(api_key, app_secret, token_read_func,
 
     wrapped_token_write_func = metadata.wrapped_token_write_func()
     if asyncio:
-        # Not `# pragma: no cover`, which is what this said. The exclusion
-        # was honest when nothing reached it, and it meant the one line that
-        # actually writes the token on the async path was hidden from
-        # measurement as well as untested -- so a write that quietly did
-        # nothing here would have shown up as neither a failure nor a gap.
+        # Not excluded from coverage: this is the one line that writes the
+        # token on the async path, and excluding it would hide a write that
+        # quietly did nothing as neither a failure nor a gap.
         async def oauth_client_update_token(t, *args, **kwargs):
             wrapped_token_write_func(t, *args, **kwargs)
         session_class = AsyncOAuth2Client
@@ -1427,8 +1423,8 @@ def client_from_received_url(
 
     oauth = OAuth2Client(api_key, redirect_uri=auth_context.callback_url)
     # The token a login exchanges its code for is written just below, so it
-    # gets the check a refresh does. Measured: {"message": "Unauthorized"} was
-    # written as the token, and every call after it failed without contacting
+    # gets the check a refresh does. Unchecked, {"message": "Unauthorized"} is
+    # written as the token, and every call after it fails without contacting
     # Schwab, restarts included.
     oauth.register_compliance_hook(
             'access_token_response', _refuse_unusable_token_response)
