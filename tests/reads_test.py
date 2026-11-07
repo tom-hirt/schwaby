@@ -4,6 +4,10 @@ tests a change reaches.'''
 import importlib.util
 import json
 import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -102,12 +106,28 @@ class ScanTest(unittest.TestCase):
                 self.assertIn(path, self.reads_of('tests/a_test.py', source),
                               'a file named by %s was not read' % shape)
 
-    def test_a_directory_named_in_a_string_is_every_file_under_it(self):
+    def test_a_directory_named_in_a_string_is_kept_as_the_directory(self):
+        # So a file added under it later is read too.
         got = self.reads_of('tests/a_test.py',
                             b"for f in os.walk('docs'):\n    pass\n")
-        self.assertIn('docs/a.rst', got)
-        self.assertIn('docs/b/c.rst', got,
-                      'a file deeper under a named directory was not read')
+        self.assertIn('docs/', got,
+                      'a named directory was not kept as the directory')
+        redproof = reads._redproof()
+        self.assertTrue(redproof.reads_any(got, {'docs/new/page.rst'}),
+                        'a file added under a named directory was not read')
+
+    def test_a_file_named_inside_a_string(self):
+        got = self.reads_of(
+            'tests/a_test.py',
+            b"BY = 'redproof.py::T::test_x'\n"
+            b"WHY = 'the docs and the tests say README.md'\n"
+            b"HOW = 'see the part:docs'\n")
+        self.assertIn('tools/redproof.py', got,
+                      'a file named in a piece of a string was not read')
+        self.assertNotIn('README.md', got,
+                         'a word of prose was taken for a file')
+        self.assertNotIn('docs/', got,
+                         'a piece of a sentence was taken for a file')
 
     def test_only_a_test_module_or_helper_names_files(self):
         # schwaby/streaming.py names README.md; a test importing it does not
@@ -122,12 +142,22 @@ class ScanTest(unittest.TestCase):
         for path in ('setup.cfg', 'tests/conftest.py', 'tests/__init__.py',
                      'tests/orders/conftest.py', 'tests/orders/__init__.py'):
             self.assertIn(path, got, 'pytest loads %s for it' % path)
+        # One that does not exist yet would be loaded once added.
+        self.assertIn('tests/b/conftest.py',
+                      self.reads_of('tests/b/a_test.py', b''),
+                      'a conftest.py added later would not be read')
+
+    def test_what_a_conftest_imports_is_read(self):
+        got = self.reads_of('tests/a_test.py', b'',
+                            **{'tests/conftest.py': b'from . import utils\n'})
+        self.assertIn('tests/utils.py', got,
+                      "what pytest's conftest.py imports was not read")
 
     def test_a_declared_read_is_added(self):
         with patch.dict(reads.DECLARED,
                         {'tests/a_test.py': {'docs/*': 'it walks docs'}}):
             got = self.reads_of('tests/a_test.py', b'')
-        self.assertIn('docs/b/c.rst', got, 'a declared read was not added')
+        self.assertIn('docs/*', got, 'a declared read was not added')
 
     def test_the_map_holds_test_modules_only(self):
         tree = dict(self.FILES, **{
@@ -136,6 +166,22 @@ class ScanTest(unittest.TestCase):
         built = reads.build(tree.get, sorted(tree))
         self.assertEqual(['tests/a_test.py'], sorted(built),
                          'a helper or a conftest.py was mapped as a test')
+
+
+class MatchTest(unittest.TestCase):
+
+    def test_an_entry_is_a_file_a_directory_or_a_pattern(self):
+        match = reads._redproof().reads_match
+        for entry, path, expected in (
+                ('docs/a.rst', 'docs/a.rst', True),
+                ('docs/a.rst', 'docs/a.rst.orig', False),
+                ('docs/', 'docs/b/c.rst', True),
+                ('docs/', 'docsx/a.rst', False),
+                ('*.md', 'SECURITY.md', True),
+                ('*.md', 'SECURITY.txt', False)):
+            with self.subTest(entry=entry, path=path):
+                self.assertEqual(expected, match(entry, path),
+                                 'an entry covered the wrong paths')
 
 
 class ReachedTest(unittest.TestCase):
@@ -153,3 +199,61 @@ class ReachedTest(unittest.TestCase):
             self.READS, {'tests/new_test.py', 'tests/conftest.py'},
             ['*test*.py']),
             'a new test module, or only it, was not reached')
+
+    def test_a_new_file_under_a_read_directory_is_reached(self):
+        self.assertEqual(['tests/a_test.py'], reads.reached(
+            {'tests/a_test.py': ['schwaby/'], 'tests/b_test.py': []},
+            {'schwaby/newmod.py'}, ['*test*.py']),
+            'a new file under a directory a test reads reached nothing')
+
+
+class TouchingTest(unittest.TestCase):
+    '''--touching, as a script in a checkout of its own: the tests a
+    branch reaches since it left a base.'''
+
+    def test_the_tests_a_branch_reaches_are_named(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        repo = tmp.name
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith('GIT_')}
+        env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
+
+        def git(*args):
+            subprocess.run(['git', *args], cwd=repo, env=env,
+                           capture_output=True, check=True)
+
+        def write(path, data):
+            os.makedirs(os.path.dirname(os.path.join(repo, path)),
+                        exist_ok=True)
+            with open(os.path.join(repo, path), 'wb') as f:
+                f.write(data)
+        os.makedirs(os.path.join(repo, 'tools'))
+        for name in ('reads.py', 'redproof.py'):
+            shutil.copy2(os.path.join(ROOT, 'tools', name),
+                         os.path.join(repo, 'tools', name))
+        write('mod.py', b'X = 1\n')
+        write('tests/a_test.py', b'import mod\n' + TEST)
+        write('tests/b_test.py', TEST)
+        for args in (['init', '-q', '-b', 'main'],
+                     ['config', 'user.name', 'test'],
+                     ['config', 'user.email', 'test@example.invalid'],
+                     ['add', '.']):
+            git(*args)
+
+        def run(*args):
+            out = subprocess.run(
+                [sys.executable, '-I', '-B',
+                 os.path.join(repo, 'tools', 'reads.py'), *args],
+                cwd=repo, env=env, capture_output=True, text=True,
+                timeout=120)
+            return out.returncode, out.stdout + out.stderr
+        self.assertEqual(0, run()[0])
+        git('add', '.')
+        git('commit', '-q', '-m', 'start')
+        git('switch', '-q', '-c', 'branch')
+        write('mod.py', b'X = 2\n')
+        code, out = run('--touching', 'main')
+        self.assertEqual(0, code, out)
+        self.assertEqual('python -m pytest tests/a_test.py\n', out,
+                         'the tests the branch reaches were not named')

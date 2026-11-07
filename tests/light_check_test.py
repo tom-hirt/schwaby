@@ -346,6 +346,10 @@ class LightCheckTest(unittest.TestCase):
 
     def test_the_tests_a_commit_reaches_are_named_from_the_map(self):
         os.makedirs(os.path.join(self.repo, 'tools'))
+        os.makedirs(os.path.join(self.repo, 'tests'))
+        for name in ('a', 'b'):
+            self.stage('tests/%s_test.py' % name,
+                       'def test_%s():\n    pass\n' % name)
         self.stage('tools/reads.json', json.dumps({
             'tests/a_test.py': ['tests/a_test.py', 'mod.py'],
             'tests/b_test.py': ['tests/b_test.py']}))
@@ -358,6 +362,33 @@ class LightCheckTest(unittest.TestCase):
                       'tests/a_test.py\n', out,
                       'the tests a commit reaches were not named: ' + out)
         self.assertNotIn('tests/b_test.py', out)
+
+    def test_a_map_that_is_not_a_map_says_so(self):
+        os.makedirs(os.path.join(self.repo, 'tools'))
+        for shape, text in (('cut short', '{"tests/a_test.py": ['),
+                            ('a list', '[]')):
+            with self.subTest(shape=shape):
+                self.stage('tools/reads.json', text)
+                self.stage('mod.py', 'import os\n\n\ndef f():\n'
+                           '    return %d\n' % len(text))
+                code, out = self.check()
+                self.assertEqual(0, code, out)
+                self.assertIn('tools/reads.json is missing from the index '
+                              'or is not a map, so no tests were named', out,
+                              'a broken map named nothing, silently: ' + out)
+
+    def test_a_deleted_test_module_is_not_named(self):
+        os.makedirs(os.path.join(self.repo, 'tools'))
+        os.makedirs(os.path.join(self.repo, 'tests'))
+        self.stage('tests/a_test.py', 'def test_a():\n    pass\n')
+        self.stage('tools/reads.json', json.dumps({
+            'tests/a_test.py': ['tests/a_test.py', 'mod.py']}))
+        self.git('commit', '-q', '-m', 'map')
+        self.git('rm', '-q', 'tests/a_test.py')
+        self.stage('mod.py', 'import os\n\n\ndef f():\n    return 2\n')
+        code, out = self.check()
+        self.assertNotIn('python -m pytest tests/a_test.py', out,
+                         'a test module the commit deletes was named to run')
 
     def test_a_changed_test_helper_says_the_set_is_release_sized(self):
         self.changed_set_checkout()

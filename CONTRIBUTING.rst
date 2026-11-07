@@ -64,10 +64,11 @@ its content, a word on the check's ``FORBIDDEN`` list: names of private
 infrastructure this repository never carries. A commit that changes a file
 under ``tests/`` is also told which red-proof entries test or mutate it; the
 release red-proof runs them (``RELEASING.md`` says more). Every commit is told
-which test modules read a file it changes, from ``tools/reads.json``: run
-those before the branch merges. When a test's imports or the files it names
-change, ``python -I -B tools/reads.py`` rewrites the map, and a test fails
-until it does.
+which test modules read a file it changes, from ``tools/reads.json``, and
+``python -I -B tools/reads.py --touching main`` names the whole branch's:
+run those before the branch merges. When a test's imports or the files it
+names change, ``python -I -B tools/reads.py`` rewrites the map, and a test
+that every change reaches fails until it does.
 The full suite is not part of it; that runs below, and on every pull request.
 
 Then check the environment before you change anything, so a later failure is

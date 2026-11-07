@@ -207,7 +207,8 @@ def reached_tests():
     '''The test modules this commit reaches: those whose reads, by the
     index's tools/reads.json, include a file it changes, and a new test
     module. They are the touched tests a batch runs before it merges.
-    Nothing when the checkout has no map, or no tools to read it with.'''
+    Nothing, with a note, when the index has no map or one that is not a
+    map; nothing when the checkout has no tools to read it with.'''
     here = os.path.dirname(os.path.abspath(__file__))
     tools = [os.path.join(here, name) for name in ('redproof.py', 'reads.py')]
     if not all(map(os.path.isfile, tools)):
@@ -217,11 +218,17 @@ def reached_tests():
     def read(path):
         return blob(':0:' + path)
     found = redproof.reads_map(read)
-    if not found:
+    if found is None:
+        print('light check: %s is missing from the index or is not a map, '
+              'so no tests were named; python -I -B tools/reads.py writes '
+              'it' % redproof.READS)
         return []
     names = git('diff', '--cached', '-z', '--name-only', '--no-renames')
     changed = {os.fsdecode(p) for p in names.stdout.split(b'\0') if p}
-    return reads.reached(found, changed, redproof.test_patterns(read))
+    # A test module the commit deletes is not one to run.
+    return [t for t in reads.reached(found, changed,
+                                     redproof.test_patterns(read))
+            if read(t) is not None]
 
 
 def main():

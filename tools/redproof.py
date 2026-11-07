@@ -864,15 +864,31 @@ READS = 'tools/reads.json'
 
 
 def reads_map(read):
-    '''tools/reads.json as `read` gives it: test module to the repository
-    files it reads, or nothing when it is missing or not that shape.'''
+    '''tools/reads.json as `read` gives it: test module to what it reads,
+    or None when it is missing or not that shape.'''
     try:
-        reads = json.loads((read(READS) or b'{}').decode('utf-8'))
-    except (ValueError, UnicodeDecodeError):
-        return {}
-    if not isinstance(reads, dict):
-        return {}
-    return {k: set(v) for k, v in reads.items() if isinstance(v, list)}
+        reads = json.loads(read(READS).decode('utf-8'))
+    except (AttributeError, ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(reads, dict) or not all(
+            isinstance(v, list) for v in reads.values()):
+        return None
+    return reads
+
+
+def reads_match(entry, path):
+    '''Whether a map entry covers a repository path: an entry ending in /
+    is a directory, one holding *, ? or [ a pattern, any other a file.'''
+    if entry.endswith('/'):
+        return path.startswith(entry)
+    if any(c in entry for c in '*?['):
+        return fnmatch.fnmatch(path, entry)
+    return path == entry
+
+
+def reads_any(entries, paths):
+    '''Whether any of a test module's map entries covers any of `paths`.'''
+    return any(reads_match(e, p) for e in entries for p in paths)
 
 
 def changed_set(cases, changed, read):
@@ -891,11 +907,11 @@ def changed_set(cases, changed, read):
                      if not is_test_module(p, read, patterns))
     if helpers:
         return list(cases), helpers
-    reads = reads_map(read)
+    reads = reads_map(read) or {}
 
     def reaches(test):
         module = test.split('::')[0]
-        return module in sentinels or bool(changed & reads.get(module, set()))
+        return module in sentinels or reads_any(reads.get(module, ()), changed)
     return [c for c in cases
             if c.path in sentinels or any(map(reaches, tests_of(c)))], []
 
