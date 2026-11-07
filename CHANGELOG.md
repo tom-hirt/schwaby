@@ -26,6 +26,41 @@ what each entry says changed, is the same.
 
 ---
 
+## 5.3.1
+
+*2026-11-07*
+
+The repository has moved to `tom-hirt/schwaby`, and the package's project
+links now point there. Nothing public is added, removed or renamed, and no
+behaviour changes: comments, docstrings and documentation are rewritten,
+and one error message reads differently.
+
+### The repository's new address
+
+The project links in the package metadata (homepage, source and tracker)
+now name `https://github.com/tom-hirt/schwaby`, as do the issue links in
+three runtime messages and every link in the documentation. GitHub
+redirects the old addresses.
+
+### Changed
+
+- The `ValueError` raised for a price that is neither a string nor a
+  `decimal.Decimal` (a float, say) says that `'{:.2f}'.format(value)` rounds
+  to the nearest cent rather than truncating toward zero, so it may not
+  round the way an order needs. It still names the field, the value and the
+  `copy_` method that skips validation.
+- Comments, docstrings and documentation say what the code does and why, in
+  their own terms. Worked examples use invented values in the shapes Schwab
+  sends.
+
+### For contributors
+
+- The commit check's forbidden-word list now comes from the clone's own
+  configuration, `git config --add lightcheck.forbidden WORD`, and is never
+  in the tree. A clone with none configured forbids nothing.
+
+---
+
 ## 5.3.0
 
 *2026-11-05*
