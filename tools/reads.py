@@ -9,14 +9,16 @@ A test module reads:
 
  * itself, setup.cfg, and the conftest.py and package __init__.py files
    pytest loads for it, whether or not they exist yet;
- * every repository module it, or one of those, imports, and what those
-   import, followed to the end;
- * every repository file it, or a test helper it imports, names in a
-   string, or in a piece of one with no space split at colons, commas and
-   the like: a tracked file's path, its name (README.md, preferences.json), a Python
+ * every repository module it imports itself;
+ * every repository file it names in a string, or in a piece of one with no
+   space split at colons, commas and the like: a tracked file's path, its name (README.md, preferences.json), a Python
    file's name without .py (load('redproof')), or a directory's name or
    path (docs), kept as the directory, `docs/`, so a file added under it
    later is read too.
+
+That is its direct surface: what it imports or names itself, not what
+those import in turn, which the full suite at a release covers. `closure()`
+follows the imports, for a check that wants the whole reach.
 
 An entry ending in / is a directory, one holding *, ? or [ a pattern, and
 anything else a file. It is read from the source, not measured by running
@@ -191,12 +193,25 @@ def pytest_loads(path):
 
 
 def reads_of(path, read, files):
-    '''Everything the test module at `path` reads, `read` giving a file's
-    bytes: files, `dir/` directories and DECLARED's patterns.'''
+    '''The direct surface of the test module at `path`, `read` giving a
+    file's bytes: itself, what pytest loads for it, the modules it imports,
+    what it names (files, `dir/` directories) and DECLARED's patterns.'''
     files = list(files)
-    loads = pytest_loads(path)
-    found = {path} | loads
-    todo = [path] + sorted(f for f in loads if f in files and f.endswith('.py'))
+    found = {path} | pytest_loads(path)
+    source = read(path)
+    if source is not None:
+        found |= imports_of(path, source, files) | named_in(source, files)
+    found |= set(DECLARED.get(path, {}))
+    return sorted(found)
+
+
+def closure(entries, read, files):
+    '''Map entries with the Python files among them followed through their
+    imports, and a test helper's named files with them, to the end: the
+    whole reach the direct surface leads to.'''
+    files = list(files)
+    found = set(entries)
+    todo = sorted(f for f in found if f.endswith('.py') and f in files)
     seen = set(todo)
     while todo:
         current = todo.pop()
@@ -211,8 +226,7 @@ def reads_of(path, read, files):
             if f.endswith('.py') and f not in seen:
                 seen.add(f)
                 todo.append(f)
-    found |= set(DECLARED.get(path, {}))
-    return sorted(found)
+    return found
 
 
 def build(read, files):
