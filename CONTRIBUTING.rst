@@ -60,8 +60,9 @@ They run ``tools/light_check.py`` on what you are about to commit (measured at
 under a tenth of a second for an eight-file commit): every staged Python file
 must parse and gain no pyflakes warning it did not already have, the diff
 must have no whitespace errors, and no staged file may carry, in its name or
-its content, a word on the check's ``FORBIDDEN`` list: names of private
-infrastructure this repository never carries. A commit that changes a file
+its content, a word on your clone's own forbidden list
+(``git config --add lightcheck.forbidden WORD``), which is kept in the clone's
+configuration so the repository never carries it. A commit that changes a file
 under ``tests/`` is also told which red-proof entries test or mutate it; the
 release red-proof runs them (``RELEASING.md`` says more). Every commit is told
 which test modules read a file it changes, from ``tools/reads.json``, and

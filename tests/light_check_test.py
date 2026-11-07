@@ -2,7 +2,6 @@
 warning is refused, and one that only moves code or keeps an old warning is
 not.'''
 
-import importlib.util
 import json
 import os
 import shutil
@@ -18,12 +17,20 @@ CHECK = os.path.join(ROOT, 'tools', 'light_check.py')
 HOOKS = os.path.join(ROOT, 'tools', 'hooks')
 
 
+#: A word for the tests to forbid, made up and spelled in pieces so that no
+#: tracked file carries it whole; the tree scan below would find it if one
+#: did.
+PROBE = 'qz' + 'xprobe'
+
+
 def forbidden():
-    # The check's own list, so the two cannot disagree about the words.
-    spec = importlib.util.spec_from_file_location('light_check', CHECK)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.FORBIDDEN
+    # This clone's own list, read the way the check reads it.
+    env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
+    out = subprocess.run(['git', 'config', '--get-all',
+                          'lightcheck.forbidden'], cwd=ROOT, env=env,
+                         capture_output=True, text=True)
+    return sorted({w.strip().lower() for w in out.stdout.splitlines()
+                   if w.strip()})
 
 
 # What a walk of a copy skips: what is not the repository's own.
@@ -79,15 +86,16 @@ def carrying(root, words):
 class ForbiddenWordsTest(unittest.TestCase):
 
     def test_no_file_in_the_tree_carries_a_forbidden_word(self):
-        words = forbidden()
-        self.assertTrue(words, 'the check forbids nothing')
+        # This clone's words, if it configures any, and the probe, which a
+        # clone with none still scans for.
+        words = sorted(set(forbidden()) | {PROBE})
         found, seen = carrying(ROOT, words)
         # Positive control: the walk reached the files it is for.
         self.assertGreater(seen, 50, 'the walk read almost nothing')
         self.assertEqual([], found)
 
     def test_a_checkout_is_read_as_git_tracks_it(self):
-        word = forbidden()[0]
+        word = PROBE
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = tmp.name
@@ -147,6 +155,7 @@ class LightCheckTest(unittest.TestCase):
         self.git('init', '-q')
         self.git('config', 'user.name', 'test')
         self.git('config', 'user.email', 'test@example.invalid')
+        self.git('config', '--add', 'lightcheck.forbidden', PROBE)
         self.write('mod.py', 'import os\n\n\ndef f():\n    return 1\n')
         self.git('add', 'mod.py')
         self.git('commit', '-q', '-m', 'start')
@@ -199,7 +208,7 @@ class LightCheckTest(unittest.TestCase):
         self.assertIn('mod.py: syntax error', out)
 
     def test_a_forbidden_word_is_refused_and_named(self):
-        word = forbidden()[0]
+        word = PROBE
         cases = [('notes.md', 'a %s job\n' % word),
                  ('mod.py', 'import os\n\n\ndef f():\n    return %r\n'
                   % (word.upper() + '_CORES')),
@@ -234,7 +243,7 @@ class LightCheckTest(unittest.TestCase):
     def test_a_forbidden_word_already_at_head_still_fails(self):
         # The whole file is read, not the lines a change adds: a commit
         # touching a file that carries the word carries it again.
-        word = forbidden()[0]
+        word = PROBE
         self.stage('notes.md', 'a %s job\nfirst\n' % word)
         self.git('commit', '-q', '-m', 'carries it')
         self.stage('notes.md', 'a %s job\nsecond\n' % word)

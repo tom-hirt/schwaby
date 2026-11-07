@@ -17,8 +17,10 @@ commit will contain:
    fail every commit; requiring no new one catches the unused import or
    undefined name a change introduces;
  * `git diff --cached --check`: no whitespace errors or conflict markers;
- * no staged file, by its name or its content, carries a word on FORBIDDEN:
-   names of private infrastructure, which this repository never carries.
+ * no staged file, by its name or its content, carries a word on this
+   clone's forbidden list, `git config --add lightcheck.forbidden WORD`.
+   The list lives in the clone's own configuration, so the repository
+   never carries the words it keeps out.
    The whole file, not only its added lines, and any case.
 
 It names the test modules the commit reaches, from the index's
@@ -52,9 +54,6 @@ except ImportError:
     api = None
 
 
-#: Names of private infrastructure. Spelled in pieces, so that this file
-#: carries none of them either.
-FORBIDDEN = ('r' + 'unq',)
 
 
 class _Collect:
@@ -125,14 +124,23 @@ def staged_paths():
     return [os.fsdecode(p) for p in out.stdout.split(b'\0') if p]
 
 
-def forbidden_in(path):
-    '''The words on FORBIDDEN that the staged file carries, in its name or
-    its content, in any case.'''
+def forbidden_words():
+    '''This clone's forbidden list, `git config lightcheck.forbidden`, in
+    lower case: nothing when it configures none.'''
+    out = git('config', '--get-all', 'lightcheck.forbidden', check=False)
+    return sorted({w.strip().lower() for w in
+                   out.stdout.decode('utf-8', 'replace').splitlines()
+                   if w.strip()})
+
+
+def forbidden_in(path, words):
+    '''The forbidden words the staged file carries, in its name or its
+    content, in any case.'''
     # Stage 0 named outright: ':0:x' would read as stage 0 of 'x'.
     content = (blob(':0:' + path) or b'').lower()
     name = path.lower()
-    return [word for word in FORBIDDEN
-            if word in name or word.encode('ascii') in content]
+    return [word for word in words
+            if word in name or word.encode('utf-8') in content]
 
 
 def compile_error(source, path):
@@ -242,10 +250,11 @@ def main():
         for message in new_warnings(path, before):
             print('light check: %s: %s' % (path, message))
             failed = True
+    words = forbidden_words()
     for path in staged_paths():
-        for word in forbidden_in(path):
-            print('light check: %s: carries %r, a name of private '
-                  'infrastructure' % (path, word))
+        for word in forbidden_in(path, words):
+            print('light check: %s: carries %r, a word on the forbidden '
+                  'list' % (path, word))
             failed = True
     check = git('diff', '--cached', '--check', check=False)
     if check.returncode != 0:

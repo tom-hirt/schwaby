@@ -8707,12 +8707,12 @@ CASES.extend([
          '::test_the_built_version_must_equal_the_tag',
          "tag '', dist unnamed: exited 0",
          subtest="dist='unnamed'"),
-    # No staged file carries a name of private infrastructure, by its content
-    # or its name, in any case; and nothing in the tree does. The word is
-    # spelled in pieces here, as the check spells it.
+    # No staged file carries a word on the clone's forbidden list, by its
+    # content or its name, in any case; and nothing in the tree carries the
+    # tests' probe word, spelled in pieces here as the test spells it.
     Case('light-check/a-forbidden-word-in-a-file-is-refused',
          'tools/light_check.py',
-         " or word.encode('ascii') in content]", ']',
+         " or word.encode('utf-8') in content]", ']',
          'tests/light_check_test.py::LightCheckTest::test_a_forbidden_word_is_refused_and_named',
          'a file carrying a forbidden word was let through',
          subtest="name='notes.md'"),
@@ -8770,7 +8770,7 @@ CASES.extend([
     Case('light-check/the-tree-is-walked-for-forbidden-words',
          'docs/index.rst',
          '``schwaby`` is an unofficial Python client for the Charles Schwab trading API.',
-         '``schwaby`` is an unofficial Python client for the Charles Schwab trading API. ' + 'R' + 'UNQ',
+         '``schwaby`` is an unofficial Python client for the Charles Schwab trading API. ' + 'QZ' + 'XPROBE',
          'tests/light_check_test.py::ForbiddenWordsTest'
          '::test_no_file_in_the_tree_carries_a_forbidden_word',
          "'docs/index.rst', "),
