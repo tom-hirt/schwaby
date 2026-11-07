@@ -1067,7 +1067,7 @@ class ChangedSetTest(unittest.TestCase):
 
     def test_an_entry_is_chosen_by_its_test_file(self):
         self.assertEqual((['a/by-its-test'], []),
-                         self.chosen('tests/a_test.py', 'schwaby/x.py'),
+                         self.chosen('tests/a_test.py', 'schwaby/w.py'),
                          'an entry was not chosen by its test file')
 
     def test_an_entry_is_chosen_by_the_test_file_it_mutates(self):
@@ -1165,12 +1165,15 @@ class ChangedSetTest(unittest.TestCase):
             "pytest's default, test_*.py and *_test.py, was not the one "
             'taken without setup.cfg')
 
-    def test_a_change_outside_tests_chooses_nothing(self):
-        # What an entry mutates outside tests/ is code, not a check: a code
-        # change alone puts no entry in the changed set.
+    def test_a_change_no_entry_reads_or_mutates_chooses_nothing(self):
         self.assertEqual(([], []),
-                         self.chosen('schwaby/x.py', 'tools/redproof.py'),
+                         self.chosen('schwaby/z.py', 'tools/redproof.py'),
                          'a change outside tests/ chose an entry')
+
+    def test_an_entry_is_chosen_by_the_code_it_mutates(self):
+        self.assertEqual((['a/by-its-test', 'e/untouched'], []),
+                         self.chosen('schwaby/x.py'),
+                         'an entry was not chosen by the code it mutates')
 
     def test_a_test_module_no_entry_names_chooses_nothing(self):
         # tests/test.py, a test module, and one that is gone.

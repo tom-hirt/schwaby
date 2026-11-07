@@ -1,5 +1,5 @@
-'''Which repository files each test module reads: the map that chooses the
-tests a change reaches.
+'''Each test module's direct surface, the repository files it reads
+itself: the map that chooses the tests a change reaches.
 
     python -I -B tools/reads.py                  # rewrite tools/reads.json
     python -I -B tools/reads.py --check          # exit 1, naming them, if stale
@@ -8,7 +8,8 @@ tests a change reaches.
 A test module reads:
 
  * itself, setup.cfg, and the conftest.py and package __init__.py files
-   pytest loads for it, whether or not they exist yet;
+   pytest loads for it, whether or not they exist yet, with the modules a
+   conftest.py imports, since its fixtures run for the test;
  * every repository module it imports itself;
  * every repository file it names in a string, or in a piece of one with no
    space split at colons, commas and the like: a tracked file's path, its name (README.md, preferences.json), a Python
@@ -25,8 +26,8 @@ anything else a file. It is read from the source, not measured by running
 the tests, so it is recomputed exactly and checked by a test. What that
 cannot see -- an import or a path built at run time from pieces -- is in
 DECLARED, with its reason. Naming a file a test does not read costs a test
-run; missing one it does is the failure this exists to prevent, so it errs
-towards naming.
+run; missing one of its direct reads is the failure this exists to prevent,
+so it errs towards naming.
 
 The light check names the test modules a commit's changes reach from this
 map, --touching names a branch's, and tools/redproof.py --touching chooses
@@ -57,6 +58,10 @@ DECLARED = {
     'tests/entrypoints_test.py': {
         '*': 'it runs reads.py --check, which reads every tracked file',
     },
+    'tests/streaming_test.py': {
+        'schwaby/utils.py': 'it tests behaviour streaming.py takes from '
+                            'utils.py, which its red-proof entries mutate',
+    },
     'tests/packaging_test.py': {
         '*.md': 'it lists the repository root for documents',
         '*.rst': 'it lists the repository root for documents',
@@ -80,19 +85,27 @@ def _redproof():
     return module
 
 
-def tracked(root=ROOT):
-    '''The files git tracks, by repository path; in a copy that is not a
-    checkout, as a red-proof's is, every file under it but bytecode and
-    what NOT_THE_TREE names.'''
+def from_git(root=ROOT):
+    '''The files git tracks, by repository path, or None when git cannot
+    say: no checkout here, no git, or git refusing to read it.'''
     env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
     try:
         out = subprocess.run(['git', 'ls-files', '-z'], cwd=root, env=env,
                              capture_output=True)
     except OSError:
-        out = None
-    if (out is not None and out.returncode == 0
-            and os.path.exists(os.path.join(root, '.git'))):
-        return sorted(p for p in out.stdout.decode('utf-8').split('\0') if p)
+        return None
+    if out.returncode != 0 or not os.path.exists(os.path.join(root, '.git')):
+        return None
+    return sorted(p for p in out.stdout.decode('utf-8').split('\0') if p)
+
+
+def tracked(root=ROOT):
+    '''The files git tracks, by repository path; where git cannot say, as in
+    a red-proof's copy, every file under it but bytecode and what
+    NOT_THE_TREE names.'''
+    files = from_git(root)
+    if files is not None:
+        return files
     found = []
     for top, dirs, names in os.walk(root):
         dirs[:] = sorted(d for d in dirs if d not in NOT_THE_TREE
@@ -197,7 +210,13 @@ def reads_of(path, read, files):
     file's bytes: itself, what pytest loads for it, the modules it imports,
     what it names (files, `dir/` directories) and DECLARED's patterns.'''
     files = list(files)
-    found = {path} | pytest_loads(path)
+    loads = pytest_loads(path)
+    found = {path} | loads
+    for conftest in sorted(f for f in loads
+                           if f.endswith('/conftest.py') and f in files):
+        source = read(conftest)
+        if source is not None:
+            found |= imports_of(conftest, source, files)
     source = read(path)
     if source is not None:
         found |= imports_of(path, source, files) | named_in(source, files)
@@ -230,7 +249,7 @@ def closure(entries, read, files):
 
 
 def build(read, files):
-    '''The map: each test module under tests/ to what it reads.'''
+    '''The map: each test module under tests/ to its direct surface.'''
     redproof = _redproof()
     patterns = redproof.test_patterns(read)
     modules = [f for f in files if f.startswith('tests/') and f.endswith('.py')

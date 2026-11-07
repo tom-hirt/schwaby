@@ -8222,7 +8222,7 @@ CASES.extend([
     # for each commit.
     Case('changed-set/an-entry-is-chosen-by-what-it-mutates',
          'tools/redproof.py',
-         '            if c.path in sentinels or any(map(reaches, tests_of(c)))]',
+         '            if c.path in changed or any(map(reaches, tests_of(c)))]',
          '            if any(map(reaches, tests_of(c)))]',
          'tests/redproof_tool_test.py::ChangedSetTest'
          '::test_an_entry_is_chosen_by_the_test_file_it_mutates',
@@ -8247,7 +8247,7 @@ CASES.extend([
          "    sentinels = {p for p in changed if p.startswith('tests/')}\n",
          '    sentinels = set(changed)\n',
          'tests/redproof_tool_test.py::ChangedSetTest'
-         '::test_a_change_outside_tests_chooses_nothing',
+         '::test_a_change_no_entry_reads_or_mutates_chooses_nothing',
          'a change outside tests/ chose an entry'),
     Case('changed-set/a-rename-is-both-paths',
          'tools/redproof.py',

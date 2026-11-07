@@ -34,10 +34,9 @@ class MapIsCurrentTest(unittest.TestCase):
         # Only in a checkout: in a copy that is not one, the walk that stands
         # in for git's list takes untracked files too, and the map would
         # differ for them.
-        if not os.path.exists(os.path.join(ROOT, '.git')):
-            self.skipTest('not a git checkout, so the tracked files are not '
-                          'known')
-        files = reads.tracked(ROOT)
+        files = reads.from_git(ROOT)
+        if files is None:
+            self.skipTest('git cannot list the tracked files here')
 
         def read(path):
             try:
@@ -59,18 +58,15 @@ class MapIsCurrentTest(unittest.TestCase):
 class MapAgainstEntriesTest(unittest.TestCase):
     '''The map against what the red-proof entries already say: an entry
     that proves fails its test when the file it mutates breaks, so the
-    test's reach, its direct surface followed through its imports, takes in
-    that file. A miss is a read the scan cannot see, or an entry naming the
-    wrong test or path. It cannot fail for a test module that declares
-    every file read ('*' in DECLARED).'''
+    test's direct surface, the map the light check selects from, takes in
+    that file. A miss is a read the scan cannot see, to declare, or an
+    entry naming the wrong test or path. It cannot fail for a test module
+    that declares every file read ('*' in DECLARED).'''
 
-    def test_each_entry_s_tests_reach_the_file_it_mutates(self):
+    def test_each_entry_s_tests_read_the_file_it_mutates(self):
         redproof = reads._redproof()
         with open(os.path.join(ROOT, reads.MAP), encoding='utf-8') as f:
-            committed = json.load(f)
-        files = reads.tracked(ROOT)
-        reach = {m: reads.closure(entries, reads.read_tree, files)
-                 for m, entries in committed.items()}
+            reach = json.load(f)
         missed, checked = [], 0
         for case in redproof.load_cases(ROOT):
             if case.removed or case.superseded:
@@ -79,7 +75,7 @@ class MapAgainstEntriesTest(unittest.TestCase):
             checked += 1
             if not any(redproof.reads_match(entry, case.path)
                        for m in modules for entry in reach.get(m, ())):
-                missed.append('%s: %s does not reach %s' % (
+                missed.append('%s: %s does not read %s' % (
                     case.name, ' or '.join(modules), case.path))
         self.assertGreater(checked, 500, 'the entries were not read')
         self.assertEqual([], missed, 'the map misses a read an entry shows: '
@@ -124,6 +120,18 @@ class ScanTest(unittest.TestCase):
         self.assertNotIn('schwaby/utils.py', got,
                          'what an imported module imports was taken as a '
                          'direct read')
+
+    def test_what_a_conftest_imports_is_read(self):
+        # Its fixtures run for the test, so what it imports is part of the
+        # test's surface; what those import in turn is not.
+        got = self.reads_of('tests/a_test.py', b'',
+                            **{'tests/conftest.py': b'from . import utils\n',
+                               'tests/utils.py': b'import schwaby.auth\n'})
+        self.assertIn('tests/utils.py', got,
+                      "what pytest's conftest.py imports was not read")
+        self.assertNotIn('schwaby/auth.py', got,
+                         "what the conftest's imports import was taken as "
+                         'a direct read')
 
     def test_the_closure_follows_imports_to_the_end(self):
         tree = dict(self.FILES, **{'tests/a_test.py': b'import schwaby.auth\n'})

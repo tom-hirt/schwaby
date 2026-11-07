@@ -71,6 +71,7 @@
   "tests/light_check_test.py",
   "tests/orders/__init__.py",
   "tests/test.py",
+  "tests/utils.py",
   "tools/",
   "tools/hooks/",
   "tools/light_check.py",
@@ -261,6 +262,7 @@
   "tests/__init__.py",
   "tests/conftest.py",
   "tests/repeat_tool_test.py",
+  "tests/utils.py",
   "tools/",
   "tools/repeat.py"
  ],
@@ -282,6 +284,7 @@
   "schwaby/contrib/__init__.py",
   "schwaby/contrib/util.py",
   "schwaby/streaming.py",
+  "schwaby/utils.py",
   "setup.cfg",
   "tests/__init__.py",
   "tests/conftest.py",
@@ -302,13 +305,15 @@
   "tests/__init__.py",
   "tests/conftest.py",
   "tests/suite_config_test.py",
-  "tests/test.py"
+  "tests/test.py",
+  "tests/utils.py"
  ],
  "tests/test.py": [
   "setup.cfg",
   "tests/__init__.py",
   "tests/conftest.py",
-  "tests/test.py"
+  "tests/test.py",
+  "tests/utils.py"
  ],
  "tests/utils_test.py": [
   "schwaby/",

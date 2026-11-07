@@ -912,7 +912,7 @@ def changed_set(cases, changed, read):
         module = test.split('::')[0]
         return module in sentinels or reads_any(reads.get(module, ()), changed)
     return [c for c in cases
-            if c.path in sentinels or any(map(reaches, tests_of(c)))], []
+            if c.path in changed or any(map(reaches, tests_of(c)))], []
 
 
 def changed_since(base, cwd=ROOT):
