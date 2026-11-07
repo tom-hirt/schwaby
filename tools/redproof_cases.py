@@ -58,8 +58,8 @@ _DECODING_AROUND_A_KEY_REMOVED = (
     'refusing one where a component was missing, on the reasoning that '
     'the unknown key might be that component renamed. \'Missing\' has '
     'three spellings and each attempt left one uncovered: the key absent, '
-    'the key present and null, the key present and zero. Each was a $6.86 '
-    'limit price decoding as $6,860,000. The third cannot be closed at '
+    'the key present and null, the key present and zero. Each turns a $7.35 '
+    'limit price into $7,350,000. The third cannot be closed at '
     'all -- `signScale: 0` genuinely means scale 0. Measured against a '
     'real capture it also bought nothing: under a rename that keeps the '
     'old key at its default, 27 of 37 objects still decoded wrong, which '
@@ -1211,29 +1211,25 @@ CASES = [
          'tests/contrib/util_test.py::DecodeDecimalTest'
          '::test_a_mantissa_without_a_scale_is_refused_rather_than_guessed',
          'UnusableDecimalScale not raised',
-         removed='The behaviour this proved was wrong, and this case is the '
-                 'record of how confidently. A mantissa with no signScale '
-                 'was refused because a missing scale cannot be told from a '
-                 'lost one -- sound reasoning on a false premise. The '
-                 'docstring called the shape unobserved; a real capture '
-                 'carried eight, and `AskSize` {"lo": "19200"} sits '
-                 'beside `Ask` {"lo": "13720000", "signScale": 12} in one '
-                 'quote. An absent scale is zero, like an absent mantissa '
-                 'member, and refusing it cost both sizes on every quote. '
-                 'Replaced by `contrib/decimal-absent-scale-is-zero`. The '
-                 'lesson: state a negative result as a reason, not as a '
-                 'search.'),
+         removed='The behaviour this mutated is gone: a mantissa with no '
+                 'signScale was refused, on the reasoning that a missing '
+                 'scale cannot be told from a lost one. An absent scale is '
+                 'zero, like an absent mantissa member: `AskSize` '
+                 '{"lo": "15300"} arrives beside `Ask` '
+                 '{"lo": "21480000", "signScale": 12} on one quote, and '
+                 'refusing it would cost both sizes on every quote. '
+                 'Replaced by `contrib/decimal-absent-scale-is-zero`.'),
 
     # An absent `signScale` is scale 0, by the same rule as an absent
-    # mantissa member -- the serializer omits what is zero. Measured against
-    # a real quote, which is what overturned the raise this replaces.
+    # mantissa member -- the serializer omits what is zero, and a quote's
+    # sizes arrive that way.
     Case('contrib/decimal-absent-scale-is-zero',
          'schwaby/contrib/util.py',
          "    scale = _unsigned(0 if scale_member is None else scale_member,",
          "    scale = _unsigned(12 if scale_member is None else scale_member,",
          'tests/contrib/util_test.py::DecodeDecimalTest'
          '::test_a_mantissa_without_a_scale_is_scale_zero',
-         '19200'),
+         '15300'),
 
     # The bare-value path was once the unvalidated sibling of the member
     # path. `Decimal`'s parser takes PEP 515 underscores, surrounding
@@ -1405,8 +1401,8 @@ CASES = [
          'KeyError'),
 
     # An unknown key beside a *missing* component is ambiguous: it may be
-    # that component renamed. Guessed at, a renamed scale turned a $6.86
-    # limit price into $6,860,000 -- six orders of magnitude, silently, on
+    # that component renamed. Guessed at, a renamed scale would turn a $7.35
+    # limit price into $7,350,000 -- six orders of magnitude, silently, on
     # the field this feed exists to carry.
     Case('contrib/decimal-renamed-component-is-refused',
          'schwaby/contrib/util.py',
@@ -1420,9 +1416,9 @@ CASES = [
 
 
     # The guard and the decoder must mean the same thing by "present". Keyed
-    # on mere presence, an explicit null slipped the guard and then met the
-    # absent-scale rule, decoding $6.86 as $6,860,000 -- the exact defect the
-    # refusal was added to close, back through a different door.
+    # on mere presence, an explicit null would slip the guard and then meet
+    # the absent-scale rule, decoding $7.35 as $7,350,000 -- the defect the
+    # refusal closes, through a different door.
     Case('contrib/decimal-null-does-not-slip-the-rename-guard',
          'schwaby/contrib/util.py',
          "        present = {k for k in keys & _DECIMAL_KEYS\n"

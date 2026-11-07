@@ -418,7 +418,7 @@ Worth stating plainly because the reasons are checkable and the schema is not:
 a later reader reconciling these setters "to match Schwab's schema" would be
 working from a premise this page has just contradicted. And the practical
 consequence stands either way --- passing ``'1.50'`` to
-``set_activation_price`` and ``6.86`` to ``set_price`` are both natural things
+``set_activation_price`` and ``7.35`` to ``set_price`` are both natural things
 to write, and both are refused.
 
 That includes the quantity argument of every prebuilt template, which builds
