@@ -3935,8 +3935,9 @@ class StreamClient(EnumEnforcer):
     # It is not added because a validator that rejects what Schwab accepts is
     # worse than none: it reads as a configuration error rather than as two
     # documents disagreeing, and there is no way for the caller to get past
-    # it. Schwab does not publish the full vocabulary, and it is easy to get
-    # wrong: `$SPX.X` looks like a plausible key and is not a valid prefix.
+    # it. Schwab documents a prefix list, but whether it is the whole set is
+    # not known, and keys are easy to get wrong: `$SPX.X` looks like a
+    # plausible key and is not a valid prefix.
     # Roughly eight prefixes have been tried against the live service, out of
     # a set whose size nobody knows.
     #
