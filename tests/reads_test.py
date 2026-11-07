@@ -50,6 +50,39 @@ class MapIsCurrentTest(unittest.TestCase):
                       'the map has a test module that reads nothing')
 
 
+class MapAgainstEntriesTest(unittest.TestCase):
+    '''The map against what the red-proof entries already say: an entry
+    that proves fails its test when the file it mutates breaks, so the test
+    reads that file. A miss is a read the scan cannot see, or an entry
+    naming the wrong test or path. It cannot fail for a test module that
+    declares every file read ('*' in DECLARED).'''
+
+    def test_each_entry_s_tests_read_the_file_it_mutates(self):
+        redproof = reads._redproof()
+        with open(os.path.join(ROOT, reads.MAP), encoding='utf-8') as f:
+            committed = json.load(f)
+        missed, checked = [], 0
+        for case in redproof.load_cases(ROOT):
+            if case.removed or case.superseded:
+                continue
+            modules = [t.split('::')[0] for t in redproof.tests_of(case)]
+            checked += 1
+            if not any(redproof.reads_match(entry, case.path)
+                       for m in modules for entry in committed.get(m, ())):
+                missed.append('%s: %s does not read %s' % (
+                    case.name, ' or '.join(modules), case.path))
+        self.assertGreater(checked, 500, 'the entries were not read')
+        self.assertEqual([], missed, 'the map misses a read an entry shows: '
+                         'declare it in tools/reads.py DECLARED, or correct '
+                         "the entry's test or path")
+
+    def test_each_declaration_is_a_mapped_test_module(self):
+        with open(os.path.join(ROOT, reads.MAP), encoding='utf-8') as f:
+            committed = json.load(f)
+        self.assertEqual([], sorted(set(reads.DECLARED) - set(committed)),
+                         'a declaration names no test module in the map')
+
+
 class ScanTest(unittest.TestCase):
     '''What the scan finds, on a small tree held in memory.'''
 
