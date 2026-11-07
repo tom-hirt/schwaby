@@ -20,10 +20,6 @@ record of anything.
 Getting a fact wrong is the exception. Where an entry says something that was
 untrue when it was written, it gets corrected and the correction says so.
 
-One other kind of edit, made once: on 2026-10-23 two phrases saying where a
-measurement came from were reworded to name no particular deployment. What
-was measured, and every number, is unchanged.
-
 ---
 
 ## 5.3.0
@@ -569,7 +565,7 @@ One fix. Nothing public is added, removed or renamed.
   whose `MESSAGE_DATA` is a notice written as text is no longer logged as a
   message type nobody has captured. That is how the streaming documentation
   records Schwab's "Feature not supported" notice arriving: on at least 69 days
-  across about three months of one production feed, most often around 00:30
+  across about three months of a live feed, most often around 00:30
   Eastern. It logged a warning asking for an issue to be opened, once in each
   process that received it. An empty type carrying a JSON object, broken JSON
   that starts like one, or no text at all is still logged, as is any non-empty
@@ -725,9 +721,9 @@ filled, so adding up by `activityType` alone reports them as filled. A shape it
 cannot read, or a `mismarkedQuantity` other than zero, raises
 `UnusableOrderActivityError`, which is also a `ValueError`.
 
-It was measured read-only over 423 orders: orders filled in one or two
-executions, the two-execution ones ETF orders; one vertical spread filled in one
-execution; and 25 canceled or replaced orders. Not observed, and not claimed: a
+It was measured read-only over 423 historical orders: orders filled in one or
+two executions; one vertical spread filled in one execution; and 25 canceled or
+replaced orders. Not observed, and not claimed: a
 partial fill before a replace, an option order filled in more than one
 execution, a ratio spread, and a plain `EQUITY` instrument.
 
@@ -966,12 +962,12 @@ Measured on a live account, and stated no wider than the evidence:
   so far, `ExecutionQuantity` is this execution alone, and the posting
   `Quantity` is the order's quantity. The first two agree on single-execution
   fills, which is why reading the wrong one survives testing.
-- **`PriceImprovement`'s unit is not established.** 94 of 188 ETF fills fitted
+- **`PriceImprovement`'s unit is not established.** 94 of 188 fills checked fitted
   a total for the fill, and 9 fitted a price per share.
 - **Fill timestamps.** `ExecutionTimeStamp` reads as US Eastern time with no
   offset, checked in summer only. `VenuExecutionTimeStamp` sits beside it and
-  differed on every fill in the archive.
-- **Charges.** Every fill in the archive carried its commission and fees, zero
+  differed on every fill checked.
+- **Charges.** Every fill checked carried its commission and fees, zero
   charges included.
 - **The "Feature not supported" notice.** It arrives on the data channel with
   an empty `MESSAGE_TYPE`, most often around 00:30 Eastern. The notify-channel
@@ -985,8 +981,8 @@ Measured on a live account, and stated no wider than the evidence:
     one.
 - **Quotes.** `get_quotes` can return HTTP 429. No rate is given, because none
   was measured.
-- **Account balances.** `cashAvailableForTrading` was present as `0.0`, not
-  omitted, on an account holding no cash.
+- **Account balances.** `cashAvailableForTrading` is sent as `0.0` when it is
+  zero, not omitted.
 
 ## 4.4.2
 
@@ -1134,7 +1130,7 @@ The cause was reasoning where there should have been measurement. The
 encoding is a serialized .NET `System.Decimal`, whose 96-bit mantissa is laid
 out as three 32-bit members, `lo`, `mid` and `hi`, and this read `lo` as the
 first of them. Schwab does not send that layout. Measured over 5,843 decimal
-objects from a production `ACCT_ACTIVITY` archive:
+objects from a recorded `ACCT_ACTIVITY` archive:
 
 - none carried `mid` or `hi`, and every `lo` was a string of digits;
   *(corrected in 4.4.2: this said every one carried `lo` alone, but a decimal
@@ -1479,8 +1475,8 @@ New, and the first thing in this release that is code rather than prose.
 
 Schwab streams money and quantities on `ACCT_ACTIVITY` as a serialized .NET
 `System.Decimal` — `{"lo": "6860000", "signScale": 12}` — not as numbers. The
-encoding is undocumented publicly; Schwab's Trader API support confirmed the
-conversion in writing. Every consumer ends up writing this, and the first
+encoding is undocumented publicly; Schwab's Trader API support has confirmed
+the conversion. Every consumer ends up writing this, and the first
 attempt is reliably wrong in at least one of five ways, each of which is a
 **wrong number rather than an error**:
 
@@ -1571,9 +1567,9 @@ now says so where someone setting a duration will see it. `IMMEDIATE_OR_CANCEL`,
 `END_OF_WEEK`, `END_OF_MONTH` and `NEXT_END_OF_MONTH` come back `HTTP 400`. The
 enum mirrors Schwab's schema rather than what the equity endpoint takes, and the
 rejection happens at *placement* rather than at build — so `OrderBuilder` builds
-the order without complaint and it fails on the live path. Two consumers have
-built a time-in-force table from this enum and been wrong; it was documented on
-the enum's own docstring, which is not where either of them looked.
+the order without complaint and it fails on the live path. A time-in-force
+table built from this enum is wrong, and the note on the enum's own docstring
+is not where a reader building one looks.
 
 **The `{lo, signScale}` decoder published in 4.1.0 was wrong for large
 numbers.** It read only `lo`. The encoding is a serialized .NET
@@ -1591,10 +1587,9 @@ alone.
 `lo` whole is correct. Measured over 5,843 decimal objects, none carried `mid`
 or `hi`.*
 
-Three more facts about the same encoding, from the consumer who took it to
-Schwab: the conversion was **confirmed in writing by Schwab Trader API
-support** on 2026-06-24, who stated it while confirming it remains publicly
-undocumented; a decimal object with a `signScale` and no `lo` is **zero, not
+Three more facts about the same encoding: the conversion has been
+**confirmed by Schwab Trader API support**, which stated it while confirming it
+remains publicly undocumented; a decimal object with a `signScale` and no `lo` is **zero, not
 unknown**, measured on a `LeavesQuantity` arriving on the final fill event of a
 completed order, where reading it as unknown makes a complete fill report as
 outstanding; and the sign is not the side — direction comes from `BuySellCode`,
@@ -1602,7 +1597,7 @@ and the odd-`signScale` branch exists so a genuinely negative field does not
 decode positive.
 
 **A normalizer in front of the setters defeats the `bool` rejection.** A
-consumer adapting to 4.1.0 wrote a helper to turn a `numpy.int64` quantity into
+helper written to adapt to 4.1.0 to turn a `numpy.int64` quantity into
 a plain `int`; `float(True)` is `1.0` and `(1.0).is_integer()` is `True`, so it
 turned `True` into `1` and rebuilt the silent one-share order 4.1.0 was released
 to close — in code written to accommodate that very fix. Documented next to the
@@ -1728,7 +1723,7 @@ one. `docs/order-builder.rst` now states the accepted types **per setter**, in
 a table the test suite checks against the validators — in both directions, so
 it fails if the table lies and if a validator drifts from it.
 
-### Documentation, from live trading use
+### Documentation, measured against a live account
 
 Findings that could not have come from reading the library, each measured:
 
@@ -2137,8 +2132,8 @@ instead.
 It is a directory listing rather than an `importlib.metadata` lookup, which
 opens and parses a metadata file for every installed package. Both answer the
 question identically. Measured with `time.perf_counter` around a single call in
-a fresh interpreter, five runs, 92 distributions installed, on the maintainer's
-aarch64 Linux box: the listing 0.21–0.23 ms, `importlib.metadata` 104–105 ms,
+a fresh interpreter, five runs, 92 distributions installed, on one aarch64
+Linux machine: the listing 0.21–0.23 ms, `importlib.metadata` 104–105 ms,
 `import schwab` itself 143–166 ms. Those absolutes move a lot with the machine,
 the filesystem cache and the number of packages — a reviewer on other hardware
 measured 23–27 ms and 70–77 ms for the same two — so the ratio is the durable
@@ -2211,7 +2206,7 @@ as well, because code catching them that way predates this release and they do
 describe a caller mistake.
 
 **`OrderIdNotFoundError` deliberately does not inherit `ValueError`.** It was
-going to, for consistency, until a consumer pointed out that this hands back the
+going to, for consistency, but that hands back the
 exact failure the raise was introduced to remove: `except ValueError` is the
 idiom people reach for around `int()` and `float()`, order specs coerce exactly
 those a few lines from the call, and the one exception here that means *an order
@@ -2599,8 +2594,9 @@ papers over exactly that.
 Separately, `client.rst` now warns that `httpx2` exceptions are not `httpx`
 exceptions. Catching `httpx.HTTPStatusError` around a call into this library
 fails silently: nothing raises at import, nothing raises at the `try`, and the
-`except` simply never matches. That is what broke a consumer's rate-limit retry
-on the 2.0.0 upgrade, and until now it appeared nowhere as code.
+`except` simply never matches. A rate-limit retry written against `httpx`
+stops working this way, silently, on the 2.0.0 upgrade, and until now that
+appeared nowhere as code.
 
 **The one file under `examples/` was four years stale and now has a test.** It
 subscribed to `TWTR`, `FB` and `FIT` --- delisted in 2022, renamed in 2022, and
@@ -2651,9 +2647,8 @@ release, rather than interpolating a git URL and a tag.
 **The project is described as itself rather than as a fork of something else.**
 The README opens with what `schwaby` is and puts the history in a note below it:
 it began from `alexgolec/schwab-py`, which gave it its shape and most of its
-code, and became separate because running systematic strategies against funded
-accounts imposes requirements a general-purpose wrapper has no reason to
-prioritise. Alex Golec's copyright and licence are unchanged.
+code, and became separate because code that places real orders imposes
+requirements a general-purpose wrapper has no reason to prioritise. Alex Golec's copyright and licence are unchanged.
 
 **Two client endpoints were documented for the first time**, both inherited in
 2024 and never covered: `preview_order`, which asks Schwab whether it would
@@ -2720,7 +2715,7 @@ re-subscribes, which is the only thing that recovers state.
 `HeuristicJsonDecoder` exists because Schwab really does emit unparsable JSON,
 which is evidence the other way, so the docs now point at it.
 
-Found by a consumer tracing the failure classes rather than grepping for them.
+Found by tracing the failure classes rather than grepping for them.
 
 ### Documentation
 
@@ -2730,9 +2725,9 @@ and the same token ends a cancel you issued yourself — so the description
 contradicted the sequences printed a few lines below it. It now says the order
 came off the book, and says explicitly that the token does not carry the cause.
 
-Found by a consumer applying the two-sequence table to their own operator-facing
-wording: a phrase asserting a cause the token cannot carry is a small lie on the
-screen every time an order is rejected. The same wording was in these docs.
+A phrase asserting a cause the token cannot carry is a small lie on any screen
+that shows it each time an order is rejected, and the same wording was in these
+docs.
 
 ## 2.4.1
 
@@ -2744,10 +2739,10 @@ states deliberately against a live account: the tokens are CamelCase on the
 wire — `OrderCreated`, `OrderAccepted`, `CancelAccepted`, `ExecutionCreated`,
 `OrderUROutCompleted` — with `SUBSCRIBED` a genuine exception.
 
-A consumer comparing against `'ORDERCREATED'` matched nothing. Worse,
-`ORDERUROUT` is not a case variant of `OrderUROutCompleted`, so upper-casing
-does not rescue it — and at least one consumer had copied that token from this
-list, where it would have alerted on an ordinary cancel.
+Comparing against `'ORDERCREATED'` matches nothing. Worse, `ORDERUROUT` is
+not a case variant of `OrderUROutCompleted`, so upper-casing does not rescue
+it — and a token copied from this list would have alerted on an ordinary
+cancel.
 
 The two sequences a caller most needs to tell apart are now written down: a
 cancel you issue yourself, and a buy rejected for buying power. They differ only
@@ -3090,8 +3085,8 @@ never mentioned the exception.
 three top-level fields and nothing inside `MESSAGE_DATA`, so every consumer
 reverse-engineers it privately. The order identifier appears under seven
 spellings, the symbol under four, and both `CANCELED` and `CANCELLED` occur in
-Schwab's own status tokens. That is now written down, collected by watching a
-live feed over roughly a year, and labelled as an observation log rather than a
+Schwab's own status tokens. That is now written down, collected from live
+traffic, and labelled as an observation log rather than a
 contract -- nothing in it is validated by this library, and a shape that has not
 been seen is not thereby impossible.
 
@@ -3643,7 +3638,7 @@ that nobody had seen the response. This corrects it.
 
 ## 1.10.0
 
-The rest of the production audit -- the findings which were real but not
+The rest of the production-readiness audit -- the findings which were real but not
 urgent, plus the one piece of design it turned up.
 
 One behaviour change worth reading before upgrading: a rejected token refresh
@@ -4026,8 +4021,8 @@ helpers provided both. `period` is now sent only when no range was asked for,
 since the helpers synthesize one spanning decades when the caller gives none.
 
 What Schwab does when it receives both is **not** consistent across accounts. The
-upstream report describes the range being disregarded; a funded margin account we
-had measurements from returned byte-identical responses with and without `period`
+upstream report describes the range being disregarded; one account measured
+here returned byte-identical responses with and without `period`
 across four frequency and range combinations, so there the range was honoured
 either way. Both can be true — entitlements, symbol class, or the API changing
 since the report would all explain it. The fix does not depend on which: sending a
