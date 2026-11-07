@@ -7,10 +7,9 @@
 # installing schwaby never reads this file. It pins what is installed, not
 # the build backends an isolated build fetches.
 #
-# Resolved 2026-10-23 by uv for Python 3.10 and newer. On 3.14 it is the set
-# 5.1.1 was tested against plus pyflakes and pytest-timeout, which [dev]
-# gained after it; the runtime packages are the set 5.1.0 was certified
-# against on 2026-10-22.
+# Resolved by uv for Python 3.10 and newer. On 3.14 it is the set 5.1.1 was
+# tested against plus pyflakes and pytest-timeout, which [dev] gained after
+# it; its runtime packages are the ones 5.1.0 was released against.
 #
 # To regenerate, keeping every pin that still resolves:
 #   uv pip compile setup.py --extra dev --universal --python-version 3.10 \

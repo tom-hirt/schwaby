@@ -50,6 +50,24 @@ class Case:
         self.also = also
 
 
+# The reason five entries below are removed, all of them against one
+# version of the decimal decoder.
+_DECODING_AROUND_A_KEY_REMOVED = (
+    'The version this mutates is gone. It tried to decode around an '
+    'unrecognised key -- ignoring one on an object that looked complete, '
+    'refusing one where a component was missing, on the reasoning that '
+    'the unknown key might be that component renamed. \'Missing\' has '
+    'three spellings and each attempt left one uncovered: the key absent, '
+    'the key present and null, the key present and zero. Each was a $6.86 '
+    'limit price decoding as $6,860,000. The third cannot be closed at '
+    'all -- `signScale: 0` genuinely means scale 0. Measured against a '
+    'real capture it also bought nothing: under a rename that keeps the '
+    'old key at its default, 27 of 37 objects still decoded wrong, which '
+    'is what no guard does. Any unrecognised key refuses the object now; '
+    '`contrib/decimal-unknown-key-refuses` is the case. Kept because '
+    'decoding around an unknown key is the obvious thing to reach for and '
+    'was reached for three times.')
+
 CASES = [
     Case('exceptions/parent-side-flask',
          'schwaby/auth.py',
@@ -712,11 +730,10 @@ CASES = [
 
     # --- 3.0.0 / 3.0.1: the exception surface -------------------------------
     #
-    # All of this was red-proofed by hand across four review rounds, and the
-    # hand version had a blind spot the harness does not: a grep for `FAILED`
-    # cannot see a subTest, which pytest reports as SUBFAILED. One mutation
-    # came back "nothing noticed" and had in fact been caught. These cases go
-    # through the return code instead.
+    # Red-proofed by hand, these had a blind spot the harness does not: a
+    # grep for `FAILED` cannot see a subTest, which pytest reports as
+    # SUBFAILED, so a mutation that was caught reads as "nothing noticed".
+    # These cases go through the return code instead.
 
     Case('exceptions/parent-side-cryptography',
          'schwaby/auth.py',
@@ -742,10 +759,9 @@ CASES = [
          '::test_unparsable_location_raises_and_carries_the_header',
          'UnrecognizedLocationError'),
 
-    # The one the hand red-proof reported GREEN. Aliasing the two classes
-    # together passes every other assertion here, because each raise site
-    # names its own class and both assertRaises calls still match. Nothing
-    # asserted they were distinct until this was noticed.
+    # Aliasing the two classes together passes every other assertion here,
+    # because each raise site names its own class and both assertRaises
+    # calls still match; only this test asserts they are distinct.
     Case('exceptions/causes-are-distinct',
          'schwaby/utils.py',
          'class UnrecognizedLocationError(OrderIdNotFoundError):',
@@ -824,7 +840,7 @@ CASES = [
          '::test_a_non_number_is_refused_and_the_message_names_the_field',
          'must be a number',
          removed='The predicate this mutates, `numbers.Real`, existed for one '
-                 'commit. A review pointed out it is wider than what '
+                 'commit. It is wider than what '
                  '`_build_object` can serialize -- Fraction and the numpy '
                  'scalars are Real and all reach vars() -- so it became '
                  '`(int, float)`, the serializer\'s own test. '
@@ -917,13 +933,12 @@ CASES = [
          'tests/auth_test.py::ClientFromAccessFunctionsTest'
          '::test_asyncio_builds_an_async_client_and_still_writes_the_token',
          # The mock refuses a sync client handed the async writer, which is
-         # what the mutation does; `AsyncClient` matched only the echoed
-         # decorators until expect was held to what a failure says.
+         # what the mutation does; `AsyncClient` would match only the echoed
+         # decorators, which the harness does not read.
          'a sync OAuth client was handed a coroutine token writer'),
 
     # The same async token writer as auth/async-entry-point, 140 lines away in
-    # client_from_received_url. The first fix stopped at the first instance;
-    # this is the second, found by grepping the shape.
+    # client_from_received_url: the second instance of the same shape.
     Case('auth/async-received-url-writes-token',
          'schwaby/auth.py',
          '            token_write_func(t, *args, **kwargs)\n'
@@ -1154,7 +1169,7 @@ CASES = [
 
     # An error message that raises on the value it describes replaces a
     # SchwabError with a bare ValueError -- the escape class this function
-    # spent four rounds closing, arriving through the error path.
+    # exists to close, arriving through the error path.
     Case('contrib/decimal-error-message-cannot-raise',
          'schwaby/contrib/util.py',
          "        text = '<{} that cannot be formatted>'"
@@ -1220,8 +1235,8 @@ CASES = [
          '::test_a_mantissa_without_a_scale_is_scale_zero',
          '19200'),
 
-    # The bare-value path was the unvalidated sibling of the member path for
-    # three rounds. `Decimal`'s parser takes PEP 515 underscores, surrounding
+    # The bare-value path was once the unvalidated sibling of the member
+    # path. `Decimal`'s parser takes PEP 515 underscores, surrounding
     # whitespace, a leading +, and every Unicode decimal digit -- so '1_0' was
     # ten and '\u0663' was three, on a money field, silently.
     Case('contrib/decimal-bare-value-is-ascii-number',
@@ -1401,7 +1416,7 @@ CASES = [
          'tests/contrib/util_test.py::DecodeDecimalTest'
          '::test_a_renamed_key_is_refused_in_either_direction',
          'UnusableDecimalScale not raised',
-         removed="The version this mutates is gone. It tried to decode around an unrecognised key -- ignoring one on an object that looked complete, refusing one where a component was missing, on the reasoning that the unknown key might be that component renamed. Three review rounds each found a spelling of 'missing' it did not cover: the key absent, the key present and null, the key present and zero. Each was a $6.86 limit price decoding as $6,860,000. The third cannot be closed at all -- `signScale: 0` genuinely means scale 0. Measured against a real capture it also bought nothing: under a rename that keeps the old key at its default, 27 of 37 objects still decoded wrong, which is what no guard does. Any unrecognised key refuses the object now; `contrib/decimal-unknown-key-refuses` is the case. Kept because decoding around an unknown key is the obvious thing to reach for and was reached for three times."),
+         removed=_DECODING_AROUND_A_KEY_REMOVED),
 
 
     # The guard and the decoder must mean the same thing by "present". Keyed
@@ -1416,7 +1431,7 @@ CASES = [
          'tests/contrib/util_test.py::DecodeDecimalTest'
          '::test_an_explicit_null_does_not_slip_the_rename_guard',
          'UnusableDecimalScale not raised',
-         removed="The version this mutates is gone. It tried to decode around an unrecognised key -- ignoring one on an object that looked complete, refusing one where a component was missing, on the reasoning that the unknown key might be that component renamed. Three review rounds each found a spelling of 'missing' it did not cover: the key absent, the key present and null, the key present and zero. Each was a $6.86 limit price decoding as $6,860,000. The third cannot be closed at all -- `signScale: 0` genuinely means scale 0. Measured against a real capture it also bought nothing: under a rename that keeps the old key at its default, 27 of 37 objects still decoded wrong, which is what no guard does. Any unrecognised key refuses the object now; `contrib/decimal-unknown-key-refuses` is the case. Kept because decoding around an unknown key is the obvious thing to reach for and was reached for three times."),
+         removed=_DECODING_AROUND_A_KEY_REMOVED),
 
 
     # A key is whatever the decoder produced, and `str()` of a wide integer
@@ -1505,7 +1520,7 @@ CASES = [
          'tests/contrib/util_test.py::DecodeDecimalTest'
          '::test_a_renamed_key_is_refused_in_either_direction',
          'UnusableDecimalScale not raised',
-         removed="The version this mutates is gone. It tried to decode around an unrecognised key -- ignoring one on an object that looked complete, refusing one where a component was missing, on the reasoning that the unknown key might be that component renamed. Three review rounds each found a spelling of 'missing' it did not cover: the key absent, the key present and null, the key present and zero. Each was a $6.86 limit price decoding as $6,860,000. The third cannot be closed at all -- `signScale: 0` genuinely means scale 0. Measured against a real capture it also bought nothing: under a rename that keeps the old key at its default, 27 of 37 objects still decoded wrong, which is what no guard does. Any unrecognised key refuses the object now; `contrib/decimal-unknown-key-refuses` is the case. Kept because decoding around an unknown key is the obvious thing to reach for and was reached for three times."),
+         removed=_DECODING_AROUND_A_KEY_REMOVED),
 
 
     Case('contrib/decimal-renamed-mantissa-half',
@@ -1516,7 +1531,7 @@ CASES = [
          'tests/contrib/util_test.py::DecodeDecimalTest'
          '::test_a_renamed_key_is_refused_in_either_direction',
          'UnusableDecimalScale not raised',
-         removed="The version this mutates is gone. It tried to decode around an unrecognised key -- ignoring one on an object that looked complete, refusing one where a component was missing, on the reasoning that the unknown key might be that component renamed. Three review rounds each found a spelling of 'missing' it did not cover: the key absent, the key present and null, the key present and zero. Each was a $6.86 limit price decoding as $6,860,000. The third cannot be closed at all -- `signScale: 0` genuinely means scale 0. Measured against a real capture it also bought nothing: under a rename that keeps the old key at its default, 27 of 37 objects still decoded wrong, which is what no guard does. Any unrecognised key refuses the object now; `contrib/decimal-unknown-key-refuses` is the case. Kept because decoding around an unknown key is the obvious thing to reach for and was reached for three times."),
+         removed=_DECODING_AROUND_A_KEY_REMOVED),
 
 
     # The cap is justified by input nobody here controls, and `update`
@@ -1722,8 +1737,8 @@ CASES = [
 
     # `_is_mapping` is structural on purpose -- `get` and `__contains__`,
     # nothing about iteration -- and `set(msg)` requires iteration. The
-    # channel check this series added ended the receive loop on shapes
-    # 4.2.0 handled, through a documented public extension point.
+    # unknown-channel check ended the receive loop on shapes 4.2.0
+    # handled, through a documented public extension point.
     Case('streaming/unenumerable-mapping-still-dispatches',
          'schwaby/streaming.py',
          "        try:\n"
@@ -1881,9 +1896,10 @@ CASES = [
          "'\\nWARNING' unexpectedly found"),
 
     # Exactly the captured set. A token copied from a parser's fallback list
-    # rather than a frame is the defect the observation log was just
-    # corrected for, so the set is pinned. Mutated to the upper-case spelling
-    # the earlier note used, which is exactly what the capture corrected.
+    # rather than a frame is the defect the observation log in
+    # docs/streaming.rst was corrected for, so the set is pinned. Mutated to
+    # the upper-case spelling that log once used, which is exactly what the
+    # capture corrected.
     Case('streaming/message-type-vocabulary-is-the-captured-set',
          'schwaby/streaming.py',
          "        'OrderMonitorCreated', 'OrderMonitorCompleted',",
@@ -2064,7 +2080,7 @@ CASES = [
          'tests/contrib/util_test.py::DecodeDecimalTest'
          '::test_any_unrecognised_key_refuses_the_object',
          'UnusableDecimalScale',
-         removed="The version this mutates is gone. It tried to decode around an unrecognised key -- ignoring one on an object that looked complete, refusing one where a component was missing, on the reasoning that the unknown key might be that component renamed. Three review rounds each found a spelling of 'missing' it did not cover: the key absent, the key present and null, the key present and zero. Each was a $6.86 limit price decoding as $6,860,000. The third cannot be closed at all -- `signScale: 0` genuinely means scale 0. Measured against a real capture it also bought nothing: under a rename that keeps the old key at its default, 27 of 37 objects still decoded wrong, which is what no guard does. Any unrecognised key refuses the object now; `contrib/decimal-unknown-key-refuses` is the case. Kept because decoding around an unknown key is the obvious thing to reach for and was reached for three times."),
+         removed=_DECODING_AROUND_A_KEY_REMOVED),
 
 
     # Ignored is not the same as unnoticed. Without the report a schema
@@ -2166,9 +2182,9 @@ CASES = [
          '::test_every_failure_is_catchable_by_one_except',
          'ValueError',
          removed='The block this mutates is gone. Enumerating which exceptions '
-                 '`int()` can raise was wrong three rounds running -- each fix '
-                 'added a type and the next round found a shape that raised a '
-                 'different one, or worse, none at all: `int(1.9)` is 1 and '
+                 '`int()` can raise kept being wrong -- each added type left '
+                 'a shape that raised a different one, or worse, none at '
+                 'all: `int(1.9)` is 1 and '
                  "`int('1_0')` is 10. `_unsigned_32` validates the shape "
                  'instead, and the three cases below cover its branches. Kept '
                  'because coerce-and-catch is the obvious thing to write here '
@@ -2204,8 +2220,8 @@ CASES = [
     # Branch three: the range. A member past its width is not a member: a
     # `mid` or `hi` wider than 32 bits overlaps the next one, and a lone `lo`
     # past 96 bits is past what a System.Decimal can hold. The width is the
-    # caller's; the check is here. (This comment once gave `{"lo": 4294967296}`
-    # as the example of corruption. It is an ordinary fill principal.)
+    # caller's; the check is here. `{"lo": 4294967296}`, for one, is an
+    # ordinary fill principal, not corruption.
     Case('contrib/decimal-member-is-unsigned-32-bit',
          'schwaby/contrib/util.py',
          "    if not ok or not 0 <= member < 2 ** bits:",
@@ -2905,9 +2921,9 @@ CASES = [
          'tests/streaming_test.py::StreamClientTest::test_an_absorbed_cause_whose_type_cannot_be_named_is_reported',
          'boom'),
 
-    # The scale goes through the same validation. It reached `int()` directly
-    # for three rounds, so a float scale truncated and a bool scale decoded as
-    # 1 -- both of which change the answer by a factor of ten or more.
+    # The scale goes through the same validation. It once reached `int()`
+    # directly, so a float scale truncated and a bool scale decoded as 1 --
+    # both of which change the answer by a factor of ten or more.
     Case('contrib/decimal-scale-is-validated-like-a-member',
          'schwaby/contrib/util.py',
          "    scale = _unsigned(0 if scale_member is None else scale_member,\n"
@@ -3001,9 +3017,8 @@ CASES = [
          'tests/client_test.py::ClientTest::test_a_local_unsupported_token_type_without_expiry_is_terminal',
          'False is not true'),
 
-    # With an expiry it is refreshed once it lapses, so it stays retryable --
-    # the classification 01c1fde pinned, which a blanket reclassification
-    # broke.
+    # With an expiry it is refreshed once it lapses, so it stays retryable;
+    # calling every local UnsupportedTokenTypeError terminal breaks that.
     Case('client/stored-token-with-an-expiry-stays-retryable',
          'schwaby/client/base.py',
          "            return bool(_expiry_authlib_acts_on(token.get('expires_at'))\n"
@@ -3684,8 +3699,9 @@ CASES = [
          'tests/auth_test.py::TokenFileAgeTest::test_reading_the_age_does_not_log_at_info',
          'no logs of level INFO or higher'),
 
-    # Streaming follow-ups. An unparsable frame is quoted and cut in the
-    # message, and a frame json cannot read at all is still UnparsableMessage.
+    # Streaming messages and fallbacks. An unparsable frame is quoted and cut
+    # in the message, and a frame json cannot read at all is still
+    # UnparsableMessage.
     Case('stream-fu/unparsable-message-quotes-the-frame',
          'schwaby/streaming.py',
          "                   'cut: ' + _safe_value(raw))",
@@ -4756,8 +4772,8 @@ CASES = [
          'tests/auth_test.py::TokenFileWriterTest::test_a_path_that_is_not_a_path_is_refused_before_any_login',
          'TypeError'),
 
-    # 4.7.0 round 1: the writer refuses bytes, empty and directory paths; the
-    # date checks; and the fallback an abstract base needs.
+    # The writer refuses bytes, empty and directory paths; the date checks;
+    # and the fallback an abstract base needs.
     Case('auth/token-file-writer-refuses-a-bytes-path',
          'schwaby/auth.py',
          '    if not issubclass(type(path), str):\n        raise TypeError(',
@@ -4771,7 +4787,7 @@ CASES = [
          '    if os.path.isdir(path):',
          'tests/auth_test.py::TokenFileWriterTest::test_a_path_that_is_not_a_path_is_refused_before_any_login',
          'ValueError not raised',
-         removed='The empty-path clause was dropped in 4.7.0 round 3: an empty path resolves to the working directory, which the resolved-path directory check refuses.'),
+         removed='The empty-path clause was dropped: an empty path resolves to the working directory, which the resolved-path directory check refuses.'),
 
     Case('auth/token-file-writer-refuses-a-directory',
          'schwaby/auth.py',
@@ -5216,8 +5232,8 @@ CASES = [
 
     # The prefix check the comment warns about, whole: without the second
     # half, importing the empty module name of an unqualified `StreamClient`
-    # raised ValueError, a crash that matched only the echoed source until
-    # expect was held to what a failure says (2026-10-24).
+    # raised ValueError, a crash whose text appears only in the source pytest
+    # echoes, which the harness does not match against.
     Case('docs-config/ignore-list-is-standard-library-only',
          'tests/packaging_test.py',
          "                ok = (module.split('.')[0] in sys.stdlib_module_names\n",
@@ -6020,7 +6036,7 @@ CASES = [
          'tests/utils_test.py::HostileClassTest::test_a_class_that_raises_is_refused_like_any_other_instance',
          'ValueError'),
 
-    # 4.7.0 round 2: the writer refuses a path outside an existing directory.
+    # The writer refuses a path outside an existing directory.
     Case('auth/token-file-writer-refuses-a-path-outside-an-existing-directory',
          'schwaby/auth.py',
          '    directory = os.path.dirname(resolved)\n    if not os.path.isdir(directory):\n',
@@ -6035,8 +6051,7 @@ CASES = [
          'tests/auth_test.py::TokenFileWriterTest::test_a_path_that_is_not_a_path_is_refused_before_any_login',
          'ValueError not raised'),
 
-    # 4.7.0 round 3: a NUL is refused explicitly, since Windows' realpath lets
-    # it through.
+    # A NUL is refused explicitly, since Windows' realpath lets it through.
     Case('auth/token-file-writer-refuses-a-nul-itself',
          'schwaby/auth.py',
          "    if '\\0' in path:\n        raise ValueError('token_path must not contain a NUL')\n",
@@ -6097,8 +6112,8 @@ CASES = [
          'tests/utils_test.py::FindAccountHashTest::test_an_unusable_entry_for_another_account_is_skipped_once_reported',
          'has no hashValue'),
 
-    # 4.7.1 round 1: the ASCII check, the warning's level and logger, and an
-    # empty str-subclass hash.
+    # find_account_hash: the ASCII check, the warning's level and logger, and
+    # an empty str-subclass hash.
     Case('utils/find-account-hash-refuses-an-unusable-entry-not-ascii',
          'schwaby/utils.py',
          '        if (number != account_number\n                and number.isascii()\n                and number.isdigit()):\n',
@@ -6135,7 +6150,7 @@ CASES = [
          'tests/streaming_test.py::AccountActivityMessageTypeTest::test_the_empty_type_carrying_a_notice_is_not_reported',
          'Unexpected logs found'),
 
-    # 4.7.2 round 1: only an empty type carrying a text notice is exempt.
+    # Only an empty type carrying a text notice is exempt.
     Case('streaming/an-empty-type-with-a-payload-is-still-reported',
          'schwaby/streaming.py',
          '        return issubclass(type(parse_message_data(message_data)), str)\n',
@@ -6150,8 +6165,8 @@ CASES = [
          'tests/streaming_test.py::AccountActivityMessageTypeTest::test_an_empty_type_carrying_a_payload_is_still_reported',
          'no logs of level WARNING'),
 
-    # 4.7.2 round 2: a notice check that cannot run reports, and an empty type
-    # with no text is still reported.
+    # A notice check that cannot run reports, and an empty type with no text
+    # is still reported.
     Case('streaming/a-notice-that-cannot-be-checked-is-reported',
          'schwaby/streaming.py',
          '    try:\n        # contrib.util imports this module, so it is imported here rather than\n        # at the top, and inside the try: a notice that cannot be checked is\n        # reported, not dropped with the item it arrived in.\n        from .contrib.util import parse_message_data\n',
@@ -6484,8 +6499,8 @@ HARNESS_CASES = [
          'tests/redproof_tool_test.py::PoolSizeTest'
          '::test_memory_bounds_the_pool_and_says_so',
          '6 != 20'),
-    # A job's unit can be capped below what /proc/meminfo says the host
-    # has free, and SUITE_MEMORY_GB says by how much. A case per branch.
+    # A run can be held to a memory limit below what /proc/meminfo says the
+    # host has free, and SUITE_MEMORY_GB says how much. A case per branch.
     Case('harness/a-memory-cap-is-read',
          'tools/redproof.py',
          '    known = [n for n in (meminfo_available(), job_memory_cap())\n',
@@ -6578,8 +6593,8 @@ HARNESS_CASES = [
          '::test_the_pool_is_sized_to_a_memory_cap_and_says_so',
          "'SUITE_MEMORY_GB' unexpectedly found",
          subtest="'SUITE_MEMORY_GB': '64'"),
-    # A light job's unit has a CPU quota the core count cannot see, and
-    # SUITE_CORES says it. A case per branch.
+    # A run under a CPU quota may use fewer cores than its affinity mask
+    # shows, and SUITE_CORES says how many. A case per branch.
     Case('harness/a-core-cap-is-read',
          'tools/redproof.py',
          '    return min(host_cpus(), cap) if cap is not None else host_cpus()',
@@ -6705,8 +6720,8 @@ SUITE_CASES = [
          'tests/suite_config_test.py::AutoWorkersTest'
          '::test_before_3_13_the_affinity_mask_decides',
          'ignored the affinity mask'),
-    # Inside a job with a core cap, SUITE_CORES bounds the workers: a light job's unit
-    # has a CPU quota process_cpu_count() cannot see.
+    # Under a CPU quota, SUITE_CORES bounds the workers: process_cpu_count()
+    # cannot see the quota.
     Case('suite/auto-workers-honour-the-core-cap',
          'tests/conftest.py',
          '    return min(cores, cap) if cap is not None else cores',
@@ -6891,8 +6906,7 @@ LIGHT_CHECK_CASES = [
 ]
 
 LIGHT_CHECK_CASES += [
-    # Round-one review: each of these let a commit through, or refused one,
-    # wrongly.
+    # Each of these let a commit through, or refused one, wrongly.
     Case('light-check/a-rename-is-compared-with-its-old-path',
          'tools/light_check.py',
          "    before_text = blob('HEAD:' + before_path)",
@@ -7056,9 +7070,9 @@ PIN_CASES = [
 CASES += PIN_CASES
 
 
-# Round-one review of the harness (2026-10-24). Each breaks one guard the
-# review found untested, or one of its fixes.
-HARNESS_REVIEW_CASES = [
+# The harness's judging, its snapshot and its kept-verdict store. Each
+# breaks one guard, or one of its fixes.
+HARNESS_JUDGING_CASES = [
     # The expect text appeared in the test source pytest echoes, so a failure
     # on another assertion read as PROVEN: 150 entries were exposed.
     Case('harness/expect-is-matched-against-what-failed',
@@ -7160,14 +7174,14 @@ HARNESS_REVIEW_CASES = [
          'a tracked write went unreported'),
 ]
 
-CASES += HARNESS_REVIEW_CASES
+CASES += HARNESS_JUDGING_CASES
 
 
-# Round-two review of the harness.
-HARNESS_REVIEW_CASES_2 = [
+# More of the harness's judging and its store.
+HARNESS_JUDGING_CASES_2 = [
     # A subtest's label qualifies a failure and is never matched on its own:
     # it is text the test chose, and matching it proved an entry whose test
-    # had no assertion left (close-out review, 2026-10-24).
+    # had no assertion left.
     Case('harness/a-subtest-label-is-never-the-match',
          'tools/redproof.py',
          '    return any(case.expect in said\n',
@@ -7214,11 +7228,11 @@ HARNESS_REVIEW_CASES_2 = [
          'kept without the baseline being keepable'),
 ]
 
-CASES += HARNESS_REVIEW_CASES_2
+CASES += HARNESS_JUDGING_CASES_2
 
 
-# Round-two review of the tools.
-TOOLS_REVIEW_CASES_2 = [
+# The light check, and the workflows' pinned build.
+TOOLS_CASES = [
     Case('suite/every-workflow-uses-the-pinned-build',
          '.github/workflows/fresh.yml',
          '        python-version: ${{ steps.pin.outputs.version }}\n',
@@ -7248,7 +7262,7 @@ TOOLS_REVIEW_CASES_2 = [
          'a file that was a symlink went unchecked'),
 ]
 
-CASES += TOOLS_REVIEW_CASES_2
+CASES += TOOLS_CASES
 
 CASES.append(
     # What a test printed is its own text, E-prefixed or not.
@@ -7262,8 +7276,8 @@ CASES.append(
          'captured output was taken for what failed'))
 
 CASES.append(
-    # Close-out review: `await` outside an async function parses, so pyflakes
-    # passed it, and the hook committed a file Python cannot import.
+    # `await` outside an async function parses, so pyflakes passes it, and
+    # without this the hook would commit a file Python cannot import.
     Case('light-check/the-staged-file-must-compile',
          'tools/light_check.py',
          '        error = compile_error(staged, path)\n',
@@ -7273,9 +7287,8 @@ CASES.append(
          'a file Python cannot compile was let through'))
 
 CASES.append(
-    # Found in another project's harness and reproduced here: assertion
-    # rewriting quotes the failing expression, so an expect that is a literal
-    # in another assert matched that assert's failure.
+    # Assertion rewriting quotes the failing expression, so an expect that is
+    # a literal in another assert matched that assert's failure.
     Case('harness/a-rewritten-asserts-expression-is-not-what-failed',
          'tools/redproof.py',
          "        if text.startswith('assert ') or text.startswith(\n"
@@ -7286,8 +7299,8 @@ CASES.append(
          "quoted expression was taken for what failed"))
 
 CASES.append(
-    # A scheduler divides a run by this line, so its two counts must be the
-    # slice's and the whole's, in that order.
+    # A run divided between machines is read off this line, so its two
+    # counts must be the slice's and the whole's, in that order.
     Case('harness/the-shard-line-states-slice-and-whole',
          'tools/redproof.py',
          '        shard[0], shard[1], in_slice, total)',
@@ -7490,7 +7503,7 @@ CASES.extend([
 CASES.extend([
     # The closed world: every file pytest's interpreter could import from is
     # one a RECORD lists, or the standard library's digest covers. A case
-    # per rule; an earlier list of bad cases missed five.
+    # per rule.
     Case('harness/schwaby-is-held-to-its-record',
          'tools/redproof.py',
          '            listed.add(os.path.abspath(path))\n',
@@ -7652,10 +7665,9 @@ CASES.extend([
 _KEPT_VERDICTS_FOUND = set()
 KEPT_VERDICTS_REMOVED = (
     'Kept verdicts were deleted: every run judges every entry, since the '
-    'whole set takes about a minute and a half on 20 cores, and the '
-    'machinery that kept them produced every high finding in two review '
-    'rounds, each a way a verdict stayed kept after something it read had '
-    'changed. This case mutated that machinery.')
+    'whole set takes about a minute and a half on 20 cores, and keeping '
+    'them kept a verdict after something it read had changed, in more '
+    'than one way. This case mutated that machinery.')
 _KEPT_VERDICTS_CASES = {
             'harness/a-started-process-is-never-kept',
             'harness/a-secret-file-is-never-digested',
@@ -7704,7 +7716,7 @@ for _case in CASES:
 del _case
 
 CASES.extend([
-    # The pool's close-out: a case for each branch it found without one.
+    # The worker pool: a case for each of its branches that had none.
     Case('harness/an-item-for-a-gone-worker-waits-for-its-replacement',
          'tools/redproof.py',
          '        except OSError:\n            return False\n',
@@ -7858,7 +7870,7 @@ CASES.extend([
 ])
 
 CASES.extend([
-    # The pool's second review: a case for each branch it found without one.
+    # More of the worker pool: a case for each of its branches that had none.
     Case('harness/a-stopped-worker-kills-its-own-tests',
          'tools/redproof.py',
          '        for pid in list(_live):\n            kill_group(pid)\n'
@@ -8029,8 +8041,8 @@ CASES.extend([
 ])
 
 CASES.extend([
-    # The close-out review: what is not a write to a tracked file, though a
-    # file's identity would have named one.
+    # What is not a write to a tracked file, though a file's identity would
+    # have named one.
     Case('audit/a-removed-link-is-not-its-file',
          'tools/redproof_audit.py',
          "    'os.remove': ((0, 1, False),),\n",
@@ -8271,7 +8283,7 @@ CASES.extend([
          'a branch with no test change chose entries'),
     Case('changed-set/no-changed-test-runs-nothing',
          'tools/redproof.py',
-         "        if not cases:\n            # Still the lines a scheduler reads: nothing to run.\n            print('redproof: 0 selected, 0 removed, 0 to run%s' % (\n                ' (shard %d/%d)' % args.shard if args.shard else ''),\n                flush=True)\n            if args.shard:\n                print(shard_line(args.shard, 0, 0), flush=True)\n            return 0\n",
+         "        if not cases:\n            # Still the summary lines, with nothing to run.\n            print('redproof: 0 selected, 0 removed, 0 to run%s' % (\n                ' (shard %d/%d)' % args.shard if args.shard else ''),\n                flush=True)\n            if args.shard:\n                print(shard_line(args.shard, 0, 0), flush=True)\n            return 0\n",
          '',
          'tests/redproof_tool_test.py::ChangedSetTest'
          '::test_the_tool_runs_only_the_changed_set',

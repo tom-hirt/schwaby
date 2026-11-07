@@ -15,10 +15,11 @@ def usable_cpus():
 
 
 def job_cores():
-    '''A job's core cap, SUITE_CORES: how many cores it may use, or None when
-    it is unset or not a positive whole number. A light job's unit is held to
-    a CPU quota that the counts above cannot see; whatever runs the job sets
-    this in its environment to say so.'''
+    '''The core cap, SUITE_CORES: how many cores a run may use, or None when
+    it is unset or not a positive whole number. A run under a CPU quota (a
+    cgroup or container limit) may use fewer cores than the counts above
+    show; whatever starts the run sets this in its environment to say how
+    many.'''
     try:
         cores = int(os.environ.get('SUITE_CORES', ''))
     except ValueError:

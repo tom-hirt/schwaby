@@ -47,8 +47,8 @@ class AutoWorkersTest(unittest.TestCase):
             '-n auto ignored the affinity mask')
 
     def test_a_jobs_core_cap_bounds_the_workers(self):
-        # A light job's unit has a CPU quota process_cpu_count() does
-        # not show; SUITE_CORES says it.
+        # A run under a CPU quota may use fewer cores than
+        # process_cpu_count() shows; SUITE_CORES says how many.
         for value, expected in (('4', 4), (' 4 ', 4),
                                 # Above the usable count it does not raise it.
                                 ('16', 7),

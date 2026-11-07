@@ -358,7 +358,7 @@ class LightCheckTest(unittest.TestCase):
         code, out = self.check()
         self.assertEqual(0, code, out)
         self.assertIn('1 test module read a file this commit changes; run '
-                      'them before the batch merges: python -m pytest '
+                      'them before the change merges: python -m pytest '
                       'tests/a_test.py\n', out,
                       'the tests a commit reaches were not named: ' + out)
         self.assertNotIn('tests/b_test.py', out)

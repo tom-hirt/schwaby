@@ -23,7 +23,7 @@ commit will contain:
 
 It names the test modules the commit reaches, from the index's
 tools/reads.json: those whose reads include a file it changes. They are the
-tests a batch runs before it merges.
+tests to run before the change merges.
 
 When the commit changes a file under tests/, it names the red-proof entries
 it reaches too, by tools/redproof.py's own rule: the release red-proof runs them, and
@@ -206,7 +206,7 @@ def _load(path):
 def reached_tests():
     '''The test modules this commit reaches: those whose reads, by the
     index's tools/reads.json, include a file it changes, and a new test
-    module. They are the touched tests a batch runs before it merges.
+    module. They are the tests to run before the change merges.
     Nothing, with a note, when the index has no map or one that is not a
     map; nothing when the checkout has no tools to read it with.'''
     here = os.path.dirname(os.path.abspath(__file__))
@@ -260,7 +260,7 @@ def main():
         tests = []
     if tests:
         print('light check: %d test module%s read a file this commit changes; '
-              'run them before the batch merges: python -m pytest %s' % (
+              'run them before the change merges: python -m pytest %s' % (
                   len(tests), '' if len(tests) == 1 else 's',
                   ' '.join(tests)))
     try:

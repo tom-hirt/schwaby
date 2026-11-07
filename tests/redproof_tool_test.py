@@ -1375,8 +1375,8 @@ class PoolSizeTest(unittest.TestCase):
         self.assertIn('REDPROOF_JOBS_ALL=1', reason)
 
     def test_a_jobs_core_cap_bounds_the_count(self):
-        # A light job's unit has a CPU quota process_cpu_count() does
-        # not show; SUITE_CORES says it.
+        # A run under a CPU quota may use fewer cores than
+        # process_cpu_count() shows; SUITE_CORES says how many.
         for value, expected in (('4', 4), (' 4 ', 4),
                                 # Above the host's count it does not raise it.
                                 ('16', 7),
@@ -1428,8 +1428,8 @@ class PoolSizeTest(unittest.TestCase):
         self.assertIn('memory holds 6', reason)
 
     def test_a_jobs_memory_cap_bounds_what_is_available(self):
-        # /proc/meminfo describes the host; a job's unit may be capped
-        # below it, and says so in SUITE_MEMORY_GB.
+        # /proc/meminfo describes the host; a run may be held to a memory
+        # limit below it, and says so in SUITE_MEMORY_GB.
         host = 30 << 30
         for value, expected in (('8', 8 << 30),
                                 ('0.5', 1 << 29),

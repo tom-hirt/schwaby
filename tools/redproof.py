@@ -13,9 +13,9 @@ or whose tests read a file it changes by tools/reads.json; when there are
 none it runs nothing and exits 0.
 
 A test that passes whether or not the fix is there is worse than none, because
-it looks like protection. So revert the fix and watch the test fail. Doing that
-by hand failed four times in one sitting here, every time producing a red, just
-not from the assertion being claimed:
+it looks like protection. So revert the fix and watch the test fail. Done by
+hand, that goes wrong in ways that still produce a red, just not from the
+assertion being claimed:
 
  * a mutation applied to a call site both branches reach, so it proved only
    that *some* branch was covered;
@@ -59,10 +59,9 @@ cannot be collected; 2 when --name matches nothing, or the arguments are
 wrong.
 
 Every run judges every selected entry. Verdicts are not kept from one run to
-the next: the whole set takes about a minute and a half on 20 cores, and the
-machinery that kept them, keyed on everything a run read, produced every high
-finding in two review rounds, each a way a verdict stayed kept after
-something it depended on had changed.
+the next: the whole set takes about a minute and a half on 20 cores, and
+keeping them, keyed on everything a run read, kept a verdict after something
+it depended on had changed, in more than one way.
 
 SHARDS. `--shard K/N` judges one slice of N, so N machines can share one
 run: the selected entries (after --name) are divided by a hash of each name,
@@ -79,14 +78,14 @@ tools/redproof_audit.py, which puts the copy first on sys.path; before judging
 anything the run proves that `import schwaby` in a copy resolves inside it,
 because an import from anywhere else makes every verdict a false GREEN.
 
-PARALLEL. Every usable core with REDPROOF_JOBS_ALL=1, which a job that holds
-a machine to itself sets; two at a time otherwise, since a run on a machine
-someone is using should stay modest. No more than memory holds, beyond the
+PARALLEL. Every usable core with REDPROOF_JOBS_ALL=1, for a machine the run
+has to itself; two at a time otherwise, since a run on a machine someone is
+using should stay modest. No more than memory holds, beyond the
 one run that always goes ahead: the pool is min(cores, (available memory -
 FLOOR) / the largest run measured so far), at least one, printed with its
-reason. Available memory is MemAvailable, or a job's memory cap
-(SUITE_MEMORY_GB) where that is lower; usable cores are bounded by its core
-cap (SUITE_CORES) the same way. The first baseline runs alone to give that
+reason. Available memory is MemAvailable, or the memory cap SUITE_MEMORY_GB
+states where that is lower; usable cores are bounded by the core cap
+SUITE_CORES states the same way. The first baseline runs alone to give that
 measurement. `--jobs` overrides the core count. Entries run side by side
 whatever their tests are: each login-flow test takes a free callback port of
 its own, so two no longer take each other's server for their own.
@@ -169,7 +168,7 @@ def _untrack(pid):
 
 
 def usable_cpus():
-    '''The cores this process may run on, bounded by a job's core cap.'''
+    '''The cores this process may run on, bounded by SUITE_CORES.'''
     cap = job_cores()
     return min(host_cpus(), cap) if cap is not None else host_cpus()
 
@@ -185,10 +184,10 @@ def host_cpus():
 
 
 def job_cores():
-    '''A job's core cap, SUITE_CORES: how many cores it may use, or None when
-    it is unset or not a positive whole number. A light job's unit is held to
-    a CPU quota that host_cpus() cannot see; whatever runs the job sets this
-    in its environment to say so.'''
+    '''The core cap, SUITE_CORES: how many cores a run may use, or None when
+    it is unset or not a positive whole number. A run under a CPU quota (a
+    cgroup or container limit) may use fewer cores than host_cpus() shows;
+    whatever starts the run sets this in its environment to say how many.'''
     try:
         cores = int(os.environ.get('SUITE_CORES', ''))
     except ValueError:
@@ -210,12 +209,12 @@ def job_cores_note():
 
 def available_memory():
     '''The memory runs may use, in bytes, or None where nothing says: the
-    lower of MemAvailable and a job's memory cap. /proc/meminfo describes
-    the host, not the job, so under a cap smaller than the host's free
-    memory it alone would size the pool past it. Whatever runs the job
-    states the cap in its environment as SUITE_MEMORY_GB, in GiB: for a
-    light job on a small machine it is the unit's MemoryMax, which the
-    kernel enforces; otherwise it is advisory.'''
+    lower of MemAvailable and the stated memory cap. /proc/meminfo
+    describes the host, not the run, so under a cap smaller than the host's
+    free memory it alone would size the pool past it. Whatever starts the
+    run states the cap in its environment as SUITE_MEMORY_GB, in GiB: the
+    memory limit the run is under, such as a cgroup's memory.max, where
+    there is one; otherwise it is advisory.'''
     known = [n for n in (meminfo_available(), job_memory_cap())
              if n is not None]
     return min(known) if known else None
@@ -785,8 +784,8 @@ def in_shard(name, shard):
 
 
 def shard_line(shard, in_slice, total):
-    '''The line a scheduler reads to see how a run was divided: this slice's
-    selected entries and the whole selection's, before slicing.'''
+    '''The line that says how a run was divided between machines: this
+    slice's selected entries and the whole selection's, before slicing.'''
     return 'redproof: shard %d/%d: %d of %d entries' % (
         shard[0], shard[1], in_slice, total)
 
@@ -960,7 +959,7 @@ def judge_all(run, args, started):
         cases, helpers = changed_set(cases, changed, snapshot.content.get)
         print(touching_line(args.touching, cases, helpers), flush=True)
         if not cases:
-            # Still the lines a scheduler reads: nothing to run.
+            # Still the summary lines, with nothing to run.
             print('redproof: 0 selected, 0 removed, 0 to run%s' % (
                 ' (shard %d/%d)' % args.shard if args.shard else ''),
                 flush=True)
@@ -976,7 +975,7 @@ def judge_all(run, args, started):
 
     removed = [c for c in selected if c.removed]
     live = [c for c in selected if not c.removed]
-    # 'to run' is the count a scheduler reads off this line.
+    # 'to run' is the machine-readable count on this line.
     print('redproof: %d selected, %d removed, %d to run%s' % (
         len(selected), len(removed), len(live),
         ' (shard %d/%d)' % args.shard if args.shard else ''), flush=True)

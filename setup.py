@@ -70,8 +70,8 @@ setuptools.setup(
         # process. These were an optional `login` extra in 2.3.0 and are hard
         # dependencies again as of 3.0.0: the split saved twelve packages for
         # nobody who existed, and cost three silent failure modes -- pip freeze
-        # drops extras, a consumer's deploy check could not evaluate an
-        # extras-bearing requirement line, and the machinery needed its own
+        # drops extras, a deploy check that reads requirement lines may not
+        # evaluate one carrying extras, and the machinery needed its own
         # error path and tests.
         'flask',
         'multiprocess',
