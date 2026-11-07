@@ -28,9 +28,10 @@ class DecodeDecimalTest(unittest.TestCase):
     """The ACCT_ACTIVITY scaled-integer decimal.
 
     Two kinds of case, and the difference matters when reading a failure. The
-    values are captured off a live account and each pins one of the five things
-    this gets right, each of which costs a value, usually as a wrong number
-    rather than an error. The *corruption* is synthetic, necessarily: a guard
+    shapes are taken from live traffic, the values in them are invented, and
+    each pins one of the five things this gets right, each of which costs a
+    value, usually as a wrong number rather than an error. The *corruption* is
+    synthetic, necessarily: a guard
     against a shape nothing currently sends cannot be tested with what is
     currently sent. Anything reasoned rather than observed says so on the case.
     """
@@ -38,18 +39,18 @@ class DecodeDecimalTest(unittest.TestCase):
     @no_duplicates
     def test_the_measured_payloads_decode_exactly(self):
         for field, expected, label in (
-                ({'lo': '6860000', 'signScale': 12}, '6.86', 'LimitPrice'),
-                ({'lo': '84279900', 'signScale': 12}, '84.2799', 'AveragePrice'),
-                ({'lo': '152000000', 'signScale': 12}, '152', 'CumulativeQuantity'),
-                ({'lo': '13710000', 'signScale': 12}, '13.71', 'Bid')):
+                ({'lo': '7350000', 'signScale': 12}, '7.35', 'LimitPrice'),
+                ({'lo': '63451700', 'signScale': 12}, '63.4517', 'AveragePrice'),
+                ({'lo': '118000000', 'signScale': 12}, '118', 'CumulativeQuantity'),
+                ({'lo': '21470000', 'signScale': 12}, '21.47', 'Bid')):
             with self.subTest(label):
                 self.assertEqual(decimal.Decimal(expected),
                                  decode_decimal(field))
 
     @no_duplicates
     def test_lo_carries_the_whole_mantissa_past_32_bits(self):
-        # Measured shape, invented values. A recorded ACCT_ACTIVITY archive
-        # of 5,843 decimal objects carried `lo` alone in every one, as a
+        # Measured shape, invented values. In recorded ACCT_ACTIVITY traffic,
+        # 5,843 decimal objects carried `lo` alone in every one, as a
         # string of digits, and 129 were wider than 32 bits: fill
         # `PrincipalAmmount`, and the estimated amounts on OrderCreated, ten
         # digits at signScale 12 or 13. Read whole, each of the 33 fill
@@ -57,8 +58,8 @@ class DecodeDecimalTest(unittest.TestCase):
         # This decoder refused all 129 while it held `lo` to 32 bits.
         for field, expected in (
                 ({'lo': '4294967296', 'signScale': 12}, '4294.967296'),
-                ({'lo': '6860000000', 'signScale': 12}, '6860'),
-                ({'lo': '6860000000', 'signScale': 13}, '-6860'),
+                ({'lo': '7350000000', 'signScale': 12}, '7350'),
+                ({'lo': '7350000000', 'signScale': 13}, '-7350'),
                 ({'lo': '9999999999', 'signScale': 12}, '9999.999999')):
             with self.subTest(value=field):
                 self.assertEqual(decimal.Decimal(expected),
@@ -103,8 +104,8 @@ class DecodeDecimalTest(unittest.TestCase):
                     decode_decimal(value)
         # A corrupt `mid` or `hi` is named as itself, not blamed on a `lo`
         # that is ordinary on its own.
-        for value, name in (({'lo': '6860000000', 'hi': False}, 'hi'),
-                            ({'lo': '6860000000', 'mid': ''}, 'mid')):
+        for value, name in (({'lo': '7350000000', 'hi': False}, 'hi'),
+                            ({'lo': '7350000000', 'mid': ''}, 'mid')):
             with self.subTest(named=name):
                 with self.assertRaisesRegex(UnusableDecimalScale,
                                             '^' + name + ' is not'):
@@ -182,11 +183,11 @@ class DecodeDecimalTest(unittest.TestCase):
                          decode_decimal(Stored(lo='5000000000',
                                                signScale=13)))
         # Any mapping, not only a dict.
-        for mapping in (collections.UserDict(lo='6860000', signScale=12),
+        for mapping in (collections.UserDict(lo='7350000', signScale=12),
                         types.MappingProxyType(
-                            {'lo': '6860000', 'signScale': 12})):
+                            {'lo': '7350000', 'signScale': 12})):
             with self.subTest(mapping=type(mapping).__name__):
-                self.assertEqual(decimal.Decimal('6.86'),
+                self.assertEqual(decimal.Decimal('7.35'),
                                  decode_decimal(mapping))
 
     @no_duplicates
@@ -201,8 +202,8 @@ class DecodeDecimalTest(unittest.TestCase):
             def __eq__(self, other):
                 raise RuntimeError('boom')
 
-        self.assertEqual(decimal.Decimal('6.86'),
-                         decode_decimal({Key('lo'): '6860000',
+        self.assertEqual(decimal.Decimal('7.35'),
+                         decode_decimal({Key('lo'): '7350000',
                                          Key('signScale'): 12}))
 
         # Two keys with the same plain text cannot both be the member. This
@@ -407,7 +408,7 @@ class DecodeDecimalTest(unittest.TestCase):
         # including through the recipe the streaming docs give for it.
         self.addCleanup(util._reported_keys.clear)
         forged = 'x\nCRITICAL:schwaby.orders:order 123 FILLED'
-        for value in ({'lo': '6860000', 'signScale': 12, forged: 0},
+        for value in ({'lo': '7350000', 'signScale': 12, forged: 0},
                       {forged: 0}):
             with self.subTest(value=value):
                 with self.assertRaises(UnusableDecimalScale) as caught:
@@ -528,9 +529,9 @@ class DecodeDecimalTest(unittest.TestCase):
             decode_decimal({Unequal(): '5', 'signScale': 12})
         # The ordinary subclass a custom decoder produces still decodes.
         self.assertEqual(
-                decimal.Decimal('6.86'),
+                decimal.Decimal('7.35'),
                 decode_decimal(json.loads(
-                    '{"lo": "6860000", "signScale": 12}',
+                    '{"lo": "7350000", "signScale": 12}',
                     object_pairs_hook=collections.OrderedDict)))
 
     @no_duplicates
@@ -539,8 +540,8 @@ class DecodeDecimalTest(unittest.TestCase):
         # principal is negative on a buy because the cash goes out.
         self.assertEqual(decimal.Decimal('-40'),
                          decode_decimal({'lo': '40000000', 'signScale': 13}))
-        self.assertEqual(decimal.Decimal('-6.86'),
-                         decode_decimal({'lo': '6860000', 'signScale': 13}))
+        self.assertEqual(decimal.Decimal('-7.35'),
+                         decode_decimal({'lo': '7350000', 'signScale': 13}))
 
     @no_duplicates
     def test_a_mantissa_without_a_scale_is_scale_zero(self):
@@ -548,24 +549,24 @@ class DecodeDecimalTest(unittest.TestCase):
         # cannot be told from one that was lost, and that guessing the common
         # value -- six places -- is wrong by a factor of a million when it is
         # wrong. The reasoning was fine and the premise was not: the shape is
-        # ordinary traffic, and the docstring called it unobserved while a
-        # capture on disk carried eight of them.
+        # ordinary traffic, on the size fields of an ordinary quote.
         #
-        # One quote, verbatim, which is what settles it. Scale 12 on the
-        # prices and no scale at all on the sizes, in the same object:
-        quote = {'Ask':     {'lo': '13720000', 'signScale': 12},
-                 'AskSize': {'lo': '19200'},
-                 'Bid':     {'lo': '13710000', 'signScale': 12},
-                 'BidSize': {'lo': '4200'},
-                 'Mid':     {'lo': '13715000', 'signScale': 12}}
+        # One quote, in the shape live traffic carries it, with invented
+        # values. Scale 12 on the prices and no scale at all on the sizes, in
+        # the same object:
+        quote = {'Ask':     {'lo': '21480000', 'signScale': 12},
+                 'AskSize': {'lo': '15300'},
+                 'Bid':     {'lo': '21470000', 'signScale': 12},
+                 'BidSize': {'lo': '2600'},
+                 'Mid':     {'lo': '21475000', 'signScale': 12}}
         self.assertEqual(
-                {'Ask': decimal.Decimal('13.72'),
-                 'AskSize': decimal.Decimal(19200),
-                 'Bid': decimal.Decimal('13.71'),
-                 'BidSize': decimal.Decimal(4200),
-                 'Mid': decimal.Decimal('13.715')},
+                {'Ask': decimal.Decimal('21.48'),
+                 'AskSize': decimal.Decimal(15300),
+                 'Bid': decimal.Decimal('21.47'),
+                 'BidSize': decimal.Decimal(2600),
+                 'Mid': decimal.Decimal('21.475')},
                 {k: decode_decimal(v) for k, v in quote.items()})
-        # $13.72 with 19200 on the ask is a coherent quote; 0.0192 shares is
+        # $21.48 with 15300 on the ask is a coherent quote; 0.0153 shares is
         # not. The serializer omits what is zero, and the scale is no
         # different from a mantissa member in that respect.
 
@@ -596,9 +597,9 @@ class DecodeDecimalTest(unittest.TestCase):
         # The point of not returning a float: set_price refuses one, so a
         # decoded value has to survive being fed straight back.
         from schwaby.orders.generic import OrderBuilder
-        price = decode_decimal({'lo': '6860000', 'signScale': 12})
+        price = decode_decimal({'lo': '7350000', 'signScale': 12})
         self.assertIsInstance(price, decimal.Decimal)
-        self.assertEqual({'price': '6.860000'},
+        self.assertEqual({'price': '7.350000'},
                          OrderBuilder().set_price(price).build())
 
     @no_duplicates
@@ -617,11 +618,11 @@ class DecodeDecimalTest(unittest.TestCase):
     @no_duplicates
     def test_a_bare_number_passes_through(self):
         # The same field does not always arrive in the same shape.
-        self.assertEqual(decimal.Decimal('6.86'), decode_decimal('6.86'))
-        self.assertEqual(decimal.Decimal('6.86'), decode_decimal(6.86))
-        self.assertEqual(decimal.Decimal('6860000'), decode_decimal(6860000))
-        self.assertEqual(decimal.Decimal('6.86'),
-                         decode_decimal(decimal.Decimal('6.86')))
+        self.assertEqual(decimal.Decimal('7.35'), decode_decimal('7.35'))
+        self.assertEqual(decimal.Decimal('7.35'), decode_decimal(7.35))
+        self.assertEqual(decimal.Decimal('7350000'), decode_decimal(7350000))
+        self.assertEqual(decimal.Decimal('7.35'),
+                         decode_decimal(decimal.Decimal('7.35')))
         self.assertIsNone(decode_decimal(None))
         # A float goes through `str` so its binary expansion does not come
         # along: Decimal(0.1) is 0.1000000000000000055511151231257827.
@@ -773,8 +774,8 @@ class DecodeDecimalTest(unittest.TestCase):
                          decode_decimal({'lo': '1', 'signScale': 13}))
 
     def test_a_bare_value_refuses_what_a_member_refuses(self):
-        # The gap that let three rounds of member-validation work sit beside
-        # an unvalidated sibling: `decimal.Decimal`'s parser accepts more than
+        # The bare-value path must refuse what the member path refuses:
+        # `decimal.Decimal`'s parser accepts more than
         # `int`'s does, so every token the mantissa path refuses decoded here
         # instead, as a confident wrong number, on a field the docstring says
         # arrives in either shape.
@@ -834,7 +835,7 @@ class DecodeDecimalTest(unittest.TestCase):
                 with self.assertRaises(UnusableDecimalScale):
                     decode_decimal(value)
         # Positive control: the bound is far outside anything real.
-        for value in ('1E-64', '1E64', '6.86', '-6.86', 10 ** 20):
+        for value in ('1E-64', '1E64', '7.35', '-7.35', 10 ** 20):
             with self.subTest(value=value):
                 self.assertEqual(decimal.Decimal(value), decode_decimal(value))
 
@@ -883,8 +884,8 @@ class DecodeDecimalTest(unittest.TestCase):
         # reached it -- and zero is what a $0 commission and a completed fill
         # look like. Refused only when *none* of the four keys is present;
         # see the schema-addition test below for the other direction.
-        for value in ({'Lo': 6860000, 'SignScale': 12},     # PascalCase
-                      {'low': 6860000},                     # typo, no scale
+        for value in ({'Lo': 7350000, 'SignScale': 12},     # PascalCase
+                      {'low': 7350000},                     # typo, no scale
                       {'symbol': 'AAPL', 'quantity': 100},  # another object
                       {'flags': 0}):
             with self.subTest(value=value):
@@ -900,15 +901,15 @@ class DecodeDecimalTest(unittest.TestCase):
         # were once decoded, and they are not symmetric in cost.
         #
         # A renamed mantissa read as zero. A renamed *scale* was far worse:
-        # with no signScale the absent-scale rule applies, so a $6.86 limit
-        # price decoded as $6,860,000 -- a confident wrong number six orders
-        # of magnitude out, on the field this feed exists to carry. The
-        # analysis that introduced this enumerated only the zero half.
-        for value in ({'lo': '6860000', 'SignScale': 12},   # scale renamed
-                      {'lo': '6860000', 'signscale': 12},   # ... or recased
-                      {'lo': '6860000', 'Scale': 12},
-                      {'Lo': '6860000', 'signScale': 12},   # mantissa renamed
-                      {'low': 6860000, 'signScale': 12}):
+        # with no signScale the absent-scale rule applies, so a $7.35 limit
+        # price decoded as $7,350,000 -- a confident wrong number six orders
+        # of magnitude out, on the field this feed exists to carry. Both
+        # halves are tested here.
+        for value in ({'lo': '7350000', 'SignScale': 12},   # scale renamed
+                      {'lo': '7350000', 'signscale': 12},   # ... or recased
+                      {'lo': '7350000', 'Scale': 12},
+                      {'Lo': '7350000', 'signScale': 12},   # mantissa renamed
+                      {'low': 7350000, 'signScale': 12}):
             with self.subTest(value=value):
                 util._reported_keys.clear()
                 with self.assertRaises(UnusableDecimalScale):
@@ -922,12 +923,12 @@ class DecodeDecimalTest(unittest.TestCase):
         and the scale twenty lines below treat an explicit null as an
         absence -- deliberately, with their own test. So a null walked
         straight back into the defect the guard was added to close: no usable
-        `signScale`, the absent-scale rule applies, and a $6.86 limit price
-        decodes as $6,860,000.
+        `signScale`, the absent-scale rule applies, and a $7.35 limit price
+        decodes as $7,350,000.
         """
-        for src in ('{"lo": "6860000", "signScale": null, "SignScale": 12}',
-                    '{"lo": "6860000", "signScale": null, "flags": 0}',
-                    '{"lo": null, "signScale": 12, "low": 6860000}',
+        for src in ('{"lo": "7350000", "signScale": null, "SignScale": 12}',
+                    '{"lo": "7350000", "signScale": null, "flags": 0}',
+                    '{"lo": null, "signScale": 12, "low": 7350000}',
                     '{"lo": null, "mid": null, "hi": null,'
                     ' "signScale": 12, "f": 0}'):
             with self.subTest(src=src):
@@ -938,33 +939,33 @@ class DecodeDecimalTest(unittest.TestCase):
         # unknown key is in play, which is the rule this borrows.
         util._reported_keys.clear()
         self.assertEqual(
-                decimal.Decimal(19200),
+                decimal.Decimal(15300),
                 decode_decimal(json.loads(
-                    '{"lo": "19200", "signScale": null}')))
+                    '{"lo": "15300", "signScale": null}')))
 
     def test_any_unrecognised_key_refuses_the_object(self):
         """The whole rule, and it is the whole rule on purpose.
 
-        Three rounds of review broke the version that tried to decode around
-        an unknown key: it ignored one on an object that looked complete and
+        A version that tried to decode around an unknown key was wrong three
+        ways: it ignored one on an object that looked complete and
         refused one where a component was missing, and "missing" turned out
         to have more spellings than anyone enumerates -- absent, null, and
-        zero, each a $6.86 limit price decoding as $6,860,000. The last of
+        zero, each a $7.35 limit price decoding as $7,350,000. The last of
         those cannot be closed, because `signScale: 0` genuinely means scale
-        0. Measured against a real capture the clever version also bought
+        0. Measured against recorded traffic, the clever version also bought
         nothing: 27 of 37 objects still decoded wrong under a rename that
         keeps the old key at its default.
         """
         for value in (
                 # A key alongside a complete object -- a schema addition.
-                {'lo': '13720000', 'signScale': 12, 'flags': 0},
+                {'lo': '21480000', 'signScale': 12, 'flags': 0},
                 {'lo': '705032704', 'mid': 1, 'signScale': 12, 'f': 0},
-                {'lo': '6860000', 'signScale': 13, 'IsNeg': True},
+                {'lo': '7350000', 'signScale': 13, 'IsNeg': True},
                 # A component missing, in each of its three spellings.
-                {'lo': '6860000', 'SignScale': 12},
-                {'lo': '6860000', 'signScale': None, 'SignScale': 12},
-                {'lo': '6860000', 'signScale': 0, 'SignScale': 12},
-                {'lo': '6860000', 'signScale': '0', 'SignScale': 12},
+                {'lo': '7350000', 'SignScale': 12},
+                {'lo': '7350000', 'signScale': None, 'SignScale': 12},
+                {'lo': '7350000', 'signScale': 0, 'SignScale': 12},
+                {'lo': '7350000', 'signScale': '0', 'SignScale': 12},
                 # A renamed member of the mantissa, which the previous
                 # version documented as an inherent gap. It is not one.
                 {'lo': '705032704', 'Mid': 1, 'signScale': 12},
@@ -983,15 +984,15 @@ class DecodeDecimalTest(unittest.TestCase):
         # clever version look necessary. The non-zero `mid` is reasoned from
         # the .NET layout rather than observed -- no captured payload has
         # carried one, which the streaming docs mark as unconfirmed.
-        for value, expected in (({'lo': '13720000', 'signScale': 12}, '13.72'),
-                                ({'lo': '19200'}, '19200'),
+        for value, expected in (({'lo': '21480000', 'signScale': 12}, '21.48'),
+                                ({'lo': '15300'}, '15300'),
                                 ({'signScale': 12}, '0'),
                                 ({}, '0'),
-                                ({'lo': '6860000', 'signScale': 13}, '-6.86'),
+                                ({'lo': '7350000', 'signScale': 13}, '-7.35'),
                                 # The measured shape of a fill principal
                                 # over 32 bits; the value is invented.
-                                ({'lo': '6860000000', 'signScale': 12},
-                                 '6860'),
+                                ({'lo': '7350000000', 'signScale': 12},
+                                 '7350'),
                                 ({'lo': '705032704', 'mid': 1,
                                   'signScale': 12}, '5000')):
             with self.subTest(value=value):
@@ -1153,13 +1154,13 @@ class DecodeDecimalTest(unittest.TestCase):
             def get(self, key, default=None):
                 return 12 if key == 'signScale' else super().get(key, default)
 
-        odd = Odd(lo='6860000')
+        odd = Odd(lo='7350000')
         with self.assertRaises(KeyError):       # the shape being guarded
             odd['signScale']
-        self.assertEqual(decimal.Decimal('6860000'), decode_decimal(odd))
+        self.assertEqual(decimal.Decimal('7350000'), decode_decimal(odd))
         # Positive control: the same mapping storing the scale decodes as it.
-        self.assertEqual(decimal.Decimal('6.86'),
-                         decode_decimal(Odd(lo='6860000', signScale=12)))
+        self.assertEqual(decimal.Decimal('7.35'),
+                         decode_decimal(Odd(lo='7350000', signScale=12)))
 
     def test_a_corrupt_scale_is_refused_even_with_no_mantissa_to_scale(self):
         # The mantissa-less shortcut returned before the scale was looked at,
@@ -1202,9 +1203,9 @@ class DecodeDecimalTest(unittest.TestCase):
                 decode_decimal(json.loads(
                     '{"lo": "1", "mid": null, "hi": null, "signScale": 12}')))
         self.assertEqual(
-                decimal.Decimal('19200'),
+                decimal.Decimal('15300'),
                 decode_decimal(json.loads(
-                    '{"lo": "19200", "signScale": null}')))
+                    '{"lo": "15300", "signScale": null}')))
         self.assertEqual(
                 decimal.Decimal(0),
                 decode_decimal(json.loads('{"lo": null, "signScale": null}')))
@@ -1212,8 +1213,8 @@ class DecodeDecimalTest(unittest.TestCase):
     def test_an_error_message_cannot_raise_on_what_it_describes(self):
         # `repr` of a dict holding a 5,000-digit int raises ValueError, which
         # would replace a SchwabError describing corruption with a bare
-        # exception describing nothing -- the escape class this function has
-        # spent four rounds closing, arriving through the error path.
+        # exception describing nothing -- the escape class this function
+        # closes everywhere else, arriving through the error path.
         for label, value in (('wide lo', {'lo': 10 ** 5000}),
                              ('wide signScale',
                               {'lo': '1', 'signScale': 10 ** 5000}),

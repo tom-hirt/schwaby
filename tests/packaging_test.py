@@ -144,7 +144,7 @@ class SetupPyTest(unittest.TestCase):
         self.assertEqual(version, self.kwargs['version'])
 
     @no_duplicates
-    def test_install_requires_is_the_agreed_set(self):
+    def test_install_requires_is_the_declared_set(self):
         # Anything here lands on every machine running this library, so it
         # should be a deliberate decision rather than a merge artifact. The
         # login packages moved back in 3.0.0 after the extras split saved
@@ -1849,9 +1849,9 @@ class DocExampleTest(unittest.TestCase):
     IMPORTS_NOT_INSTALLED = {'httpx': 'client.rst names it as the wrong module'}
 
     #: Order templates are called positionally in the documentation, and
-    #: `bad_keywords_in` only inspects keyword arguments -- so the shape this
-    #: release actually broke, `equity_buy_market('AAPL', '10')`, is invisible
-    #: to every other check here.
+    #: `bad_keywords_in` only inspects keyword arguments -- so a string
+    #: quantity passed positionally, `equity_buy_market('AAPL', '10')`, is
+    #: invisible to every other check here.
     ORDER_TEMPLATE_MODULES = ('schwaby.orders.equities', 'schwaby.orders.options')
 
     @classmethod

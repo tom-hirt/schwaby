@@ -1326,11 +1326,11 @@ records why the middle ground between them does not exist.
 The middle ground is the obvious idea: ignore a key on an object that looks
 complete, refuse one where a component is missing, on the reasoning that the
 unknown key might be that component renamed. It was built and then broken
-three times, each break a **$6.86 limit price decoding as $6,860,000**:
+three times, each break a **$7.35 limit price decoding as $7,350,000**:
 
-    {"lo": "6860000", "SignScale": 12}                       # key absent
-    {"lo": "6860000", "signScale": null, "SignScale": 12}    # key null
-    {"lo": "6860000", "signScale": 0,    "SignScale": 12}    # key zero
+    {"lo": "7350000", "SignScale": 12}                       # key absent
+    {"lo": "7350000", "signScale": null, "SignScale": 12}    # key null
+    {"lo": "7350000", "signScale": 0,    "SignScale": 12}    # key zero
 
 "Missing" has more spellings than anyone enumerates, and the third cannot be
 closed at all — `signScale: 0` genuinely means scale 0, so refusing it would
@@ -1474,7 +1474,7 @@ dependence it was written to close was still there, one exception type wide.
 New, and the first thing in this release that is code rather than prose.
 
 Schwab streams money and quantities on `ACCT_ACTIVITY` as a serialized .NET
-`System.Decimal` — `{"lo": "6860000", "signScale": 12}` — not as numbers. The
+`System.Decimal` — `{"lo": "7350000", "signScale": 12}` — not as numbers. The
 encoding is undocumented publicly; Schwab's Trader API support has confirmed
 the conversion. Every consumer ends up writing this, and the first
 attempt is reliably wrong in at least one of five ways, each of which is a
@@ -1493,8 +1493,8 @@ attempt is reliably wrong in at least one of five ways, each of which is a
   where reading it as unknown reports a complete fill as outstanding;
 - an object with a mantissa and **no `signScale` at all** is scale 0, not an
   error and not the usual 12. `AskSize` and `BidSize` arrive as
-  `{"lo": "19200"}` beside an `Ask` of `{"lo": "13720000", "signScale": 12}`
-  in the same quote — $13.72 with 19200 on the ask. Guessing 12 there is
+  `{"lo": "15300"}` beside an `Ask` of `{"lo": "21480000", "signScale": 12}`
+  in the same quote — $21.48 with 15300 on the ask. Guessing 12 there is
   wrong by a factor of a million; refusing it loses both sizes on every
   quote;
 - `10 ** (signScale // 2)` on a hostile scale builds an astronomical integer
@@ -1535,7 +1535,7 @@ shipping a tested one rather than a documentation sample:
   not enough: every scale between roughly two and four million underflows to a
   zero that compares equal to zero, and zero is what a completed fill looks
   like.
-- **The library refused a shape Schwab actually sends.** The `{"lo": "19200"}`
+- **The library refused a shape Schwab actually sends.** The `{"lo": "15300"}`
   case above. It raised, and the docstring said the shape had never been
   observed, while a capture carried eight of them. Found by decoding real
   traffic rather than by reading the code — the only finding of the five

@@ -1571,10 +1571,10 @@ first attempt is reliably wrong in at least one of the ways below:
 
   from schwaby.contrib.util import decode_decimal
 
-  decode_decimal({"lo": "6860000", "signScale": 12})   # Decimal('6.860000')
-  decode_decimal({"lo": "6860000", "signScale": 13})   # Decimal('-6.860000')
+  decode_decimal({"lo": "7350000", "signScale": 12})   # Decimal('7.350000')
+  decode_decimal({"lo": "7350000", "signScale": 13})   # Decimal('-7.350000')
   decode_decimal({"signScale": 12})                    # Decimal('0')
-  decode_decimal({"lo": "19200"})                      # Decimal('19200')
+  decode_decimal({"lo": "15300"})                      # Decimal('15300')
 
 **Wrap each field, not the message.** ``decode_decimal`` raises rather than
 guess --- at a corrupt member, and at any key it does not recognise, which is
@@ -1620,9 +1620,9 @@ it refuses costs that field; decoded in one ``try``, it costs the message:
 
   .. code-block:: python
 
-    {"lo": "6860000000", "signScale": 12}     # captured shape, invented value
+    {"lo": "7350000000", "signScale": 12}     # captured shape, invented value
     # lo as one 32-bit member   ->  refused, or wrapped to a smaller number
-    # lo as the whole mantissa  ->  6860.000000      <- the actual value
+    # lo as the whole mantissa  ->  7350.000000      <- the actual value
 
   Those 129 were ``PrincipalAmmount`` on ``OrderFillCompleted`` --- Schwab's
   spelling --- and ``EstimatedPrincipalAmount``, ``EstimatedPrincipalAmnt`` and
@@ -1665,10 +1665,10 @@ underflows to a zero that compares equal to zero, which on a fill feed is the
 worst answer available. No such payload has been observed; the bound is there
 because the failure would be silent.
 
-Confirmed against known truth on a 1-share order at a $6.86 limit:
-``LimitPrice`` ``{"lo": "6860000", "signScale": 12}`` is ``6.86``, and
-``EstimatedPrincipalAmount`` ``{"lo": "6860000", "signScale": 13}`` is
-``-6.86`` --- principal on a *buy*, so cash out. **A decoder that handles only
+On a 1-share buy at a limit, with the values invented and the shapes measured:
+``LimitPrice`` ``{"lo": "7350000", "signScale": 12}`` is ``7.35``, and
+``EstimatedPrincipalAmount`` ``{"lo": "7350000", "signScale": 13}`` is
+``-7.35`` --- principal on a *buy*, so cash out. **A decoder that handles only
 the even case flips the sign on every cash-direction field, silently.**
 
 The rule itself is not guesswork. **Schwab's Trader API support has confirmed
@@ -1704,14 +1704,14 @@ publishes it.
 
   .. code-block:: python
 
-    {"Ask":     {"lo": "13720000", "signScale": 12},   # 13.72
-     "AskSize": {"lo": "19200"},                       # 19200 shares
-     "Bid":     {"lo": "13710000", "signScale": 12},   # 13.71
-     "BidSize": {"lo": "4200"},                        # 4200 shares
-     "Mid":     {"lo": "13715000", "signScale": 12}}   # 13.715
+    {"Ask":     {"lo": "21480000", "signScale": 12},   # 21.48
+     "AskSize": {"lo": "15300"},                       # 15300 shares
+     "Bid":     {"lo": "21470000", "signScale": 12},   # 21.47
+     "BidSize": {"lo": "2600"},                        # 2600 shares
+     "Mid":     {"lo": "21475000", "signScale": 12}}   # 21.475
 
   Prices scaled by six places, sizes with no scale at all, in the same object.
-  $13.72 with 19200 on the ask is a coherent quote; 0.0192 shares is not.
+  $21.48 with 15300 on the ask is a coherent quote; 0.0153 shares is not.
 
   Refusing the shape, on the reasoning that a missing scale cannot be told
   from a lost one, sounds careful and costs both sizes on every quote carrying
@@ -1734,10 +1734,10 @@ publishes it.
 
   .. code-block:: python
 
-    {"lo": "6860000", "SignScale": 12}    # a rename, or an addition?
+    {"lo": "7350000", "SignScale": 12}    # a rename, or an addition?
 
   Read as an addition, there is no ``signScale``, so the absent-scale rule
-  applies and a **$6.86 limit price decodes as $6,860,000**. Telling the two cases
+  applies and a **$7.35 limit price decodes as $7,350,000**. Telling the two cases
   apart means handling three spellings of "missing" --- the key absent, the
   key present and ``null``, the key present and ``0`` --- and the last of
   those cannot be told apart at all, because ``signScale: 0`` genuinely means

@@ -2652,9 +2652,8 @@ class _TestClient:
         # to attach a timezone to a datetime they never wrote, and points at
         # their line to do it.
         #
-        # Scoped to start_datetime: the end_datetime default is still
-        # utcnow(), which is naive for the same reason and is being replaced
-        # separately. Once that lands, neither of these warns.
+        # Scoped to start_datetime, the default this test is about. The
+        # end_datetime default is timezone-aware as well.
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter('always')
             self.client.get_price_history_every_day(SYMBOL)
@@ -2901,8 +2900,8 @@ class _TestClient:
     # Is the refresh token dead, or was this just a bad day?
 
 
-    #: Exactly what Schwab returned on 2026-08-02, from a live account whose
-    #: refresh token was allowed to reach its seven day expiry. Note the outer
+    #: Schwab's answer, observed 2026-08-02, to a refresh token past its
+    #: seven day expiry. Note the outer
     #: code is unsupported_token_type, which RFC 7009 defines for the
     #: revocation endpoint and which describes nothing that happened, and that
     #: the real answer is a JSON string nested in the description.

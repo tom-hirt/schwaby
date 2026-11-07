@@ -7245,10 +7245,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_a_coroutine_report_finishes_before_the_call_returns(
             self, ws_connect):
-        # This is what replaced the drain. Awaiting the report where it is made
-        # means there is nothing scheduled to outlive the call, so nothing has
-        # to be kept alive at shutdown -- and nothing can deadlock, time out or
-        # be cancelled half-delivered keeping it alive.
+        # Awaiting the report where it is made means there is nothing
+        # scheduled to outlive the call, so nothing has to be kept alive at
+        # shutdown -- and nothing can deadlock, time out or be cancelled
+        # half-delivered keeping it alive.
         order = []
 
         async def on_stream_error(service, exc, msg):
@@ -7266,10 +7266,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_close_does_not_wait_for_in_flight_handlers(
             self, ws_connect):
-        # The documented guarantee, which replaced the drain: close() returns
-        # without waiting on stream handlers the caller has in flight. The test
-        # that used to sit here was named for waiting and never called close(),
-        # so it asserted nothing either way.
+        # The documented guarantee: close() returns without waiting on stream
+        # handlers the caller has in flight.
         running = asyncio.Event()
 
         async def slow_handler(msg):
@@ -7327,9 +7325,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     async def test_a_slow_error_handler_holds_up_handle_message(
             self, ws_connect):
         # The cost of awaiting the report rather than scheduling it, asserted
-        # rather than documented. A downstream that awaits inside an error
-        # handler now gets a stream stall where it previously got a scheduled
-        # task -- and a stall presents as a dead feed, not as a slow handler,
+        # rather than documented. A caller that awaits inside an error
+        # handler stalls the stream rather than getting a scheduled task --
+        # and a stall presents as a dead feed, not as a slow handler,
         # so someone will eventually debug it from the wrong end. If this ever
         # stops being true it should be a decision, not a surprise.
         #
@@ -7523,8 +7521,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_batched_and_standalone_rejections_report_alike(
             self, ws_connect):
-        # The finding itself: the framing is the server's choice, so the two
-        # must be indistinguishable to a caller.
+        # The contract under test: the framing is the server's choice, so the
+        # two must be indistinguishable to a caller.
         rejected = {
             'service': 'ACCT_ACTIVITY',
             'command': 'SUBS',
@@ -8055,7 +8053,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         # the late rejections the orphan path reports and data frames handlers
         # would be given. Clearing only _pending_reports would leave the
         # standalone framing leaking across sessions while the batched one did
-        # not, which is the asymmetry this change exists to remove.
+        # not, which is the asymmetry clearing both prevents.
         await self.login_and_get_socket(ws_connect)
 
         self.client._overflow_items.appendleft(
@@ -8208,7 +8206,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
             self, ws_connect):
         # Running a handler to completion while unwinding a cancel makes
         # close(), a wait_for, or a TaskGroup shutdown block on user code --
-        # the shape that produced a high finding four rounds running.
+        # the shape that deadlocks shutdown.
         socket = await self.login_and_get_socket(ws_connect)
 
         async def slow(service, exc, msg):
@@ -9263,8 +9261,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         # (service=None, message=None) is the logout-close signature, and a
         # parse failure has no service to name. Reporting nothing alongside it
         # would give a dead feed the same shape as a failed teardown -- the
-        # absence-as-discriminator trap, recreated on the parse path by the
-        # commit which fixed it on the structural one. The raw text is passed
+        # absence-as-discriminator trap, which the structural path already
+        # avoids. The raw text is passed
         # as `message` so the pair is never both empty.
         socket = await self.login_and_get_socket(ws_connect)
 
@@ -9660,13 +9658,13 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         # message that used to be delivered was dropped instead.
         streaming._reported_fields.clear()
         fields = streaming.StreamClient.LevelOneEquityFields
-        raw = {'key': 'F', 1: 13.71, 2: 13.72}
+        raw = {'key': 'F', 1: 21.47, 2: 21.48}
         new = copy.deepcopy(raw)
         with self.assertNoLogs(streaming.get_logger(), level='WARNING'):
             fields.relabel_message(raw, new)
         # Relabeled, not merely survived, and not reported as unknown --
         # schwaby does have a name for field 1.
-        self.assertEqual({'key': 'F', 'BID_PRICE': 13.71, 'ASK_PRICE': 13.72},
+        self.assertEqual({'key': 'F', 'BID_PRICE': 21.47, 'ASK_PRICE': 21.48},
                          new)
         # Positive control: an int id it genuinely has no name for still
         # reports, so the assertNoLogs above is not vacuous.
@@ -9682,10 +9680,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         # -- it cannot be a field id -- rather than taking the message down.
         streaming._reported_fields.clear()
         fields = streaming.StreamClient.LevelOneEquityFields
-        raw = {'key': 'F', '1': 13.71, 10 ** 6000: 'x'}
+        raw = {'key': 'F', '1': 21.47, 10 ** 6000: 'x'}
         new = copy.deepcopy(raw)
         fields.relabel_message(raw, new)
-        self.assertEqual(13.71, new['BID_PRICE'])
+        self.assertEqual(21.47, new['BID_PRICE'])
         self.assertIn(10 ** 6000, new)
 
         # And a million-digit id passes isdigit(); what is retained and
@@ -9698,11 +9696,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     def test_the_new_shape_report_keeps_its_own_promises(self):
-        """Its dedup, cap, truncation and kind discriminator were all GREEN.
+        """Its dedup, cap, truncation and kind discriminator, each pinned.
 
         Every one of those is stated in its own log line or in the changelog
-        -- "reported once, not per message", bounded, per kind -- and none
-        was pinned by anything.
+        -- "reported once, not per message", bounded, per kind.
         """
 
         # Once, not per message.
@@ -9768,8 +9765,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
         # Debug on deliberately. `_pretty` runs only for a debug line, so
         # without this the frame never reaches the `repr` fallback and the
-        # test passes for want of ever getting there -- which is exactly how
-        # its red-proof case came back green the first time.
+        # test passes for want of ever getting there.
         logger = streaming.get_logger()
         previous = logger.level
         logger.setLevel(logging.DEBUG)
@@ -9986,10 +9982,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_invalid_service_is_reported_as_schwabs_error(
             self, ws_connect):
-        """`'Invalid Service'` is Schwab's error label, seen once in the
-        second before it closed a connection. The unknown-service warning
-        asked for an issue about it, which sent a reader looking for a
-        service to support.
+        """`'Invalid Service'` is Schwab's error label, which can arrive just
+        before Schwab closes a connection. It is reported as Schwab's error,
+        not as an unknown service, so nobody is asked to open an issue for a
+        service that does not exist.
 
         The frame was never captured, so these fixtures are synthetic: the
         name as it was logged, on each channel a service is routed from.
@@ -10190,8 +10186,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     def test_a_formatted_venue_value_keeps_its_content_and_its_bound(self):
-        # Both were green: a `_safe_value` returning '' satisfied every
-        # assertion, and so did one with no length bound. The docstring
+        # Both halves are asserted: a `_safe_value` returning '' would
+        # satisfy one, and one with no length bound the other. The docstring
         # claims the content survives *and* that it is bounded.
         self.assertEqual("'hello'", streaming._safe_value('hello'))
         self.assertIn('hello', streaming._safe_value('hello'))
@@ -10236,14 +10232,14 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         Its docstring says the test is `get` + `__contains__` and nothing
         about iteration, *because* "a lightweight mapping-like object worked
         before the type checks were added and would have had every frame
-        dropped afterwards". `set(msg)` requires iteration. So the channel
-        check -- added by this series -- ended the receive loop with a
+        dropped afterwards". `set(msg)` requires iteration. So a channel
+        check that iterates ended the receive loop with a
         non-SchwabError on shapes 4.2.0 handled, through a documented public
         extension point.
         """
         payload = {'data': [{'service': 'LEVELONE_EQUITIES',
                              'command': 'SUBS',
-                             'content': [{'key': 'F', '1': 13.71}]}]}
+                             'content': [{'key': 'F', '1': 21.47}]}]}
 
         class NoIter:
             def get(self, key, default=None):
@@ -10862,8 +10858,8 @@ class AccountActivityMessageTypeTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     def test_it_is_exactly_the_observed_types(self):
-        # The change and monitor types were first known from a note that
-        # spelled them in upper case; these are the captured spellings.
+        # Upper-case spellings of the change and monitor types circulate;
+        # these are the spellings Schwab sends.
         self.assertEqual(
                 {'SUBSCRIBED', 'OrderCreated', 'OrderAccepted',
                  'ExecutionRequested', 'ExecutionRequestCreated',
@@ -10911,14 +10907,14 @@ class UnknownStreamFieldTest(IsolatedAsyncioTestCase):
     @no_duplicates
     def test_an_unknown_field_is_still_delivered_verbatim(self):
         fields = streaming.StreamClient.LevelOneEquityFields
-        raw = {'key': 'F', '1': 13.71, '2': 13.72, '99': 'brand new'}
+        raw = {'key': 'F', '1': 21.47, '2': 21.48, '99': 'brand new'}
         new = copy.deepcopy(raw)
         fields.relabel_message(raw, new)
         self.assertEqual('brand new', new['99'])
         # Positive control: the rest of the message still relabeled, so this
         # is not passing because relabeling did nothing at all.
-        self.assertEqual(13.71, new['BID_PRICE'])
-        self.assertEqual(13.72, new['ASK_PRICE'])
+        self.assertEqual(21.47, new['BID_PRICE'])
+        self.assertEqual(21.48, new['ASK_PRICE'])
 
     @no_duplicates
     def test_a_key_is_read_as_plain_text_before_it_is_judged_a_field(self):
@@ -10947,7 +10943,7 @@ class UnknownStreamFieldTest(IsolatedAsyncioTestCase):
         with self.assertLogs(streaming.get_logger(),
                              level='WARNING') as caught:
             for _ in range(3):
-                raw = {'key': 'F', '1': 13.71, '99': 'brand new'}
+                raw = {'key': 'F', '1': 21.47, '99': 'brand new'}
                 fields.relabel_message(raw, copy.deepcopy(raw))
         self.assertEqual(1, len(caught.output))
         self.assertIn('99', caught.output[0])
@@ -10972,7 +10968,7 @@ class UnknownStreamFieldTest(IsolatedAsyncioTestCase):
         # message, which is a flood rather than a signal.
         fields = streaming.StreamClient.LevelOneEquityFields
         raw = {'key': 'F', 'seq': 7, 'delayed': False,
-               'assetMainType': 'EQUITY', '1': 13.71}
+               'assetMainType': 'EQUITY', '1': 21.47}
         with self.assertNoLogs(streaming.get_logger(), level='WARNING'):
             new = copy.deepcopy(raw)
             fields.relabel_message(raw, new)
@@ -10990,10 +10986,10 @@ class UnknownStreamFieldTest(IsolatedAsyncioTestCase):
         self.assertLessEqual(len(streaming._reported_fields),
                              streaming._MAX_REPORTED_FIELDS)
         # And relabeling still works after the cap.
-        raw = {'key': 'F', '1': 13.71, '99999': 'x'}
+        raw = {'key': 'F', '1': 21.47, '99999': 'x'}
         new = copy.deepcopy(raw)
         fields.relabel_message(raw, new)
-        self.assertEqual(13.71, new['BID_PRICE'])
+        self.assertEqual(21.47, new['BID_PRICE'])
         self.assertEqual('x', new['99999'])
 
     @no_duplicates
@@ -11008,10 +11004,10 @@ class UnknownStreamFieldTest(IsolatedAsyncioTestCase):
                     'LEVELONE_EQUITIES',
                     {'service': 'LEVELONE_EQUITIES', 'command': 'SUBS',
                      'timestamp': 1,
-                     'content': [{'key': 'F', '1': 13.71, '99': 'brand new'}]},
+                     'content': [{'key': 'F', '1': 21.47, '99': 'brand new'}]},
                     relabel=True)
         self.assertEqual(1, len(got))
-        self.assertEqual(13.71, got[0]['content'][0]['BID_PRICE'])
+        self.assertEqual(21.47, got[0]['content'][0]['BID_PRICE'])
         self.assertEqual('brand new', got[0]['content'][0]['99'])
         # Nothing was absorbed and nothing was reported as a failure.
         self.assertEqual(0, client._absorbed)

@@ -1881,7 +1881,7 @@ class NonNumericOrderFieldTest(unittest.TestCase):
     def test_the_prebuilt_templates_refuse_a_string_quantity_too(self):
         # `__add_order_leg` calls the same validator, so this reaches every
         # template in the package -- which is the most-used entry point here
-        # and the part of this change that is actually breaking.
+        # and the place existing callers are most likely to break.
         # `equity_buy_market('AAPL', '10')` built `{"quantity": "10"}` and
         # sent a string where Schwab's schema says number.
         from schwaby.orders.equities import (
@@ -1912,11 +1912,10 @@ class NonNumericOrderFieldTest(unittest.TestCase):
 class AcceptedTypesTableTest(unittest.TestCase):
     """The table in `docs/order-builder.rst`, checked against the validators.
 
-    A downstream integrator built their time-in-force handling from an enum and
-    their type handling from a sentence, and both were wrong in ways nothing
-    raised until an order was placed. Their suggestion was the right one: state
-    the accepted types per setter, and generate the statement rather than
-    writing it, so it cannot quietly stop being true.
+    Time-in-force handling built from an enum, and type handling built from a
+    prose sentence, can both be wrong in ways nothing raises until an order is
+    placed. So the accepted types are stated per setter, in a table checked
+    against the code, so it cannot quietly stop being true.
 
     The builder has two rules that are close to opposites -- a price field
     takes a string or a Decimal, a numeric field takes an int or a float --
@@ -1961,7 +1960,7 @@ class AcceptedTypesTableTest(unittest.TestCase):
                 found.append(item.name)
         return tuple(sorted(found))
 
-    VALUES = {'str': '1.50', 'int': 7, 'float': 6.86,
+    VALUES = {'str': '1.50', 'int': 7, 'float': 7.35,
               'Decimal': decimal.Decimal('1.50'), 'bool': True, 'None': None}
 
     @staticmethod

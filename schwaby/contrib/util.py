@@ -145,8 +145,8 @@ class UnusableDecimalScale(SchwabError, ValueError):
 
     An absent ``signScale`` is **not** one of these --- it is scale 0, which
     is how ``AskSize`` and ``BidSize`` arrive: one quote carries an ``Ask``
-    of ``{"lo": "13720000", "signScale": 12}`` beside an ``AskSize`` of
-    ``{"lo": "19200"}``.
+    of ``{"lo": "21480000", "signScale": 12}`` beside an ``AskSize`` of
+    ``{"lo": "15300"}``.
 
     The scale is what turns the mantissa into a number, so guessing one is a
     silent wrong answer by construction --- and the guess that suggests itself,
@@ -402,7 +402,7 @@ def decode_decimal(value):
     Those fields do not arrive as numbers. They arrive as a serialized .NET
     ``System.Decimal``::
 
-        {"lo": "6860000", "signScale": 12}       ->  Decimal('6.860000')
+        {"lo": "7350000", "signScale": 12}       ->  Decimal('7.350000')
 
     a 96-bit integer mantissa, which arrives whole in ``lo`` as a string of
     digits, and a ``signScale`` packing the scale in its magnitude and the
@@ -427,8 +427,8 @@ def decode_decimal(value):
     * **An absent** ``signScale`` **is scale 0, not a missing scale.** The
       serializer omits whatever is zero, and that applies to the scale as
       much as to a mantissa member: ``AskSize`` and ``BidSize`` arrive as
-      ``{"lo": "19200"}`` beside an ``Ask`` of
-      ``{"lo": "13720000", "signScale": 12}`` on the same quote. Refusing
+      ``{"lo": "15300"}`` beside an ``Ask`` of
+      ``{"lo": "21480000", "signScale": 12}`` on the same quote. Refusing
       the shape costs both sizes on every quote it appears in.
     * **A** ``Decimal`` **is returned, never a float.** These are money;
       :meth:`OrderBuilder.set_price
@@ -559,7 +559,7 @@ def decode_decimal(value):
         # reasoning that the key might be that component renamed -- cannot be
         # made safe, because "missing" has more spellings than can be listed:
         # the key absent, the key present and null, the key present and zero.
-        # Each can turn a $6.86 limit price into $6,860,000, and the last
+        # Each can turn a $7.35 limit price into $7,350,000, and the last
         # cannot be guarded at all -- `signScale: 0` genuinely means scale 0,
         # so refusing it would refuse a real `AskSize`.
         #
@@ -616,9 +616,9 @@ def decode_decimal(value):
     # An absent `signScale` is scale 0, by the same rule as an absent
     # mantissa member: the serializer omits what is zero. A missing scale
     # looks as though it cannot be told from a lost one, but `AskSize` and
-    # `BidSize` arrive as `{"lo": "19200"}` with no scale at all, beside an
-    # `Ask` of `{"lo": "13720000", "signScale": 12}` on the same quote.
-    # $13.72 and 19200 shares, which is coherent; 0.0192 shares is not. So
+    # `BidSize` arrive as `{"lo": "15300"}` with no scale at all, beside an
+    # `Ask` of `{"lo": "21480000", "signScale": 12}` on the same quote.
+    # $21.48 and 15300 shares, which is coherent; 0.0153 shares is not. So
     # the shape is ordinary traffic, and refusing it would cost both sizes on
     # every quote.
     #
