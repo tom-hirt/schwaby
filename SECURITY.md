@@ -9,7 +9,7 @@ and cancel orders with real money. A defect here is not an availability problem
 **Do not open a public issue.**
 
 Use [private vulnerability
-reporting](https://github.com/Hu1kSmash/schwaby/security/advisories/new), which
+reporting](https://github.com/tom-hirt/schwaby/security/advisories/new), which
 opens a report only the maintainer can see.
 
 Useful reports say what an attacker ends up able to do, how to reproduce it, and

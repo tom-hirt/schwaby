@@ -36,7 +36,7 @@ setuptools.setup(
                  'for systematic trading against live accounts'),
     long_description=long_description,
     long_description_content_type='text/markdown',
-    url='https://github.com/Hu1kSmash/schwaby',
+    url='https://github.com/tom-hirt/schwaby',
     # include= rather than a bare find_packages(), which also matched `tests`
     # and shipped a top-level `tests` module into every user's site-packages.
     # Anything else installing a top-level `tests` then collides with it
@@ -138,8 +138,8 @@ setuptools.setup(
     keywords='finance trading equities bonds options research',
     project_urls={
         'Documentation': 'https://schwaby.readthedocs.io/',
-        'Source': 'https://github.com/Hu1kSmash/schwaby',
-        'Tracker': 'https://github.com/Hu1kSmash/schwaby/issues',
+        'Source': 'https://github.com/tom-hirt/schwaby',
+        'Tracker': 'https://github.com/tom-hirt/schwaby/issues',
         'Upstream': 'https://github.com/alexgolec/schwab-py',
     },
     license='MIT',

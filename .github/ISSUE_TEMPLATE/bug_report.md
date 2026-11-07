@@ -9,7 +9,7 @@ assignees: ''
 
 <!--
 Please read the bug submission guidelines before filing:
-https://github.com/Hu1kSmash/schwaby/blob/main/docs/help.rst
+https://github.com/tom-hirt/schwaby/blob/main/docs/help.rst
 
 IMPORTANT: anonymize everything you paste. Replace API keys and app secrets with
 placeholders, and never share the contents of your token file.
@@ -35,4 +35,4 @@ Paste in the code that causes the bug to occur.
 **Error/Exception Log, If Applicable**
 Attach logs as a file rather than pasting them inline, and check them for
 secrets first. See here for how to enable debug logging:
-https://github.com/Hu1kSmash/schwaby/blob/main/docs/help.rst
+https://github.com/tom-hirt/schwaby/blob/main/docs/help.rst

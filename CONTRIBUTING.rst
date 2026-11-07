@@ -6,7 +6,7 @@ Fixing a bug? Adding a feature? Cleaning something up for the sake of cleaning
 it up? All welcome, and no improvement is too small.
 
 Branch from ``main``, one concern per branch. `RELEASING.md
-<https://github.com/Hu1kSmash/schwaby/blob/main/RELEASING.md>`__ collects the
+<https://github.com/tom-hirt/schwaby/blob/main/RELEASING.md>`__ collects the
 rules this project has learned by getting them wrong, and is worth ten minutes
 before a first patch.
 

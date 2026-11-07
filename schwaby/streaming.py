@@ -310,7 +310,7 @@ def _report_unknown_field(field_enum_type, field_id):
             'under its numeric key and everything else is relabeled as '
             'usual; this is reported once per field, not per message. If you '
             'see this, please open an issue at '
-            'https://github.com/Hu1kSmash/schwaby/issues with the value -- '
+            'https://github.com/tom-hirt/schwaby/issues with the value -- '
             'the field tables are only as current as the last time someone '
             'looked.',
             field_id, field_enum_type.__name__)
@@ -376,7 +376,7 @@ def _report_unknown_message_type(name):
             'a CANCEL or UROUT as necessarily ending the order: on the '
             'option orders captured, a price change retired the old order id '
             'the same way. If you see this, please open an issue at '
-            'https://github.com/Hu1kSmash/schwaby/issues with the type -- '
+            'https://github.com/tom-hirt/schwaby/issues with the type -- '
             'Schwab documents this vocabulary nowhere, and a report is how '
             'the list of observed types grows.',
             name)
@@ -1225,7 +1225,7 @@ class StreamClient(EnumEnforcer):
                 'Messages for it are dropped -- there is no handler to route '
                 'them to -- and this is reported once, not per message. '
                 'Please open an issue at '
-                'https://github.com/Hu1kSmash/schwaby/issues.',
+                'https://github.com/tom-hirt/schwaby/issues.',
                 what, seen[1])
         return True
 

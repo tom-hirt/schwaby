@@ -287,7 +287,7 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
    git fetch origin
    tagged=$(git ls-remote origin 'refs/tags/vX.Y.Z^{}' | cut -f1)
    test -n "$tagged" && git merge-base --is-ancestor "$tagged" origin/main \
-       && gh release create vX.Y.Z -R Hu1kSmash/schwaby --notes-file ...
+       && gh release create vX.Y.Z -R tom-hirt/schwaby --notes-file ...
    ```
 
    GitHub's tag, not the local one: the release is made from GitHub's, and
@@ -310,7 +310,7 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
    release's tag itself:
 
    ```shell
-   gh workflow run publish -R Hu1kSmash/schwaby --ref vX.Y.Z
+   gh workflow run publish -R tom-hirt/schwaby --ref vX.Y.Z
    ```
 
    The run then builds that tag's commit, with the tag's own copy of the
@@ -374,7 +374,7 @@ test is the thing to argue with first.
 A git install works for testing an unreleased commit:
 
 ```shell
-pip install "schwaby @ git+https://github.com/Hu1kSmash/schwaby@<sha>"
+pip install "schwaby @ git+https://github.com/tom-hirt/schwaby@<sha>"
 ```
 
 Pin a commit, never a branch. Tags before the 2.6.0 rename carry `schwab-py` in

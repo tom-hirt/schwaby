@@ -55,7 +55,7 @@ a way that's appropriate to the context in which you're running:
   alert on.
 
 Here's how you can use it. If for some reason this doesn't work, please report
-your issues `on the issue tracker <https://github.com/Hu1kSmash/schwaby/issues>`__. See
+your issues `on the issue tracker <https://github.com/tom-hirt/schwaby/issues>`__. See
 :func:`~schwaby.auth.easy_client` for details:
 
 .. code-block:: python
@@ -496,7 +496,7 @@ Troubleshooting
 Authentication looks simple and is not, and the mistakes are easy to make.
 The most common ones are below. If yours is not here, or the remedy does not
 help, see the :ref:`help` page or `open an issue
-<https://github.com/Hu1kSmash/schwaby/issues>`__.
+<https://github.com/tom-hirt/schwaby/issues>`__.
 
 
 ++++++++++++++++++++++++++++++++++++
@@ -560,7 +560,7 @@ before it expires.
 
 Deleting the token file and creating a new one clears it. The cause is not
 understood, so a stack trace `on the issue tracker
-<https://github.com/Hu1kSmash/schwaby/issues>`__ is genuinely useful.
+<https://github.com/tom-hirt/schwaby/issues>`__ is genuinely useful.
 
 
 .. _invalid_client:
@@ -649,7 +649,7 @@ experiencing token parsing issues, remember that:
 
 If you didn't do any of this and are still seeing issues using a token file that
 you're confident is valid, please `file a ticket
-<https://github.com/Hu1kSmash/schwaby/issues>`__. Just remember, **never share
+<https://github.com/tom-hirt/schwaby/issues>`__. Just remember, **never share
 your token file, not even with** ``schwaby`` **developers**. Sharing the token
 file is as dangerous as sharing your Schwab username and password.
 

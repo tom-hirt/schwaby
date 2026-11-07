@@ -131,7 +131,7 @@ def _report_unknown_keys(unknown):
             'refused until schwaby knows the key -- an unrecognised key may '
             'be a renamed one, and decoding around it is a wrong price where '
             'it is. Reported once per key, not per message. Please open an '
-            'issue at https://github.com/Hu1kSmash/schwaby/issues with the '
+            'issue at https://github.com/tom-hirt/schwaby/issues with the '
             'field: it is undocumented publicly and a capture is the only '
             'way anyone learns what a new key means.',
             ', '.join(_quoted(k) for k in fresh))

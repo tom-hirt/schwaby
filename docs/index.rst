@@ -5,7 +5,7 @@
 
 .. image:: _static/github-logo.png
    :width: 40
-   :target: https://github.com/Hu1kSmash/schwaby
+   :target: https://github.com/tom-hirt/schwaby
 
 ``schwaby`` is an unofficial Python client for the Charles Schwab trading API.
 It covers every endpoint Schwab publishes, turns the streaming websocket into
@@ -45,7 +45,7 @@ New here? Start with :ref:`getting_started`, then :ref:`auth`.
    price a cent low, an option symbol naming a different contract, an order
    routed to a venue nobody asked for. None raised. None failed a test. The
    `changelog
-   <https://github.com/Hu1kSmash/schwaby/blob/main/CHANGELOG.md>`__ lists them,
+   <https://github.com/tom-hirt/schwaby/blob/main/CHANGELOG.md>`__ lists them,
    and the next one is in there somewhere too, unfound.
 
    **You are responsible for every order your code places.** Not the author,
@@ -88,8 +88,8 @@ stream that reports what it absorbs. Alex Golec's copyright
 notice is retained unchanged and the licence is the same MIT one he chose.
 
 See the `changelog
-<https://github.com/Hu1kSmash/schwaby/blob/main/CHANGELOG.md>`__ for what
-changed, and the `README <https://github.com/Hu1kSmash/schwaby>`__ for the
+<https://github.com/tom-hirt/schwaby/blob/main/CHANGELOG.md>`__ for what
+changed, and the `README <https://github.com/tom-hirt/schwaby>`__ for the
 longer version.
 
 

@@ -90,7 +90,7 @@ is the usual one --- produces failures that are hard to trace back to their
 cause.
 
 If Schwab refuses to create an app with a ``127.0.0.1`` callback URL, please
-`open an issue <https://github.com/Hu1kSmash/schwaby/issues>`__. It happens
+`open an issue <https://github.com/tom-hirt/schwaby/issues>`__. It happens
 intermittently and it is worth knowing whether it still does.
 
 .. _approved_pending:
@@ -175,5 +175,5 @@ secret into a token the client can use.
 Getting Help
 ++++++++++++
 
-Stuck? `Open an issue <https://github.com/Hu1kSmash/schwaby/issues>`__ and ask.
+Stuck? `Open an issue <https://github.com/tom-hirt/schwaby/issues>`__ and ask.
 If you think you have found a bug, :ref:`fill out a bug report <help>`.

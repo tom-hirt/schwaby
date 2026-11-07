@@ -576,7 +576,7 @@ helper function <extract_order_id>`. Otherwise, see
   exactly the position a replacement leaves you in. If you find that
   ``extract_order_id`` does read the new ID from a replacement response,
   `that is worth reporting
-  <https://github.com/Hu1kSmash/schwaby/issues>`__ --- it would settle this.
+  <https://github.com/tom-hirt/schwaby/issues>`__ --- it would settle this.
 
 **Testing a replacement without sending it.** :meth:`preview_order
 <schwaby.client.Client.preview_order>` takes the same order spec and reports

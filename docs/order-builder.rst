@@ -195,7 +195,7 @@ generated from the schema provided in the `official API documents
 <https://developer.schwab.com/products/trader-api--individual/details/specifications/Retail%20Trader%20API%20Production>`__,
 but many of the finer points, such as which fields should be populated for which
 order types, etc. are best guesses.  If you find something is inaccurate or
-missing, please `let us know <https://github.com/Hu1kSmash/schwaby/issues>`__.
+missing, please `let us know <https://github.com/tom-hirt/schwaby/issues>`__.
 
 That being said, experienced traders who understand how various order types and
 complex strategies work should find this builder easy to use, at least for the
@@ -627,7 +627,7 @@ things have been observed, however:
    debit or credit desired.
 
 If you use these strategies successfully, please say so on the `issue tracker
-<https://github.com/Hu1kSmash/schwaby/issues>`__. What works is worth more here
+<https://github.com/tom-hirt/schwaby/issues>`__. What works is worth more here
 than what the schema permits.
 
 .. autoclass:: schwaby.orders.common::ComplexOrderStrategyType
@@ -672,7 +672,7 @@ Schwab's order schema contains fields whose behaviour is not documented and
 has not been established by experiment. They are collected here rather than
 described inaccurately elsewhere. If you know how one of them behaves, please
 say so on the `issue tracker
-<https://github.com/Hu1kSmash/schwaby/issues>`__.
+<https://github.com/tom-hirt/schwaby/issues>`__.
 
 
 .. _undocumented_quantity:

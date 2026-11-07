@@ -321,7 +321,7 @@ class LinkTest(unittest.TestCase):
     EXAMPLE_HOSTS = frozenset(('127.0.0.1', 'localhost'))
     EXAMPLE_SUFFIXES = ('.example.com', '.example.org', '.example.net')
 
-    OURS = 'https://github.com/Hu1kSmash/schwaby/blob/main/'
+    OURS = 'https://github.com/tom-hirt/schwaby/blob/main/'
 
     # `\s*` after the slashes is load-bearing. RST wraps long links, and
     # `getting-started.rst` had `<https://\nvirtualenv.pypa.io/...>` -- so a
@@ -329,7 +329,7 @@ class LinkTest(unittest.TestCase):
     # virtualenv.pypa.io was in the allowlist and no scanned file produced it.
     URL = re.compile(r'https?://\s*([^/\s\'"`)>,]+)')
     OUR_LINK = re.compile(
-            r'https://github\.com/Hu1kSmash/schwaby/blob/main/'
+            r'https://github\.com/tom-hirt/schwaby/blob/main/'
             r'([A-Za-z0-9_./-]+?)(?:#([a-z0-9-]+))?(?=[\s\'"`)>,]|$)')
 
     # `'…schwaby/' + 'blob/main/…'` is one URL to a reader and two string
@@ -498,7 +498,7 @@ class LinkTest(unittest.TestCase):
             with open(path, 'w') as f:
                 f.write('See https://schwab-py.readthedocs.io/en/latest/ and\n'
                         'https://developer.schwabmeritrade.com/orders and\n'
-                        'https://github.com/Hu1kSmash/schwaby and\n'
+                        'https://github.com/tom-hirt/schwaby and\n'
                         'https://127.0.0.1:8182\n')
 
             wrapped = os.path.join(tmp, 'wrapped.rst')

@@ -570,7 +570,7 @@ documentation referred to them.
 Which of them still work is not documented anywhere, so it is worked out by
 trying them. If you find one that behaves differently from what is described
 here, please report it `on the issue tracker
-<https://github.com/Hu1kSmash/schwaby/issues>`__.
+<https://github.com/tom-hirt/schwaby/issues>`__.
 
 The following streams are confirmed working:
  * :ref:`charts`
@@ -818,7 +818,7 @@ in these streams refusing to connect, typically returning errors about
 unavailable services. Due to this behavior and the lack of official
 documentation for book streams generally, ``schwaby`` assumes these streams are not
 actually implemented, and so excludes them. If you have any insight into using
-them, please `let us know <https://github.com/Hu1kSmash/schwaby/issues>`__.
+them, please `let us know <https://github.com/tom-hirt/schwaby/issues>`__.
 
 
 -------------------------------------
@@ -858,7 +858,7 @@ happens.
 Note that, to match what little documentation exists, the NYSE book is called
 "listed". Testing indicates this stream corresponds to the NYSE book; if you
 see behaviour suggesting otherwise, please
-`let us know <https://github.com/Hu1kSmash/schwaby/issues>`__.
+`let us know <https://github.com/tom-hirt/schwaby/issues>`__.
 
 .. automethod:: schwaby.streaming::StreamClient.nyse_book_subs
 .. automethod:: schwaby.streaming::StreamClient.nyse_book_unsubs
@@ -1315,7 +1315,7 @@ would be silent, not because we have met it.
 reliably reproducible since, so we cannot tell you when it happens.
 
 **If you can confirm or refute either kind, please**
-`open an issue <https://github.com/Hu1kSmash/schwaby/issues>`__. A single
+`open an issue <https://github.com/tom-hirt/schwaby/issues>`__. A single
 message saying "I see this" or "my traffic contradicts it" settles a question
 that no amount of reasoning here will, and account and asset mix differ enough
 that someone else's feed is genuinely different evidence. Being told we are
@@ -1405,7 +1405,7 @@ buying power has been captured, and so has a price change to a working order;
 both used only types in that list. **Expiry and partial fill have not been
 captured**, so the first of each a process receives may log once. That is
 expected; please `open an issue
-<https://github.com/Hu1kSmash/schwaby/issues>`__ with the type it names.
+<https://github.com/tom-hirt/schwaby/issues>`__ with the type it names.
 
 No other type is known from a captured frame. The absence of others from the
 captures is not evidence either way: the archive most of them come from records
@@ -1638,7 +1638,7 @@ it refuses costs that field; decoded in one ``try``, it costs the message:
   member held to 32 bits, and a ``lo`` wider than that beside one is refused.
   That layout is :ref:`Unconfirmed <confidence_tags>`: reasoned from .NET, and
   no captured payload has carried ``mid`` or ``hi`` at all. **If you have one,
-  please** `open an issue <https://github.com/Hu1kSmash/schwaby/issues>`__
+  please** `open an issue <https://github.com/tom-hirt/schwaby/issues>`__
   **with the field.**
 
 .. _decimal_context:
@@ -1748,7 +1748,7 @@ publishes it.
   ``schwaby`` knows about it. That is loud, it is catchable per field, and the
   key is named in the log on the first message --- against a silent wrong
   price on a funded account, it is not a close call. If you see it, please
-  `open an issue <https://github.com/Hu1kSmash/schwaby/issues>`__ with the
+  `open an issue <https://github.com/tom-hirt/schwaby/issues>`__ with the
   field.
 
 .. _unknown_field_ids:
@@ -1763,7 +1763,7 @@ publishes it.
   logger --- because being delivered and being *noticed* are different
   things, and the field tables are only as current as the last time someone
   looked. If you see that line, please `open an issue
-  <https://github.com/Hu1kSmash/schwaby/issues>`__ with the id and the value.
+  <https://github.com/tom-hirt/schwaby/issues>`__ with the id and the value.
 
   This one is not reported through :func:`add_error_handler
   <schwaby.streaming.StreamClient.add_error_handler>`: nothing was absorbed
@@ -1920,7 +1920,7 @@ malformed message and should not be reported as one.
   unknown. What is true either way, and worth building for: **a consumer must
   be idempotent across reconnects.**
 
-  `An issue <https://github.com/Hu1kSmash/schwaby/issues>`__ from anyone who
+  `An issue <https://github.com/tom-hirt/schwaby/issues>`__ from anyone who
   can reproduce this on demand would be worth a great deal.
 
 **Content items within one message are not necessarily in lifecycle order.** A

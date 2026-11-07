@@ -13,7 +13,7 @@ how you can get help and make progress.
 .. note::
 
    Bug reports and questions go to `the tracker
-   <https://github.com/Hu1kSmash/schwaby/issues>`__.
+   <https://github.com/tom-hirt/schwaby/issues>`__.
 
 
 
@@ -202,4 +202,4 @@ A good report includes:
    checked for anything sensitive first.
  * **Your version, OS and execution environment.**
 
-Then `file an issue <https://github.com/Hu1kSmash/schwaby/issues>`__.
+Then `file an issue <https://github.com/tom-hirt/schwaby/issues>`__.

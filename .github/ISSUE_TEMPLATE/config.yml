@@ -1,12 +1,12 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/Hu1kSmash/schwaby/security/advisories/new
+    url: https://github.com/tom-hirt/schwaby/security/advisories/new
     about: >-
       Do not open a public issue. This library holds brokerage credentials and
       can place trades; report privately.
   - name: Questions and discussion
-    url: https://github.com/Hu1kSmash/schwaby/discussions
+    url: https://github.com/tom-hirt/schwaby/discussions
     about: >-
       For "how do I", "is this supposed to", and anything you are not yet sure
       is a bug.

@@ -4,7 +4,7 @@
 
 **A Python client for the Charles Schwab API, built for code that trades real money.**
 
-[![tests](https://github.com/Hu1kSmash/schwaby/workflows/tests/badge.svg)](https://github.com/Hu1kSmash/schwaby/actions?query=workflow%3Atests)
+[![tests](https://github.com/tom-hirt/schwaby/workflows/tests/badge.svg)](https://github.com/tom-hirt/schwaby/actions?query=workflow%3Atests)
 [![PyPI](https://img.shields.io/pypi/v/schwaby.svg)](https://pypi.org/project/schwaby/)
 [![Python](https://img.shields.io/pypi/pyversions/schwaby.svg)](https://pypi.org/project/schwaby/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -57,7 +57,7 @@ Synchronous and `asyncio` over the same interface. Python 3.10+.
 > than feels necessary. Reconcile against the broker rather than trusting what
 > this library tells you happened. Read the code on every path that places,
 > replaces or cancels an order — all of it is [right
-> here](https://github.com/Hu1kSmash/schwaby/tree/main/schwaby). And assume the
+> here](https://github.com/tom-hirt/schwaby/tree/main/schwaby). And assume the
 > bug you have not found is on the path you did not read.
 >
 > If that is not a trade you want to make, use Schwab's own interfaces instead.
@@ -276,8 +276,8 @@ goes on succeeding until the first submodule you use.
 ## Getting help and contributing
 
 Bug reports, questions, suggestions and patches all go to the repository: open an
-[issue](https://github.com/Hu1kSmash/schwaby/issues) or a [pull
-request](https://github.com/Hu1kSmash/schwaby/pulls).
+[issue](https://github.com/tom-hirt/schwaby/issues) or a [pull
+request](https://github.com/tom-hirt/schwaby/pulls).
 
 ## Where this came from
 
