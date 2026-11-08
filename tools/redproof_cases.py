@@ -1067,6 +1067,16 @@ CASES = [
          '::test_set_json_decoder_refuses_something_that_is_not_one',
          'ValueError not raised'),
 
+    # A custom decoder replaces parsing. Parsed by the library instead, a
+    # decoder written for a non-JSON wire format is never consulted.
+    Case('streaming/a-custom-decoder-replaces-parsing',
+         'schwaby/streaming.py',
+         "            ret = self.json_decoder.decode_json_string(raw)\n",
+         "            ret = json.loads(raw)\n",
+         'tests/streaming_test.py::StreamClientTest'
+         '::test_a_custom_decoder_replaces_parsing_on_the_request_path',
+         'UnparsableMessage'),
+
     Case('streaming/receive-before-login',
          'schwaby/streaming.py',
          "    async def _receive_from_socket(self):\n"

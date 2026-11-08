@@ -131,52 +131,6 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         return socket
 
 
-    # TODO: Revive this test once the contrib module comes back.
-
-    '''
-    ##########################################################################
-    # Custom JSON Decoder
-
-
-    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
-    async def test_default_parser_invalid_message(self, ws_connect):
-        socket = await self.login_and_get_socket(ws_connect)
-
-        socket.recv.side_effect = ['invalid json']
-
-        # No custom parser
-        msg = ('Failed to parse message. This often happens with ' +
-               'unknown symbols or other error conditions')
-        with self.assertRaisesRegex(schwaby.streaming.UnparsableMessage, msg):
-            await self.client.level_one_equity_subs(['GOOG', 'MSFT'])
-
-
-    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
-    async def test_custom_parser_invalid_message(self, ws_connect):
-        socket = await self.login_and_get_socket(ws_connect)
-
-        socket.recv.side_effect = ['invalid json']
-
-        class CustomJsonDecoder(schwaby.contrib.util.StreamJsonDecoder):
-            def decode_json_string(_, raw):
-                self.assertEqual(raw, 'invalid json')
-                return self.success_response(1, 'LEVELONE_EQUITIES', 'SUBS')
-
-        self.client.set_json_decoder(CustomJsonDecoder())
-        await self.client.level_one_equity_subs(['GOOG', 'MSFT'])
-
-
-    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
-    async def test_custom_parser_wrong_type(self, ws_connect):
-        socket = await self.login_and_get_socket(ws_connect)
-
-        socket.recv.side_effect = ['invalid json']
-
-        with self.assertRaises(ValueError):
-            self.client.set_json_decoder('')
-    '''
-
-
     ##########################################################################
     # Login
 
@@ -8689,6 +8643,40 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         self.assertEqual(6, len(records))
         self.assertIn('1000 of these', records[-1])
         self.assertIn('10 of these', records[3])
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_custom_decoder_replaces_parsing_on_the_request_path(
+            self, ws_connect):
+        # A custom decoder is handed the frame exactly as it arrived, text or
+        # bytes, and what it returns is the frame. handle_message reads
+        # through the same call; this is the request path. Neither frame is
+        # JSON, so a subscribe succeeds only if the library decoded nothing
+        # itself.
+        socket = await self.login_and_get_socket(ws_connect)
+
+        from schwaby.contrib.util import StreamJsonDecoder
+
+        seen = []
+        answers = []
+
+        class Decoder(StreamJsonDecoder):
+            def decode_json_string(self, raw):
+                seen.append(raw)
+                return answers.pop(0)
+
+        self.client.set_json_decoder(Decoder())
+
+        for request_id, frame in ((1, 'not json at all'),
+                                  (2, b'\x80 not json either')):
+            with self.subTest(frame=frame):
+                seen.clear()
+                answers.append(self.success_response(
+                    request_id, 'LEVELONE_EQUITIES', 'SUBS'))
+                socket.recv.side_effect = [frame]
+                await self.client.level_one_equity_subs(['GOOG', 'MSFT'])
+                self.assertEqual([frame], seen)
+                self.assertIs(type(frame), type(seen[0]))
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
