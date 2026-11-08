@@ -63,15 +63,19 @@ must have no whitespace errors, and no staged file may carry, in its name or
 its content, a word on your clone's own forbidden list
 (``git config --add lightcheck.forbidden WORD``), which is kept in the clone's
 configuration so the repository never carries it. Nor may a staged file look
-up its parent's pid or signal pid -1: an orphan's parent is whoever adopted
-it, often the session manager, so a kill aimed that way can end the desktop.
-The whole file is read, so a line that only mentions such a lookup is refused
-too. Signal only a pid or a process group you started and recorded. A commit
-that changes a file under ``tests/`` is also told which red-proof entries test
-or mutate it; the release red-proof runs them (``RELEASING.md`` says more).
-Every commit is told which test modules read a file it changes, from
-``tools/reads.json``, and ``python -I -B tools/reads.py --touching main`` names
-the whole branch's: run those before the branch merges. When a test's imports or the files it
+up its parent's pid, or signal pid -1 or its own process group: an orphan's
+parent is whoever adopted it, often the session manager, so a kill aimed that
+way can end the desktop, and a script's own group holds the shell that ran
+it. Comparing the parent's pid with 1, to see whether init adopted you, is
+let through. The whole file is read, so a line that only mentions such a
+lookup is refused too, and so is a ``ps`` walk down from a pid you recorded:
+keep the pids you start instead. Signal only a pid or a process group you
+started and recorded. A commit that changes a file under ``tests/`` is also
+told which red-proof entries test or mutate it; the release red-proof runs
+them (``RELEASING.md`` says more). Every commit is told which test modules
+read a file it changes, from ``tools/reads.json``, and
+``python -I -B tools/reads.py --touching main`` names the whole branch's:
+run those before the branch merges. When a test's imports or the files it
 names change, ``python -I -B tools/reads.py`` rewrites the map, and a test
 that every change reaches fails until it does.
 The full suite is not part of it; that runs below, and on every pull request.

@@ -19,12 +19,15 @@ commit will contain:
  * `git diff --cached --check`: no whitespace errors or conflict markers;
  * no staged file signals a process it cannot have started: none looks up
    its parent's pid (Python's os call, the shell's variable, ps's parent
-   column, the PPid line of /proc's status, psutil's methods) or sends a
-   signal to pid -1, in Python, in a shell line or as an argv, which reaches
-   every process the user owns. A parent found that way is whoever adopted
-   an orphan, often the session manager, whose children are the whole
-   desktop. A kill names a pid or a process group its caller started and
-   recorded. Each line is named, by the whole file;
+   column, the PPid line of /proc's status, psutil's methods), and none
+   sends a signal, in Python, in a shell line or as an argv, to pid -1,
+   which reaches every process the user owns, or to its own process group,
+   which holds the shell or test runner that started it unless it began a
+   session of its own. A parent found that way is whoever adopted an
+   orphan, often the session manager, whose children are the whole desktop.
+   Asking whether the parent is init, the test of an orphan that exits, is
+   let through. A kill names a pid or a process group its caller started
+   and recorded. Each line is named, by the whole file;
  * no staged file, by its name or its content, carries a word on this
    clone's forbidden list, `git config --add lightcheck.forbidden WORD`.
    The list lives in the clone's own configuration, so the repository
@@ -154,8 +157,9 @@ def forbidden_in(path, words):
 # Built from pieces so that this file, which names them, does not carry them.
 _PARENT = 'pp' + 'id'
 BLIND_KILL = re.compile('|'.join([
-    # Python's os call for the parent's pid.
-    r'\bget' + _PARENT + r'\b',
+    # Python's os call for the parent's pid, unless it is only compared
+    # with init's.
+    r'\bget' + _PARENT + r'\b(?!\(\)\s*[=!]=\s*1\b)',
     # The shell's variable for it.
     r'\$\{?' + _PARENT.upper() + r'\b',
     # ps asked for the parent column, on the same line.
@@ -174,12 +178,24 @@ BLIND_KILL = re.compile('|'.join([
     # option, and -1 last.
     r'[\'"]kill' + r'[\'"]\s*,\s*'
     r'(?:[\'"]-[^\'"]*[\'"]\s*,\s*)+[\'"]-1[\'"]\s*,?\s*[\])]',
+    # Python's signal to its own group: pid 0, or the group by number.
+    r'\bkill' + r'(?:pg)?\(\s*0\s*,',
+    r'\bkill' + r'pg\(\s*(?:os\.)?getpg(?:rp\(\)|id\(\s*(?:0|(?:os\.)?'
+    r'getpid\(\))\s*\))',
+    # The shell's, with 0 the last word: `kill -0 PID` and `kill -s 0 PID`
+    # only ask whether PID exists. A quote straight after the 0 closes the
+    # string the command sits in; one after a space opens the next word.
+    r'\bkill' + r'(?:\s+-[sn]\s+\S+|\s+-\S+)*\s+0'
+    r'(?=[\'"`]|[ \t]*(?:$|[;&|)>]|\d>))',
+    # The same as an argv, with 0 last.
+    r'[\'"]kill' + r'[\'"]\s*,\s*'
+    r'(?:[\'"]-[^\'"]*[\'"]\s*,\s*)*[\'"]0[\'"]\s*,?\s*[\])]',
 ]).encode('ascii'), re.MULTILINE)
 
 
 def blind_kills_in(path):
-    '''The line numbers at which the staged file looks up its parent's pid
-    or signals pid -1.'''
+    '''The line numbers at which the staged file looks up its parent's pid,
+    or signals pid -1 or its own group.'''
     content = blob(':0:' + path) or b''
     return [content.count(b'\n', 0, m.start()) + 1
             for m in BLIND_KILL.finditer(content)]
@@ -299,9 +315,9 @@ def main():
                   'list' % (path, word))
             failed = True
         for line in blind_kills_in(path):
-            print("light check: %s:%d: looks up its parent's pid or signals "
-                  'pid -1; signal only a pid or group it started and '
-                  'recorded' % (path, line))
+            print("light check: %s:%d: looks up its parent's pid, or "
+                  'signals pid -1 or its own group; signal only a pid or '
+                  'group it started and recorded' % (path, line))
             failed = True
     check = git('diff', '--cached', '--check', check=False)
     if check.returncode != 0:
