@@ -5,6 +5,7 @@ proves its functions and not that the file starts: a tool that works only
 with the repository root on the path passes every one of them.'''
 
 import importlib
+import importlib.util
 import json
 import os
 import re
@@ -41,6 +42,10 @@ class EntrypointTest(unittest.TestCase):
     # other test above runs everywhere. A skip is seen by its decorator, on
     # the method or its class; one taken inside the test is not.
     POSIX_ONLY = {'redproof.py', 'repeat.py'}
+    # The ones whose test runs the light check, which refuses every commit
+    # without pyflakes: that test skips where [dev] is not installed.
+    NEED_PYFLAKES = {'light_check.py', 'hooks/pre-commit',
+                     'hooks/pre-merge-commit'}
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -73,7 +78,9 @@ class EntrypointTest(unittest.TestCase):
             self.assertTrue(callable(method), '%s: no %s' % (name, by))
             skipped = (getattr(vars(module)[cls], '__unittest_skip__', False)
                        or getattr(method, '__unittest_skip__', False))
-            expected = os.name == 'nt' and name in self.POSIX_ONLY
+            expected = ((os.name == 'nt' and name in self.POSIX_ONLY)
+                        or (importlib.util.find_spec('pyflakes') is None
+                            and name in self.NEED_PYFLAKES))
             self.assertEqual(expected, skipped,
                              '%s: %s %s here' % (
                                  name, by,

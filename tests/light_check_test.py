@@ -167,6 +167,11 @@ class BlindKillTest(unittest.TestCase):
         self.assertEqual([], found)
 
 
+# The check refuses every commit without pyflakes, so each of these would
+# fail on that alone. [dev] installs it, and a check that it does keeps
+# this skip from hiding anything where the suite is meant to run.
+@unittest.skipIf(importlib.util.find_spec('pyflakes') is None,
+                 'pyflakes not installed in this venv; [dev] installs it')
 class LightCheckTest(unittest.TestCase):
 
     def setUp(self):

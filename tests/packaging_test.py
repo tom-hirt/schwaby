@@ -170,9 +170,11 @@ class SetupPyTest(unittest.TestCase):
         # CONTRIBUTING runs the suite with `-n auto`, and setup.cfg sets
         # `timeout`. Without pytest-xdist the first is an unknown argument;
         # without pytest-timeout the second is a warning and no test has a
-        # limit.
+        # limit. The light check needs pyflakes, and its tests and the
+        # time-limit test skip where these are not installed, so [dev] must
+        # install them for the skips to hide nothing.
         dev = [package_name(r) for r in self.kwargs['extras_require']['dev']]
-        for plugin in ('pytest-xdist', 'pytest-timeout'):
+        for plugin in ('pytest-xdist', 'pytest-timeout', 'pyflakes'):
             self.assertIn(plugin, dev, '%s is missing from [dev]' % plugin)
 
     # The two checks below are vacuous against setup.py as it stands, because
