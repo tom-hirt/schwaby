@@ -249,8 +249,8 @@ def _safe_repr(value):
     except Exception:
         # Not just ValueError. `json.loads` yields plain dicts, whose `repr`
         # raises only the integer digit limit -- but `StreamJsonDecoder` is a
-        # public extension point, which is the same argument that made
-        # `relabel_message` handle a non-string key.
+        # public extension point, which is also why `relabel_message` handles
+        # a non-string key.
         text = '<{} that cannot be formatted>'.format(_type_name(value))
     # A plain dict's repr escapes a newline, but neither a value's own
     # `__repr__` nor a class name need -- a mapping type or a str subclass
@@ -270,9 +270,8 @@ def _decode_bare(value):
     """The other half of the surface, validated the same way as a member.
 
     This path is defensive: no captured payload has carried a money or
-    quantity field as a bare number or string, and the docstring above says
-    so rather than implying otherwise. It carries the same untrusted text as
-    the mantissa members, so it is validated as strictly.
+    quantity field as a bare number or string. It carries the same untrusted
+    text as the mantissa members, so it is validated as strictly.
     `decimal.Decimal`'s parser accepts more than `int`'s does, so unchecked,
     every token `_unsigned` refuses would decode here instead: ``'1_0'`` as
     ten, ``'\u0663'`` as three, ``' 12 '`` and ``'+12'`` and

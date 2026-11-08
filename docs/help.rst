@@ -105,7 +105,7 @@ around the logger it would have used anyway, ``websockets.client``, which
 redacts each frame before anything sees it -- so its elision of a long frame's
 middle only ever cuts redacted text. Its records still come from
 ``websockets.client``, so a level, handler, filter or ``disabled`` you set
-there applies as it always did. If you pass ``websockets`` a ``logger`` of your
+there applies as it would to any other logger. If you pass ``websockets`` a ``logger`` of your
 own through ``websocket_connect_args``, it is wrapped the same way rather than
 replaced: no filter or handler of yours can see a frame unredacted, and
 everything else passes through as it was logged. A fragment of a message is

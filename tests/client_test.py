@@ -36,11 +36,11 @@ SYMBOL = 'AAPL'
 TRANSACTION_ID = 400000
 WATCHLIST_ID = 5000000
 
-# The library's default start date, which is UTC. This was previously naive,
-# and so was the library -- both read it as local time and agreed, which made
-# the expected value here depend on the timezone of whatever machine ran the
-# suite. Pinning it to UTC on both sides makes the assertion mean the same
-# thing everywhere.
+# The library's default start date, which is UTC. A naive value here and in
+# the library would both be read as local time and agree, so the expected
+# value would depend on the timezone of whatever machine ran the suite.
+# Pinning it to UTC on both sides makes the assertion mean the same thing
+# everywhere.
 MIN_DATETIME = datetime.datetime(year=1971, month=1, day=1,
                                  tzinfo=datetime.timezone.utc)
 MIN_ISO = '1971-01-01T00:00:00+0000'
@@ -2362,8 +2362,8 @@ class _TestClient:
                          'needs time.tzset to pin a non-UTC local zone')
     def test_a_tzinfo_with_no_offset_is_naive(self):
         # Python calls a datetime naive when utcoffset() returns None, even
-        # with a tzinfo set. Keying on tzinfo alone skipped the warning and
-        # then converted from the host's zone, so the same code sent a
+        # with a tzinfo set. Keying on tzinfo alone would skip the warning and
+        # then convert from the host's zone, so the same code would send a
         # different instant from each machine. The zone is pinned for the
         # reason the naive test above pins it.
         class NoOffset(datetime.tzinfo):
@@ -2509,23 +2509,23 @@ class _TestClient:
     def test_a_stack_entirely_inside_the_package_still_blames_somebody(self):
         """The fallback after the walk runs out of frames.
 
-        The docstring on `_caller_stacklevel` says it never returns 0, because
-        `warnings.warn` reads 0 as "blame the frame which called warn" -- this
-        library -- which is the exact failure the function exists to avoid. It
-        names a zipimport or a frozen build as how a frame's `co_filename`
-        stops resolving under the package root.
+        `_caller_stacklevel` never returns 0, because `warnings.warn` reads 0
+        as "blame the frame which called warn" -- this library -- which is the
+        exact failure the function exists to avoid. A zipimport or a frozen
+        build is how a frame's `co_filename` stops resolving under the
+        package root.
 
-        Nothing reached the line. Under pytest the stack always contains
-        frames outside the package, so the loop always returns early. Every
-        filename is made to look internal instead, which is the same shape as
-        every frame being unresolvable, and takes the walk to the end.
+        Under pytest the stack always contains frames outside the package, so
+        the loop always returns early and an ordinary call never reaches the
+        fallback. Every filename is made to look internal instead, which is
+        the same shape as every frame being unresolvable, and takes the walk
+        to the end.
         """
-        # Three earlier attempts made every frame look internal by choosing
-        # a clever `_PACKAGE_ROOT` or by patching `os.path.abspath`, and each
-        # was wrong in its own way:
+        # Choosing a clever `_PACKAGE_ROOT` or patching `os.path.abspath`
+        # does not make every frame look internal, each for its own reason:
         #
         #  * `''` gives a prefix of `\` on Windows, which no absolute path
-        #    starts with, so the walk returned at the first frame.
+        #    starts with, so the walk returns at the first frame.
         #  * this file's drive gives `D:\` on a GitHub runner, where the
         #    checkout is on D: and the interpreter under C:\hostedtoolcache,
         #    so the stdlib frames are foreign and the walk stops midway.
@@ -2536,7 +2536,7 @@ class _TestClient:
         #    as living under `schwaby/`.
         #
         # The first two are green on Linux and red on `windows-latest`, which
-        # runs on pull requests and tags: the runs used to clear a release.
+        # runs on pull requests and tags.
         #
         # So supply the frames instead. `_caller_stacklevel` walks whatever
         # `inspect.currentframe()` gives it and reads `co_filename` off each
@@ -2572,11 +2572,10 @@ class _TestClient:
         '.../schwaby', so frames from an unrelated package are skipped as if
         they were ours and the blame lands a frame too far out.
 
-        The sibling's name has to share the *current* package name as a
-        prefix, which is why it is not the 'schwabtools' this test was born
-        with: that collided with the old root and collides with nothing now,
-        so the fixture went quietly inert when 4.0.0 renamed the package and
-        the mutation stopped being caught.
+        The sibling's name has to share the package's own name as a prefix.
+        A sibling named after any other prefix collides with nothing, so the
+        fixture would go quietly inert and the mutation would stop being
+        caught, with the test still passing.
 
         This needs a real module in a real sibling directory. Patching
         _PACKAGE_ROOT cannot stand it up, because the walk starts at this
@@ -2926,8 +2925,7 @@ class _TestClient:
     def test_a_description_that_is_not_a_string_is_not_terminal(self):
         # `description` is whatever the exception carries, and the two reads
         # after this one are `.find('{')` and `.rfind('}')`, which a non-string
-        # does not have. The guard was there and nothing sent it anything to
-        # guard against.
+        # does not have.
         #
         # False is the right answer rather than an exception, for the reason
         # the docstring gives: a failure wrongly called terminal stops an
@@ -3021,8 +3019,8 @@ class _TestClient:
     def test_a_local_unsupported_token_type_without_expiry_is_terminal(self):
         # With no expiry the stored token is never refreshed, so a token
         # authlib cannot send fails the same way on every call and nothing is
-        # ever sent: retrying cannot help. A token file damaged before
-        # refreshes were checked looks exactly like this.
+        # ever sent: retrying cannot help. A token file holding a refusal
+        # body rather than a token looks exactly like this.
         from authlib.integrations.base_client.errors import (
                 UnsupportedTokenTypeError)
 
@@ -3165,8 +3163,8 @@ class ClientTest(_TestClient, unittest.TestCase):
     magicmock_class = MagicMock
 
     def test_close_session(self):
-        # The asyncio client could always be closed; the synchronous one held
-        # its connections until it happened to be collected.
+        # Without this the synchronous client would hold its connections
+        # until it happened to be collected.
         self.client.close_session()
         self.mock_session.close.assert_called_once_with()
 

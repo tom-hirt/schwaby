@@ -256,8 +256,8 @@ def _refuse_unusable_token_response(response):
     read it from there, and its presence is how they know the endpoint
     answered. So a JSON object carrying ``error`` is raised here too, as the
     ``OAuthError`` authlib would raise for it, built the same way under 1.8
-    and 1.9. Left to authlib, that refusal reached the caller with no status
-    on it anywhere.
+    and 1.9. Left to authlib, that refusal would reach the caller with no
+    status on it anywhere.
     '''
     if response.status_code >= 500:
         return response
@@ -960,9 +960,8 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
         while True:
             # Check if the server is still alive
             if server.exitcode is not None:
-                # RedirectServerExitedError is documented in docs/util.rst
-                # under Exceptions. The parent-side imports above exist so that
-                # a broken install does not arrive here wearing this message.
+                # The parent-side imports above exist so that a broken install
+                # does not arrive here wearing this message.
                 raise RedirectServerExitedError(
                         'Redirect server exited. Are you attempting to use a ' +
                         'callback URL without a port number specified?')

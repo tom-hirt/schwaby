@@ -277,7 +277,7 @@ class ClientFromLoginFlowTest(unittest.TestCase):
         # and let go first. A collision in that gap fails by its own name.
         port = free_callback_port()
         # A killed server holds the port until it has actually exited, so a
-        # second flow started straight after found the port taken. Exited
+        # second flow started straight after would find the port taken. Exited
         # and reaped is checked rather than the port, which is a race: a
         # killed child nobody waited for stays in the process table, as a
         # zombie or still dying, every time.
@@ -449,9 +449,9 @@ class ClientFromLoginFlowTest(unittest.TestCase):
         # Whether a port nothing is bound to refuses the connection or drops
         # it decides which exception httpx2 raises, and that is a property of
         # the host rather than of this library. ConnectTimeout is a sibling of
-        # ConnectError, not a subclass, so catching only the latter let the
-        # timeout case escape and end the login flow while the server was
-        # still coming up. macOS runners hit this on every login-flow test.
+        # ConnectError, not a subclass, so catching only the latter would let
+        # the timeout case escape and end the login flow while the server was
+        # still coming up. macOS runners take the timeout case.
         import httpx2 as _httpx2
 
         ok = MagicMock()
@@ -471,7 +471,7 @@ class ClientFromLoginFlowTest(unittest.TestCase):
         # the call count says so. Driving the whole flow to success would need
         # a real server on a real port, and the readiness check is mocked here
         # -- the code would believe a server was up which was not, and the test
-        # would race against it. It did exactly that on one CI runner.
+        # would race against it.
         with self.assertRaises(auth.RedirectTimeoutError):
             auth.client_from_login_flow(
                     API_KEY, APP_SECRET, f'https://127.0.0.1:{self.port}/callback',
@@ -508,17 +508,16 @@ class ClientFromLoginFlowTest(unittest.TestCase):
         path and requiring a 200. That only discriminates if the path is ours
         alone.
 
-        Through 3.0.3 it was `/schwab-py-internal/status`, inherited from
-        `schwab-py`, which serves the same path for the same reason. A
-        `schwab-py` login flow already bound to the callback port therefore
-        answered with 200, the guard read that as its own server, and the
-        browser handed the authorization code to the other project. 4.0.0 is
-        the release that makes having both installed normal, so this is the
-        release where that stops being hypothetical.
+        `schwab-py` serves `/schwab-py-internal/status` for the same reason.
+        If the path were that one, a `schwab-py` login flow already bound to
+        the callback port would answer with 200, the guard would read that as
+        its own server, and the browser would hand the authorization code to
+        the other project. The two packages install side by side, so that is
+        an ordinary setup rather than a hypothetical one.
 
         Asserting the substring rather than the whole value on purpose: the
-        path may change again, and what must not come back is a name the other
-        project answers to.
+        path may change, and what must not appear is a name the other project
+        answers to.
         """
         self.assertNotIn('schwab-py', auth.INTERNAL_STATUS_PATH)
         self.assertIn('schwaby', auth.INTERNAL_STATUS_PATH)
@@ -541,9 +540,10 @@ class ClientFromLoginFlowTest(unittest.TestCase):
     def test_refuses_to_continue_when_something_else_holds_the_port(
             self, mock_get, mock_webbrowser_get, async_session, sync_session,
             client):
-        # The status response was fetched and discarded, so any listener on the
-        # port counted as our server. Continuing would send the authorization
-        # code -- which is enough to take over the account -- to whatever it is.
+        # If the status response were fetched and discarded, any listener on
+        # the port would count as our server. Continuing would send the
+        # authorization code -- which is enough to take over the account -- to
+        # whatever it is.
         response = MagicMock()
         response.status_code = 404
         mock_get.return_value = response
@@ -924,15 +924,14 @@ class ClientFromTokenFileTest(unittest.TestCase):
     @patch('schwaby.auth.AsyncOAuth2Client', new_callable=MockAsyncOAuthClient)
     def test_update_token_is_user_readable_only(
             self, async_session, sync_session, client):
-        # A token written by an earlier version, or by a user with a permissive
-        # umask, is left group- and world-readable. Updating it must correct
+        # A token file written by another program, or under a permissive
+        # umask, can be group- and world-readable. Updating it must correct
         # that rather than preserve it.
         #
         # POSIX only. Windows has no such mode: os.chmod there toggles a
         # read-only bit and nothing else, so the file comes back 0o666 and the
         # guarantee this asserts does not exist. Skipped rather than weakened,
-        # so that the check stays exact where it means something. See the note
-        # in docs/auth.rst.
+        # so that the check stays exact where it means something.
         if os.name != 'posix':
             self.skipTest('file modes are POSIX-only; see docs/auth.rst')
 
@@ -1184,15 +1183,12 @@ class ClientFromAccessFunctionsTest(unittest.TestCase):
     @patch('schwaby.auth.AsyncOAuth2Client', new_callable=MockAsyncOAuthClient)
     def test_asyncio_builds_an_async_client_and_still_writes_the_token(
             self, async_session, sync_session, async_client, client):
-        """The asyncio branch of this function, which nothing reached.
+        """The asyncio branch of this function.
 
-        Every `client_from_*` entry point funnels into here, and four tests
-        called it -- all four with the default `asyncio=False`. So the branch
-        that picks `AsyncOAuth2Client` and `AsyncClient` was never taken, and
-        neither was the `async def` it wraps the token writer in. That inner
-        line carries a `# pragma: no cover`, so the body was excluded from
-        measurement as well as unreached: a token write that quietly did
-        nothing on the async path would have looked exactly like this.
+        Every `client_from_*` entry point funnels into here, and most tests of
+        it use the default `asyncio=False`. This one takes the branch that
+        picks `AsyncOAuth2Client` and `AsyncClient`, and checks that the
+        `async def` it wraps the token writer in really writes the token.
 
         `client_from_received_url(asyncio=True)` is covered elsewhere and is a
         different function; this is the one every path goes through.
@@ -1405,16 +1401,13 @@ class ClientFromReceivedUrl(unittest.TestCase):
             self, async_session, sync_session, async_client, client):
         """The second copy of the async token writer.
 
-        `client_from_access_functions` had one of these, unreached and marked
-        `# pragma: no cover`; this is the same shape 140 lines away, and
-        fixing the first one without looking for the second is how the
-        identical `int(float(x) * 1000)` sat in two places here for a release.
+        `client_from_access_functions` has one of the same shape, and a test
+        of that one says nothing about this one.
 
         `test_success_async` below covers the *construction* -- that
-        `AsyncClient` is built and `Client` is not. What nothing covered is
-        awaiting the `async def` that gets handed to the session as
-        `update_token`, which is the only thing on this path that writes a
-        token at all.
+        `AsyncClient` is built and `Client` is not. This covers awaiting the
+        `async def` that gets handed to the session as `update_token`, which
+        is the only thing on this path that writes a token at all.
         """
         sync_session.return_value = sync_session
         sync_session.create_authorization_url.return_value = \
@@ -1778,8 +1771,9 @@ class StoredTokenShapeTest(unittest.TestCase):
     @no_duplicates
     @patch('time.time', MagicMock(return_value=MOCK_NOW))
     def test_a_mapping_that_is_not_a_dict_is_used_as_one(self):
-        # authlib converts only a real dict into its token type, so every call
-        # on a mappingproxy raised AttributeError on is_expired.
+        # authlib converts only a real dict into its token type, so unless it
+        # is converted first every call on a mappingproxy raises
+        # AttributeError on is_expired.
         import types
         client = self.build(types.MappingProxyType(dict(self.GOOD)))
         requests = []
@@ -1838,7 +1832,7 @@ class StoredTokenShapeTest(unittest.TestCase):
         client.get_quote('AAPL')
         self.assertEqual(0, sum(p.endswith('/oauth/token') for p in requests))
 
-        # One int() cannot take at all is authlib's to refuse, as before.
+        # One int() cannot take at all is left for authlib to refuse.
         #
         # authlib raises with its OAuth2Auth half built, and that object's
         # __del__ then fails as well. Left to the garbage collector, pytest
@@ -2067,7 +2061,7 @@ class LoginExchangeErrorTest(unittest.TestCase):
     @no_duplicates
     def test_refusal_text_is_escaped_and_cut(self):
         # It comes from the redirect or the endpoint and reaches whatever logs
-        # the exception: a line break there forged a log line.
+        # the exception: a line break there would forge a log line.
         import httpx2
         import traceback
         from authlib.integrations.base_client.errors import OAuthError
@@ -2195,8 +2189,8 @@ class LoginExchangeErrorTest(unittest.TestCase):
 
 class TokenBodyFromASuccessOnlyTest(unittest.TestCase):
     '''A token is kept only from a success. authlib keeps any JSON object
-    without an ``error`` key, whatever the status, so a refusal carrying a
-    usable token was stored as the new one.'''
+    without an ``error`` key, whatever the status, so without this a refusal
+    carrying a usable token would be stored as the new one.'''
 
     CONTEXT = LoginExchangeErrorTest.CONTEXT
     RECEIVED = LoginExchangeErrorTest.RECEIVED
@@ -2453,7 +2447,8 @@ class TokenFileAgeTest(unittest.TestCase):
     @no_duplicates
     def test_a_faked_class_is_not_taken_for_a_mapping_or_a_number(self):
         # isinstance consults __class__, which any class can fake. Each of
-        # these passed it and then escaped as TypeError instead of ValueError.
+        # these passes it, and unless the real type is checked would escape
+        # as TypeError instead of ValueError.
         class FakeDict:
             __class__ = dict
 
@@ -2511,8 +2506,8 @@ class TokenFileAgeTest(unittest.TestCase):
     @no_duplicates
     @patch('time.time', MagicMock(return_value=MOCK_NOW))
     def test_a_token_mapping_that_is_not_a_dict_is_accepted(self):
-        # A token_read_func may return any mapping, and these built a client
-        # before the shape check existed.
+        # A token_read_func may return any mapping, and the shape check must
+        # not refuse these.
         import collections
         import types
         raw = {'token': {'access_token': 'a'},
@@ -2553,8 +2548,8 @@ class TokenFileAgeTest(unittest.TestCase):
     @no_duplicates
     @patch('time.time', MagicMock(return_value=MOCK_NOW))
     def test_a_token_the_client_refuses_is_refused_here_too(self):
-        # A monitor reading the age reported a healthy token for these, while
-        # every client build on the same file failed.
+        # Accepted here, these would let a monitor reading the age report a
+        # healthy token while every client build on the same file failed.
         good = {'access_token': 'a', 'refresh_token': 'r',
                 'token_type': 'Bearer', 'expires_at': MOCK_NOW + 1800}
         for token, message in (
@@ -2587,7 +2582,7 @@ class TokenFileAgeTest(unittest.TestCase):
     @patch('time.time', MagicMock(return_value=MOCK_NOW))
     def test_a_decimal_or_other_real_timestamp_is_accepted(self):
         # A token store such as DynamoDB hands numbers back as Decimal, and
-        # token_age() has always worked with one.
+        # token_age() works with one.
         import decimal
         import fractions
         for stamp in (decimal.Decimal(TOKEN_CREATION_TIMESTAMP),
@@ -2712,8 +2707,8 @@ class EasyClientTest(unittest.TestCase):
     def test_a_notebook_login_keeps_asyncio(
             self, getenv, client_from_manual_flow, client_from_login_flow,
             client_from_token_file):
-        # The notebook route dropped the flag, so asking for an async client
-        # there returned a synchronous one.
+        # If the notebook route dropped the flag, asking for an async client
+        # there would return a synchronous one.
         getenv.side_effect = lambda flag: 'yes'
         client_from_manual_flow.return_value = MagicMock()
 
@@ -2962,9 +2957,8 @@ class ParentSideImportTest(unittest.TestCase):
 
     The callback server runs in a child. An ImportError there surfaces as child
     stderr and the parent reports RedirectServerExitedError -- blaming the
-    callback port for a broken install. This survived the removal of the
-    optional-import machinery in 3.0.0 because it was never about extras: it is
-    about which process gets to raise.
+    callback port for a broken install. This is not about optional
+    dependencies: it is about which process gets to raise.
     """
 
     def block(self, *module_names):
@@ -3035,8 +3029,8 @@ class ParentSideImportTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             token_path = os.path.join(tmp, 'token.json')
             # creation_timestamp 0 makes the token older than max_token_age, so
-            # easy_client discards it and takes the login flow. That is the
-            # case the docs call out: having a token file is not enough.
+            # easy_client discards it and takes the login flow: having a
+            # token file is not enough.
             with open(token_path, 'w') as f:
                 json.dump({'token': {'token': 'yes'},
                            'creation_timestamp': 0}, f)

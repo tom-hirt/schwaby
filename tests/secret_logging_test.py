@@ -9,12 +9,12 @@ elision of long frames is turned off, as its documented
 each secret in every form it could take.
 
 This test uses nothing but public API and the root logger, so it runs as it
-is against an older version -- which is how it was shown to fail on 5.0.0,
-where the streamer's LOGIN request logged the access token, the bug-report
-report carried it, and websockets logged it whole.
+is against an earlier release with the same public API, and fails on one
+where the streamer's LOGIN request logs the access token, the bug report
+carries it, or websockets logs it whole.
 
 The servers bind ephemeral loopback ports, so two runs of the suite cannot
-collide here the way the login flow's fixed port does.
+collide here.
 '''
 import asyncio
 import base64
@@ -43,8 +43,7 @@ from .utils import no_duplicates
 
 # Fresh values for every test. Redaction registers secrets for the life of the
 # process, so a value an earlier test registered would be masked here whether
-# or not this test's path registers it -- which is how the bug-report test
-# first passed against 5.0.0 with the leak in place.
+# or not this test's path registers it, and a leak would pass unseen.
 SECRETS = {}
 
 
@@ -219,8 +218,8 @@ class SecretLoggingTest(unittest.TestCase):
         stack.enter_context(patch.object(
             httpx2.AsyncHTTPTransport, 'handle_async_request', ahandle))
         # websockets' documented WEBSOCKETS_MAX_LOG_SIZE, set high: its
-        # default elides a long frame's middle, which is the only thing that
-        # kept the LOGIN token out of its log.
+        # default elides a long frame's middle, which can cut the LOGIN token
+        # out of the line and so hide a leak from this test.
         stack.enter_context(patch.object(
             websockets.frames.Frame, 'MAX_LOG_SIZE', 1_000_000))
 
@@ -388,11 +387,11 @@ class SecretLoggingTest(unittest.TestCase):
         self.addCleanup(undo)
 
         # The report is written before anything reloads the refreshed token.
-        # 5.0.0 registered a token for this report only when one was loaded
-        # from a file, never on refresh, so a session that reloads afterwards
-        # registers the refreshed token in time for the report to redact it
-        # retroactively -- and passed this test with the leak in place. A
-        # process that refreshes and carries on never reloads.
+        # Loading a token from a file registers it, so a session that reloads
+        # afterwards would register the refreshed token in time for the
+        # report to redact it retroactively, and this test would pass even if
+        # a refresh registered nothing. A process that refreshes and carries
+        # on never reloads.
         with tempfile.TemporaryDirectory() as tmp, \
                 contextlib.redirect_stdout(io.StringIO()):
             self.run_session(tmp, reload_after_refresh=False)

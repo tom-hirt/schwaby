@@ -65,11 +65,11 @@ class OptionSymbolTest(unittest.TestCase):
         self.assertEqual('BKNG  240510C02400000', op.build())
 
     def test_the_granularity_check_is_exact_at_any_precision(self):
-        # Testing the SCALED product consulted the decimal context, and no
-        # fixed precision is enough: a strike with more significant digits
+        # Testing the SCALED product would consult the decimal context, and
+        # no fixed precision is enough: a strike with more significant digits
         # than the context holds is rounded by the multiply, so the product
         # comes out integral and the check passes it.
-        # '1.0000000000000000000000000000004' encoded as $1.000 that way.
+        # '1.0000000000000000000000000000004' would encode as $1.000 that way.
         import decimal
         original = decimal.getcontext()
         try:
@@ -89,8 +89,7 @@ class OptionSymbolTest(unittest.TestCase):
         # decimal places and three real ones. It is representable and must
         # encode, not be refused.
         #
-        # This passes against the product-based check it replaced too. It
-        # guards against the obvious simplification of the current one --
+        # It guards against the obvious simplification of the check --
         # testing as_tuple().exponent directly, which reads '2.0010' as four
         # places and refuses a valid strike.
         for strike in ('2.0010', '2.00100', '1.0000', '100.'):
@@ -103,9 +102,10 @@ class OptionSymbolTest(unittest.TestCase):
 
     def test_a_strike_too_large_for_the_symbol_is_refused(self):
         # The strike field is eight digits of thousandths, so it stops just
-        # below $100,000. Past that the format silently widened: '700000' gave
-        # a 22-character symbol with a nine-digit strike. The realistic way to
-        # get here is a strike already in cents or thousandths.
+        # below $100,000. Past that the format would silently widen: '700000'
+        # would give a 22-character symbol with a nine-digit strike. The
+        # realistic way to get here is a strike already in cents or
+        # thousandths.
         for strike in ('100000', '250000', '700000', '99999999'):
             with self.assertRaises(ValueError, msg=strike):
                 OptionSymbol('BRKA', datetime.date(2024, 5, 10), 'C', strike)
@@ -138,10 +138,11 @@ class OptionSymbolTest(unittest.TestCase):
         try:
             # prec alone, and then the whole context: localcontext() copies the
             # ambient one, so Emax, Emin and the traps come along unless a
-            # fresh Context is supplied. Under Emax=3 a strike of '500' raised
-            # decimal.Overflow from the constructor, and with Overflow
-            # untrapped it returned Infinity -- which is integral, so the
-            # granularity check passed it and build() died converting it.
+            # fresh Context is supplied. Scaled under the ambient Emax=3, a
+            # strike of '500' would raise decimal.Overflow from the
+            # constructor, and with Overflow untrapped it would return
+            # Infinity -- which is integral, so the granularity check would
+            # pass it and build() would die converting it.
             contexts = [decimal.Context(prec=p) for p in (2, 5, 9, 28)]
             contexts.append(decimal.Context(prec=28, Emax=3, Emin=-3))
             contexts.append(decimal.Context(prec=28, Emax=3, Emin=-3, traps=[]))
@@ -170,8 +171,8 @@ class OptionSymbolTest(unittest.TestCase):
         # binary float and truncating with int() truncates the representation
         # error with it: 2.01 * 1000 is 2009.9999999999998, so int() gives
         # 2009 and the symbol names a strike a tenth of a cent low -- a
-        # different contract, or one that does not exist. This is the same
-        # defect that made limit prices a cent low, in a different function.
+        # different contract, or one that does not exist. Truncating a float
+        # the same way would send a limit price a cent low.
         for strike, expected in (('2.01', '00002010'), ('4.02', '00004020'),
                                  ('8.19', '00008190'), ('2.03', '00002030')):
             op = OptionSymbol('AAPL', datetime.date(2024, 5, 10), 'C', strike)
@@ -649,13 +650,12 @@ class VerticalTemplatesTest(unittest.TestCase):
 
 
 class OptionSymbolInputTest(unittest.TestCase):
-    '''`OptionSymbol`'s rejections, and its one accepted-but-untested type.
+    '''`OptionSymbol`'s rejections, and the datetime it accepts for a date.
 
-    None of this was exercised. The class turns four arguments into a string
-    that names a tradeable contract, and the failure mode when it gets one of
-    them wrong is a symbol for a *different* contract rather than an error --
-    which is why the argument checking here matters more than the line count
-    suggests.
+    The class turns four arguments into a string that names a tradeable
+    contract, and the failure mode when it gets one of them wrong is a symbol
+    for a *different* contract rather than an error -- which is why the
+    argument checking here matters more than the line count suggests.
     '''
 
     EXPIRY = datetime.date(2024, 5, 10)

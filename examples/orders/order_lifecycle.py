@@ -42,7 +42,7 @@ ACCOUNT_NUMBER = 'XXXXXXXX'
 # Deliberately far from the market so this does not fill while you read it.
 SYMBOL = 'AAPL'
 QUANTITY = 1
-LIMIT_PRICE = '1.00'      # a string, never a float -- see the README
+LIMIT_PRICE = '1.00'      # a string, never a float: a float is refused
 
 # Anything not in this set is still live and worth waiting on.
 TERMINAL = {'FILLED', 'CANCELED', 'REJECTED', 'EXPIRED', 'REPLACED'}

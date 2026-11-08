@@ -23,10 +23,9 @@ jobs:
         # before every commit.
         #
         # workflow_dispatch is in the full-matrix list deliberately. Without it
-        # the on-demand run was Linux-only, so the one button available for
-        # checking a cross-platform fix could not check one -- which is how
-        # seven macOS failures sat red on every tag from v2.0.0 to v2.4.0
-        # without anyone being able to test a fix short of cutting a release.
+        # the on-demand run would be Linux-only, so the one button available
+        # for checking a cross-platform fix could not check one, and the only
+        # way to test such a fix would be to cut a release.
         platform: >-
           ${{
             (github.event_name == 'pull_request'
@@ -65,18 +64,11 @@ jobs:
         ${{ steps.pin.outputs.version }}
 
     # With requirements.lock as a constraint, so every job tests the versions
-    # every other machine tests. Without it each run resolved afresh, and a
-    # release appearing between two runs changed what was under test.
+    # every other machine tests. Without it each run would resolve afresh, and
+    # a release appearing between two runs would change what is under test.
     - name: Install dependencies
       run: uv pip install -c requirements.lock ".[dev]"
 
-    # Was `tox`, which is gone. It built an sdist, installed it into an
-    # isolated env, and then ran `coverage` as an external command under a
-    # different interpreter -- so the environment it had just built was never
-    # the one under test, and pytest imported the package from the working tree
-    # anyway. The Python version came from the job's own setup either way,
-    # which is the part that mattered. This runs the same command without the
-    # layer.
     - name: Test
       run: coverage run --rcfile=setup.cfg --source=schwaby -p -m pytest tests/
 
@@ -94,7 +86,7 @@ jobs:
         coverage report
 
     # `htmlcov/` is the useful half of coverage -- which lines never ran,
-    # rather than a percentage -- and it was being generated and discarded.
+    # rather than a percentage -- so it is kept rather than discarded.
     - name: Keep the coverage report
       if: ${{ !cancelled() && matrix.python == '3.10' }}
       uses: actions/upload-artifact@v7

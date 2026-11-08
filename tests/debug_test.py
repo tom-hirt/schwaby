@@ -15,11 +15,10 @@ def isolate_bug_report_state(test):
 
     Both are process-wide. Every test that builds a client from a token
     registers that token, and the auth tests' tokens are ``'a'`` and ``'r'``, so a test after them asserting
-    on logged text found ``'a line worth reporting'`` redacted letter by
-    letter. This file's own order hid that: ``RegisterRedactionsTest`` swapped
-    in a new redactor and never put the old one back, so whatever ran next
-    started clean, and ``pytest -n auto``, which does not keep that order,
-    failed it.
+    on logged text would find ``'a line worth reporting'`` redacted letter by
+    letter. What runs before a test depends on the order, which
+    ``pytest -n auto`` does not keep, so a test that calls this starts from
+    fresh state whatever ran before it.
     '''
     for patcher in (patch.object(schwaby, 'LOG_REDACTOR',
                                  schwaby.debug.LogRedactor()),
@@ -168,8 +167,8 @@ class RegisterRedactionsTest(unittest.TestCase):
     def test_schwab_account_identifiers_are_redacted(self):
         # accountNumber and hashValue are how Schwab names the two identifiers
         # a user is least likely to want in a bug report they paste into a
-        # public issue. The default patterns were inherited from an API which
-        # called them accountId and displayName.
+        # public issue. Patterns written for another API's names for them,
+        # accountId and displayName, would miss both.
         schwaby.debug.register_redactions({
             'accounts': [{'accountNumber': '12345678',
                           'hashValue': 'ABCDEF0123456789'}]})

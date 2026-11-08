@@ -298,8 +298,7 @@ def _require_price_string(name, price):
     float-derived values span 0 to 53 decimal places and string arithmetic
     spans 1 to 9, which overlap. A guard on depth therefore refuses valid
     computed limits at order-placement time to prevent a payload that is
-    merely long. ``Decimal(str(value))`` is still the right habit, and the
-    docs say so.
+    merely long. ``Decimal(str(value))`` is still the right habit.
     '''
     if _is_instance(price, decimal.Decimal):
         # format() renders NaN and the infinities as 'sNaN'/'Infinity', and

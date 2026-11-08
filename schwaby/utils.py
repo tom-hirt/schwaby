@@ -157,10 +157,10 @@ class SchwabError(Exception):
     you is the ability to catch the library's own failures *without* also
     catching every ``int()`` and ``float()`` in the same block.
 
-    Two of the order exceptions additionally inherit ``ValueError``, so that
-    code written to catch them as ``ValueError`` before this class existed
-    still catches them. :class:`OrderIdNotFoundError` deliberately does not:
-    see its own documentation.
+    Two of the order exceptions additionally inherit ``ValueError``, so an
+    ``except ValueError`` around order placement catches them.
+    :class:`OrderIdNotFoundError` deliberately does not: see its own
+    documentation.
     '''
 
     def __reduce__(self):
@@ -899,14 +899,14 @@ class LoginExchangeError(SchwabError, OAuthError):
     (``unusable_token_response``), or with a token at a status other than a
     success (``http_<status>``).
 
-    It is also authlib's ``OAuthError``, so ``except OAuthError`` written
-    before this class existed still catches it, and ``error`` and
-    ``description`` carry the refusal's code and text. Text from the redirect
-    or the endpoint reaches whatever logs the exception, so it has its control
-    characters escaped and is cut to 200 characters, and a value that is not
-    a string is given as its repr. authlib's own error is not chained as
-    ``__cause__``, since its text is not escaped and a logged traceback prints
-    it. When this library refuses a token response as
+    It is also ``OAuthError``, the type authlib raises for a refused
+    exchange, so a caller catching ``OAuthError`` catches it, and ``error``
+    and ``description`` carry the refusal's code and text. Text from the
+    redirect or the endpoint reaches whatever logs the exception, so it has
+    its control characters escaped and is cut to 200 characters, and a value
+    that is not a string is given as its repr. authlib's own error is not
+    chained as ``__cause__``, since its text is not escaped and a logged
+    traceback prints it. When this library refuses a token response as
     ``unusable_token_response``, the description is its own text; an endpoint
     sending that code has its text treated like any other.
 
@@ -915,9 +915,9 @@ class LoginExchangeError(SchwabError, OAuthError):
     is good for one exchange, so every refusal means starting the login again.
     Nothing is written, so a token file already on disk is left as it was.
 
-    So is a refusal whose body is not JSON. A server error from the token
-    endpoint, or a success whose body is not JSON, raises as it does during a
-    call rather than as this.
+    A refusal whose body is not JSON raises this too. A server error from the
+    token endpoint, or a success whose body is not JSON, raises as it does
+    during a call rather than as this.
 
     ``endpoint_answered`` is ``True`` when the token endpoint answered the
     exchange, and ``status_code`` is then the HTTP status it answered with,

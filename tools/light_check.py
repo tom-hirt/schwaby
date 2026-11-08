@@ -88,7 +88,7 @@ def git(*args, check=True):
 def blob(spec):
     '''The bytes of a blob, or None if there is none. Bytes, not text: a
     stray byte that is not UTF-8 makes a file Python refuses to import, and
-    decoding it here hid that.'''
+    decoding it here would hide that.'''
     out = git('show', spec, check=False)
     return out.stdout if out.returncode == 0 else None
 

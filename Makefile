@@ -18,9 +18,7 @@ dist: clean
 # release and uploads with a trusted-publishing token -- so it re-runs the
 # suite on all five Pythons, runs `twine check --strict`, and refuses if the
 # tag and the built version disagree. A local `twine upload` skips every one of
-# those, which is what the target inherited from upstream did.
-#
-# The steps are in RELEASING.md under "Cutting a release".
+# those.
 release:
 	@echo 'No. Releases publish from CI on a published GitHub release.'
 	@echo 'See RELEASING.md, "Cutting a release".'
@@ -29,7 +27,7 @@ release:
 clean:
 	rm -rf build dist docs-build schwaby.egg-info htmlcov
 	# Not a bare `__pycache__`: there is none at the repo root, so the plain
-	# pattern matched nothing and this target cleared no bytecode at all.
+	# pattern would match nothing and this target would clear no bytecode.
 	# CPython invalidates on mtime and size, so a same-second restore during a
 	# red-proof can reuse a stale .pyc and make a passing test look failed.
 	find . -name __pycache__ -type d -not -path './.venv/*' -prune \

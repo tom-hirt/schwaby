@@ -2,9 +2,10 @@
 #
 # Every other job installs requirements.lock exactly, so every machine tests
 # the same versions -- which also means nothing tests what `pip install
-# schwaby` resolves today. That is where authlib 1.9 changing the exception it
-# raises for a refusal with no JSON body was found. A failure here is a reason
-# to look at the newest releases and update the lock, not a broken build.
+# schwaby` resolves today. A dependency release that changes behaviour, such as
+# authlib 1.9 raising a different exception from 1.8 for a refusal with no JSON
+# body, shows up here first. A failure here is a reason to look at the newest
+# releases and update the lock, not a broken build.
 name: fresh resolve
 
 on:

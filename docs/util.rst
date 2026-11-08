@@ -302,8 +302,8 @@ so existing ``except ValueError`` handlers keep catching them;
     any other status below 500 it raises
     :class:`~schwaby.utils.TokenRefreshError`, with the code
     ``http_<status>``, and nothing is stored. ``authlib`` keeps a token
-    whatever the status, so through 5.2.0 a refusal carrying one was stored as
-    the new token.
+    whatever the status, so without this check a refusal carrying one would
+    be stored as the new token.
 
   What Schwab's token endpoint sends in the last three cases has not been
   observed.

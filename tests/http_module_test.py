@@ -211,6 +211,6 @@ class ConnectErrorSiblingsAreAbsorbedTest(unittest.TestCase):
         sync_session.create_authorization_url.return_value = 'https://x', None
 
         # The sibling case. ConnectTimeout is not a subclass of ConnectError,
-        # so catching only the latter let this one end the login flow while the
-        # server was still coming up.
+        # so catching only the latter would let this one end the login flow
+        # while the server was still coming up.
         self._drive_login_flow_until_the_wait_gives_up('ConnectTimeout')

@@ -64,7 +64,7 @@ class DecodeDecimalTest(unittest.TestCase):
             with self.subTest(value=field):
                 self.assertEqual(decimal.Decimal(expected),
                                  decode_decimal(field))
-        # Positive control on the widest value that decoded before.
+        # Positive control on the widest 32-bit value.
         self.assertEqual(decimal.Decimal('4294.967295'),
                          decode_decimal({'lo': '4294967295', 'signScale': 12}))
 
@@ -121,8 +121,7 @@ class DecodeDecimalTest(unittest.TestCase):
         # member is formatted into the result, and a subclass decides its own
         # `str` and `format`, so unless it is reduced to a plain int it can
         # decode as another number, or raise past the one `except` callers
-        # are told to write. The three-member path reduced it by accident,
-        # through `<<`; the lone-lo path did not.
+        # are told to write.
         class Shown(int):
             def __str__(self):
                 return '999'
@@ -159,8 +158,8 @@ class DecodeDecimalTest(unittest.TestCase):
     def test_a_mapping_that_keeps_its_data_elsewhere_decodes(self):
         # `DotMap` subclasses OrderedDict and keeps its data in its own store,
         # so dict's storage is empty. Read through `dict.items`, a $5,000
-        # principal decoded as a clean zero -- the worst wrong answer on this
-        # feed. Read through the mapping's own `items()`, it is the value.
+        # principal would decode as a clean zero -- the worst wrong answer on
+        # this feed. Read through the mapping's own `items()`, it is the value.
         class Stored(dict):
             def __init__(self, **fields):
                 super().__init__()
@@ -219,8 +218,8 @@ class DecodeDecimalTest(unittest.TestCase):
 
     @no_duplicates
     def test_a_claimed_class_is_not_believed(self):
-        # `isinstance` also believes `__class__`, so each of these passed a
-        # type check and then failed the real type's own method with a bare
+        # `isinstance` also believes `__class__`, so each of these would pass
+        # a type check and then fail the real type's own method with a bare
         # TypeError, past the one `except` callers write.
         def claiming(cls):
             class Claim:
@@ -240,8 +239,8 @@ class DecodeDecimalTest(unittest.TestCase):
 
     @no_duplicates
     def test_an_unnameable_type_does_not_escape_the_message(self):
-        # The fallback that names an unprintable value read `type(x).__name__`,
-        # which consults the metaclass first.
+        # The fallback that names an unprintable value must not read
+        # `type(x).__name__`, which consults the metaclass first.
         self.addCleanup(util._reported_keys.clear)
 
         class Meta(type):
@@ -260,7 +259,7 @@ class DecodeDecimalTest(unittest.TestCase):
             decode_decimal(Unprintable())
 
         # A class's `__name__` can be a str subclass, which the descriptor
-        # returns as it is; its own `__len__` ran in the same fallback.
+        # returns as it is; its own `__len__` would run in the same fallback.
         class Name(str):
             def __len__(self):
                 raise RuntimeError('boom')
@@ -294,7 +293,7 @@ class DecodeDecimalTest(unittest.TestCase):
     def test_an_unhashable_class_is_refused_not_escaped(self):
         # Routing asks whether the type is a Mapping, and the ABC's cache
         # hashes the class. A metaclass defining `__eq__` alone makes every
-        # class it creates unhashable, which escaped as a bare TypeError.
+        # class it creates unhashable, which would escape as a bare TypeError.
         class EqMeta(type):
             def __eq__(cls, other):
                 return cls is other
@@ -374,8 +373,9 @@ class DecodeDecimalTest(unittest.TestCase):
 
     @no_duplicates
     def test_the_once_per_key_report_line_is_bounded(self):
-        # The exception's key names were capped and the log line's were not,
-        # so thirty-two non-printable keys logged twenty kilobytes at once.
+        # The log line's key names are capped as the exception's are.
+        # Uncapped, thirty-two non-printable keys would log twenty kilobytes
+        # at once.
         util._reported_keys.clear()
         self.addCleanup(util._reported_keys.clear)
         value = {'%02d' % i + '\U000e0001' * 62: 0 for i in range(32)}
@@ -404,7 +404,7 @@ class DecodeDecimalTest(unittest.TestCase):
     @no_duplicates
     def test_a_refusal_cannot_forge_a_log_line(self):
         # Key names are venue text. Joined bare into the message, a newline in
-        # one forged a second line wherever the exception was logged --
+        # one would forge a second line wherever the exception was logged --
         # including through the recipe the streaming docs give for it.
         self.addCleanup(util._reported_keys.clear)
         forged = 'x\nCRITICAL:schwaby.orders:order 123 FILLED'
@@ -419,9 +419,9 @@ class DecodeDecimalTest(unittest.TestCase):
 
     @no_duplicates
     def test_subclasses_decode_as_their_plain_values(self):
-        # `json.loads` never produces a subclass; a custom decoder can. Each
-        # of these decided its own value, or raised past the one `except`
-        # callers write, until inputs were reduced to exact built-in types.
+        # `json.loads` never produces a subclass; a custom decoder can. Unless
+        # inputs are reduced to exact built-in types, each of these would
+        # decide its own value, or raise past the one `except` callers write.
         class Text(str):
             def isdigit(self):
                 return True
@@ -456,7 +456,8 @@ class DecodeDecimalTest(unittest.TestCase):
 
         # And the text a refusal is built from. `str()` and `repr()` hand back
         # a subclass untouched when the method returns one, so its own
-        # `__hash__` and `__len__` ran inside the code that names the problem.
+        # `__hash__` and `__len__` would run inside the code that names the
+        # problem.
         class Name(str):
             def __hash__(self):
                 raise RuntimeError('boom')
@@ -478,7 +479,8 @@ class DecodeDecimalTest(unittest.TestCase):
         with self.assertRaises(UnusableDecimalScale):
             decode_decimal(Shown())
 
-        # A bare str subclass too: its own `isascii` ran before the pattern.
+        # A bare str subclass too: its own `isascii` would run before the
+        # pattern.
         class Ascii(str):
             def isascii(self):
                 raise RuntimeError('boom')
@@ -519,7 +521,7 @@ class DecodeDecimalTest(unittest.TestCase):
 
         self.addCleanup(util._reported_keys.clear)
         # A mapping whose `items()` cannot be read is refused, not bypassed:
-        # bypassing it through dict's storage is what decoded a mapping that
+        # bypassing it through dict's storage would decode a mapping that
         # keeps its data elsewhere as zero.
         with self.assertRaises(UnusableDecimalScale):
             decode_decimal(Hostile(lo='5', signScale=12))
@@ -545,10 +547,9 @@ class DecodeDecimalTest(unittest.TestCase):
 
     @no_duplicates
     def test_a_mantissa_without_a_scale_is_scale_zero(self):
-        # This was a raise, on the reasoning that a scale which is missing
-        # cannot be told from one that was lost, and that guessing the common
-        # value -- six places -- is wrong by a factor of a million when it is
-        # wrong. The reasoning was fine and the premise was not: the shape is
+        # Not a refusal. A scale which is missing cannot be told from one
+        # that was lost, and guessing the common value -- six places -- is
+        # wrong by a factor of a million when it is wrong; but the shape is
         # ordinary traffic, on the size fields of an ordinary quote.
         #
         # One quote, in the shape live traffic carries it, with invented
@@ -608,10 +609,9 @@ class DecodeDecimalTest(unittest.TestCase):
         # hangs the thread, which a per-item try/except cannot rescue -- one
         # bad field would take a stream down rather than one message.
         #
-        # `contrib/decimal-scale-is-bounded` red-proofs this. The bound is
-        # explicit rather than left to `scaleb`'s own operand limit, which
-        # could not be red-proofed: mutating it would hang the run rather
-        # than fail the test.
+        # The bound is explicit rather than left to `scaleb`'s own operand
+        # limit, which no test can turn off and watch fail: mutating it would
+        # hang the run rather than fail the test.
         with self.assertRaises(UnusableDecimalScale):
             decode_decimal({'lo': '1', 'signScale': 10 ** 9})
 
@@ -630,11 +630,11 @@ class DecodeDecimalTest(unittest.TestCase):
 
     @no_duplicates
     def test_the_callers_decimal_context_cannot_change_the_answer(self):
-        # `scaleb` applies the *caller's* context. A consumer setting
+        # `scaleb` applies the *caller's* context. A caller setting
         # `getcontext().prec = 6` somewhere else in their process -- an
-        # ordinary thing to do when formatting money -- got 1234.57 for a
-        # price of 1234.5678, silently, from a function whose whole purpose is
-        # that its result feeds back into set_price.
+        # ordinary thing to do when formatting money -- would get 1234.57 for
+        # a price of 1234.5678, silently, from a function whose whole purpose
+        # is that its result feeds back into set_price.
         # Both branches. Building the value from a string and then negating
         # it would not do: `Decimal.__neg__` is itself a context-aware
         # operation, so it would be exact for positive values and round
@@ -673,7 +673,7 @@ class DecodeDecimalTest(unittest.TestCase):
     def test_an_implausible_scale_raises_rather_than_underflowing_to_zero(self):
         # Relying on the arithmetic to refuse is not enough: `scaleb`'s operand
         # limit only trips far out, so every scale from roughly two million to
-        # four million underflowed to a zero that compares equal to zero. On
+        # four million underflows to a zero that compares equal to zero. On
         # this feed that is the worst wrong answer available -- a corrupt
         # LeavesQuantity reading as zero is a complete fill.
         for scale in (MAX_SIGN_SCALE + 1, 2000100, 4000000, 10 ** 9, -1):
@@ -692,7 +692,8 @@ class DecodeDecimalTest(unittest.TestCase):
     def test_a_mantissa_carried_only_in_mid_is_not_read_as_zero(self):
         # The serializer omits zero members, so under the three-member layout
         # a value whose low 32 bits are zero would arrive without `lo`.
-        # Keying the mantissa-less guard on `lo` alone decoded that as zero.
+        # Keying the mantissa-less guard on `lo` alone would decode that as
+        # zero.
         # Reasoned, not observed: no captured payload has carried `mid`.
         self.assertEqual(decimal.Decimal('4294.967296'),
                          decode_decimal({'mid': 1, 'signScale': 12}))
@@ -775,12 +776,12 @@ class DecodeDecimalTest(unittest.TestCase):
     def test_a_bare_value_refuses_what_a_member_refuses(self):
         # The bare-value path must refuse what the member path refuses:
         # `decimal.Decimal`'s parser accepts more than
-        # `int`'s does, so every token the mantissa path refuses decoded here
-        # instead, as a confident wrong number, on a field the docstring says
-        # arrives in either shape.
+        # `int`'s does, so unchecked, every token the mantissa path refuses
+        # would decode here instead, as a confident wrong number, on a field
+        # the docstring says arrives in either shape.
         #
         # Driven from the same list against both paths, so the two cannot
-        # drift apart again without a failure.
+        # drift apart without a failure.
         for token in ('1_0',        # ten, under PEP 515
                       '12_',        # twelve -- `int` refuses this outright
                       '_12', '1__0', '1_0.5',
@@ -812,11 +813,11 @@ class DecodeDecimalTest(unittest.TestCase):
                 self.assertEqual(decimal.Decimal(12), decode_decimal(value))
 
     def test_a_bare_exponent_is_bounded_like_a_scale(self):
-        # The dict path is bounded for a measured reason and this one was not.
-        # 1E-999999999 is the same hazard MAX_SIGN_SCALE exists for, arriving
-        # through a value that `is_finite()` waves through: it compares
-        # neither == 0 nor <= 0, so a corrupt LeavesQuantity reads as still
-        # outstanding forever -- while behaving as zero in arithmetic.
+        # The dict path is bounded for a measured reason, and this one needs
+        # the same bound. 1E-999999999 is the hazard MAX_SIGN_SCALE exists
+        # for, arriving through a value that `is_finite()` waves through: it
+        # compares neither == 0 nor <= 0, so a corrupt LeavesQuantity reads as
+        # still outstanding forever -- while behaving as zero in arithmetic.
         stray = decimal.Decimal('1E-999999999')
         self.assertFalse(stray == 0)
         self.assertFalse(stray <= 0)
@@ -879,10 +880,11 @@ class DecodeDecimalTest(unittest.TestCase):
 
     def test_an_object_that_is_not_a_decimal_is_refused_not_read_as_zero(self):
         # The mantissa-less shortcut returns zero without inspecting
-        # anything, so corruption that changes *keys* rather than values
-        # reached it -- and zero is what a $0 commission and a completed fill
-        # look like. Refused only when *none* of the four keys is present;
-        # see the schema-addition test below for the other direction.
+        # anything, so unguarded, corruption that changes *keys* rather than
+        # values would reach it -- and zero is what a $0 commission and a
+        # completed fill look like. Refused only when *none* of the four keys
+        # is present; see the schema-addition test below for the other
+        # direction.
         for value in ({'Lo': 7350000, 'SignScale': 12},     # PascalCase
                       {'low': 7350000},                     # typo, no scale
                       {'symbol': 'AAPL', 'quantity': 100},  # another object
@@ -899,11 +901,11 @@ class DecodeDecimalTest(unittest.TestCase):
         # unknown key may be that component under a new name. Both directions
         # are refused, and they are not symmetric in cost.
         #
-        # A renamed mantissa read as zero. A renamed *scale* was far worse:
-        # with no signScale the absent-scale rule applies, so a $7.35 limit
-        # price decoded as $7,350,000 -- a confident wrong number six orders
-        # of magnitude out, on the field this feed exists to carry. Both
-        # halves are tested here.
+        # A renamed mantissa would read as zero. A renamed *scale* is far
+        # worse: with no signScale the absent-scale rule applies, so a $7.35
+        # limit price would decode as $7,350,000 -- a confident wrong number
+        # six orders of magnitude out, on the field this feed exists to carry.
+        # Both halves are tested here.
         for value in ({'lo': '7350000', 'SignScale': 12},   # scale renamed
                       {'lo': '7350000', 'signscale': 12},   # ... or recased
                       {'lo': '7350000', 'Scale': 12},
@@ -918,12 +920,11 @@ class DecodeDecimalTest(unittest.TestCase):
     def test_an_explicit_null_does_not_slip_the_rename_guard(self):
         """The guard and the decoder must mean the same thing by "present".
 
-        The guard was keyed on the key being *there* while the mantissa loop
-        and the scale twenty lines below treat an explicit null as an
-        absence -- deliberately, with their own test. So a null walked
-        straight back into the defect the guard was added to close: no usable
-        `signScale`, the absent-scale rule applies, and a $7.35 limit price
-        decodes as $7,350,000.
+        The mantissa loop and the scale treat an explicit null as an absence
+        -- deliberately, with their own test. A guard keyed on the key being
+        *there* would let a null walk straight back into the defect the guard
+        closes: no usable `signScale`, the absent-scale rule applies, and a
+        $7.35 limit price decodes as $7,350,000.
         """
         for src in ('{"lo": "7350000", "signScale": null, "SignScale": 12}',
                     '{"lo": "7350000", "signScale": null, "flags": 0}',
@@ -945,15 +946,14 @@ class DecodeDecimalTest(unittest.TestCase):
     def test_any_unrecognised_key_refuses_the_object(self):
         """The whole rule, and it is the whole rule on purpose.
 
-        A version that tried to decode around an unknown key was wrong three
-        ways: it ignored one on an object that looked complete and
-        refused one where a component was missing, and "missing" turned out
-        to have more spellings than anyone enumerates -- absent, null, and
-        zero, each a $7.35 limit price decoding as $7,350,000. The last of
-        those cannot be closed, because `signScale: 0` genuinely means scale
-        0. Measured against recorded traffic, the clever version also bought
-        nothing: 27 of 37 objects still decoded wrong under a rename that
-        keeps the old key at its default.
+        Decoding around an unknown key -- ignoring one on an object that
+        looks complete and refusing one where a component is missing -- does
+        not work, because "missing" has more spellings than anyone enumerates:
+        absent, null, and zero, each a $7.35 limit price decoding as
+        $7,350,000. The last of those cannot be closed, because
+        `signScale: 0` genuinely means scale 0. Measured against recorded
+        traffic, it also buys nothing: 27 of 37 objects still decoded wrong
+        under a rename that keeps the old key at its default.
         """
         for value in (
                 # A key alongside a complete object -- a schema addition.
@@ -965,8 +965,8 @@ class DecodeDecimalTest(unittest.TestCase):
                 {'lo': '7350000', 'signScale': None, 'SignScale': 12},
                 {'lo': '7350000', 'signScale': 0, 'SignScale': 12},
                 {'lo': '7350000', 'signScale': '0', 'SignScale': 12},
-                # A renamed member of the mantissa, which the previous
-                # version documented as an inherent gap. It is not one.
+                # A renamed member of the mantissa, which is not an
+                # inherent gap.
                 {'lo': '705032704', 'Mid': 1, 'signScale': 12},
                 # An object that is not one of these at all.
                 {'symbol': 'AAPL', 'quantity': 100}):
@@ -979,10 +979,10 @@ class DecodeDecimalTest(unittest.TestCase):
     def test_every_real_payload_still_decodes(self):
         # The control on the rule above: refusing everything would satisfy
         # it. All but the last are shapes a live account actually sends,
-        # including the two that omit a component, which is what made the
-        # clever version look necessary. The non-zero `mid` is reasoned from
-        # the .NET layout rather than observed -- no captured payload has
-        # carried one, which the streaming docs mark as unconfirmed.
+        # including the two that omit a component. The non-zero `mid` is
+        # reasoned from the .NET layout rather than observed -- no captured
+        # payload has carried one, which the streaming docs mark as
+        # unconfirmed.
         for value, expected in (({'lo': '21480000', 'signScale': 12}, '21.48'),
                                 ({'lo': '15300'}, '15300'),
                                 ({'signScale': 12}, '0'),
@@ -1040,9 +1040,9 @@ class DecodeDecimalTest(unittest.TestCase):
         `decode_decimal`'s own docstring names "any consumer decoding fields
         generically", and such a caller hands it every nested object it
         walks. Reported from the not-a-decimal-object branch as well, one
-        real ACCT_ACTIVITY frame filled all 32 slots with `AccountNumber`,
+        real ACCT_ACTIVITY frame would fill all 32 slots with `AccountNumber`,
         `BaseEvent`, `EventType` and the like -- after which a genuine schema
-        addition logged nothing at all, for the life of the process.
+        addition would log nothing at all, for the life of the process.
         """
         util._reported_keys.clear()
         with self.assertNoLogs(util.get_logger(), level='WARNING'):
@@ -1106,9 +1106,9 @@ class DecodeDecimalTest(unittest.TestCase):
 
         `_safe_key` has three callers -- the report, and the two refusal
         messages -- and a red-proof case on the helper's own body proves only
-        that *some* caller reaches it. Reverting both refusal sites to
-        `str()` left the entire suite green, because every existing fixture
-        took the ignored path.
+        that *some* caller reaches it. With every fixture on the ignored
+        path, reverting both refusal sites to `str()` would leave the suite
+        green.
         """
         # The ambiguity refusal: a missing component, and an unnameable key.
         with self.assertRaises(UnusableDecimalScale) as caught:
@@ -1125,8 +1125,9 @@ class DecodeDecimalTest(unittest.TestCase):
         self.assertIn('Scale', str(caught.exception))
 
     def test_a_refusal_message_is_bounded_in_count_as_well(self):
-        # `_safe_key` caps each name and the join did not, so an object
-        # carrying 100,000 unknown keys produced a 2.9 MB exception message.
+        # `_safe_key` caps each name, and the join is capped too: uncapped,
+        # an object carrying 100,000 unknown keys would produce a 2.9 MB
+        # exception message.
         crowded = {'lo': '1'}
         crowded.update({'k%05d' % i: 0 for i in range(100000)})
         with self.assertRaises(UnusableDecimalScale) as caught:
@@ -1135,8 +1136,8 @@ class DecodeDecimalTest(unittest.TestCase):
         self.assertIn('more', str(caught.exception))
 
     def test_an_empty_object_is_the_omit_everything_zero(self):
-        # The `:raises:` block said an object carrying none of the four is
-        # refused, which reads as covering `{}`. It does not and should not:
+        # "An object carrying none of the four is refused" can be read as
+        # covering `{}`. It does not and should not:
         # the guard lives behind "an unrecognised key is present", and `{}`
         # is the omit-everything spelling of zero.
         self.assertEqual(decimal.Decimal(0), decode_decimal({}))
@@ -1162,17 +1163,17 @@ class DecodeDecimalTest(unittest.TestCase):
                          decode_decimal(Odd(lo='7350000', signScale=12)))
 
     def test_a_corrupt_scale_is_refused_even_with_no_mantissa_to_scale(self):
-        # The mantissa-less shortcut returned before the scale was looked at,
-        # so `{"signScale": "garbage"}` decoded as a clean zero while the
-        # identical corruption one key over raised. No wrong number -- a
-        # mantissa-less object is zero at any scale -- but it discarded the
-        # only signal that the message was corrupt, on a feed where zero is
-        # what a $0 commission and a completed fill look like.
+        # If the mantissa-less shortcut returned before the scale was looked
+        # at, `{"signScale": "garbage"}` would decode as a clean zero while
+        # the identical corruption one key over raises. No wrong number -- a
+        # mantissa-less object is zero at any scale -- but it would discard
+        # the only signal that the message was corrupt, on a feed where zero
+        # is what a $0 commission and a completed fill look like.
         for corrupt in ('garbage', 1000000000, 1.9, -1, [1], 65, True, ''):
             with self.subTest(signScale=corrupt):
                 with self.assertRaises(UnusableDecimalScale):
                     decode_decimal({'signScale': corrupt})
-                # The same corruption one key over, which always raised.
+                # The same corruption one key over, which raises.
                 with self.assertRaises(UnusableDecimalScale):
                     decode_decimal({'lo': '1', 'signScale': corrupt})
         # Positive control: a sound scale with nothing to scale is still zero.
@@ -1182,8 +1183,8 @@ class DecodeDecimalTest(unittest.TestCase):
                                  decode_decimal({'signScale': sound}))
 
     def test_a_mantissa_less_object_is_zero_without_a_negative_sign(self):
-        # What the shortcut still does now that the scale above it is
-        # validated either way: falling through would give Decimal('0.000000')
+        # What the shortcut is for, with the scale validated either way:
+        # falling through would give Decimal('0.000000')
         # at scale 12 and Decimal('-0.000000') at 13. Both compare equal to
         # zero, and the second prints as a negative quantity -- on the field
         # this is most often read for, LeavesQuantity on a completed fill.
@@ -1194,9 +1195,9 @@ class DecodeDecimalTest(unittest.TestCase):
 
     def test_an_explicit_null_is_an_absence_in_every_slot(self):
         # Schwab omits rather than nulls, so this is reasoned from the rule
-        # the members already follow rather than observed. It is here because
-        # the two halves briefly disagreed: `{"lo": null}` was an absence and
-        # `{"signScale": null}` was corruption.
+        # the members already follow rather than observed. It is here so the
+        # two halves agree: `{"lo": null}` is an absence, and so is
+        # `{"signScale": null}`.
         self.assertEqual(
                 decimal.Decimal('0.000001'),
                 decode_decimal(json.loads(
@@ -1236,9 +1237,10 @@ class HeuristicJsonDecoderBytesTest(unittest.TestCase):
 
     @no_duplicates
     def test_a_bytes_frame_that_is_not_json_raises_the_decode_error(self):
-        # Its repair step replaced with str arguments, which raised TypeError
-        # on bytes -- an exception the client does not report as a frame that
-        # would not parse, so the receive loop ended with nothing said.
+        # A repair step that replaced with str arguments would raise
+        # TypeError on bytes -- an exception the client does not report as a
+        # frame that would not parse, so the receive loop would end with
+        # nothing said.
         from schwaby.contrib.util import HeuristicJsonDecoder
         with self.assertRaises(json.decoder.JSONDecodeError):
             HeuristicJsonDecoder().decode_json_string(b'not json')

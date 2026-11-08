@@ -19,11 +19,11 @@ class Case:
                                 # that needs one test to run before another
         self.expect = expect    # substring which must appear in the failure
 
-        # Text that must appear in the failing subTest's label or params,
-        # when several subtests fail with the same message and only which
-        # one failed tells the guard apart. A qualifier on `expect`, never a
-        # match of its own: a label is text the test chose, so matching it
-        # alone proved a test with no assertion left.
+        # Text that must appear in the failing subTest's label or params, when
+        # several subtests fail with the same message and only which one failed
+        # tells the guard apart. A qualifier on `expect`, never a match of its
+        # own: a label is text the test chose, so matching it alone would prove
+        # a test with no assertion left.
         self.subtest = subtest
 
         # Set when a mutation stops breaking anything *because a later change
@@ -37,9 +37,8 @@ class Case:
         # superseded: that one still runs and comes back green, this one has
         # nothing left to run against. Without it the case crashes on open(),
         # which reads as the harness being broken rather than the case being
-        # obsolete -- three cases sat like that after 3.0.0 removed the extras
-        # and the code generator. Kept with the reason for the same reason
-        # superseded ones are.
+        # obsolete. Kept with the reason for the same reason superseded ones
+        # are.
         self.removed = removed
 
         # A second (old, new) pair applied together with the first. Some
@@ -194,8 +193,8 @@ CASES = [
          '::test_a_flow_reached_by_an_imported_name_is_port_checked',
          'RedirectServerExitedError'),
 
-    # Checked only where the flow is reached through auth's attribute, as
-    # it was before, a name imported at load gets past it.
+    # Checked only where the flow is reached through auth's attribute, a name
+    # imported at load gets past it.
     Case('tests/the-port-check-is-not-on-the-module-attribute',
          'tests/conftest.py',
          "    monkeypatch.setattr(multiprocess.Process, '__init__', checked)\n",
@@ -305,8 +304,8 @@ CASES = [
          '::test_only_a_redirect_naming_another_state_is_ignored',
          'False != True'),
 
-    # 'Invalid Service' is Schwab's error label. Reported as a new service it
-    # asked for an issue, which sent a reader looking for one to support.
+    # 'Invalid Service' is Schwab's error label. Reported as a new service, it
+    # would ask the reader to open an issue for a service that does not exist.
     Case('streaming/invalid-service-is-not-a-new-service',
          'schwaby/streaming.py',
          '        if service == _INVALID_SERVICE:',
@@ -631,18 +630,12 @@ CASES = [
          '::test_an_unusable_request_id_is_absorbed_not_only_logged',
          '1 != 0'),
 
-    # The guard has a test and had no case, which is how a branch stays
-    # load-bearing on paper. It matters now because a real doubly-answered
-    # SUBS is the only observed producer of a stale-id frame arriving while
-    # another request is in flight -- without the guard the innocent request
-    # dies on the old answer, and its own answer then kills the next one.
-    # The other half of the same guard, and the one value that decides it:
-    # response_id == self._request_id, an id one past the highest issued.
-    # Measured GREEN before the test below existed -- `<` could be `<=` and
-    # all 1229 tests passed, so the strictness was proven by nothing. Deleting
-    # the whole guard (the case after this one) cannot prove it either: in that
-    # fixture the stale id is genuinely lower, so this comparison never
-    # decides anything there. A case per branch, not a case per line.
+    # The other half of the stale-id guard, and the one value that decides it:
+    # response_id == self._request_id, an id one past the highest issued. Only
+    # the test below sees `<` turned into `<=`. Deleting the whole guard (the
+    # case after this one) cannot prove the strictness: in that fixture the
+    # stale id is genuinely lower, so this comparison never decides anything
+    # there. A case per branch, not a case per line.
     Case('streaming/the-stale-boundary-is-strict',
          'schwaby/streaming.py',
          "        if response_id != request_id and "
@@ -653,6 +646,10 @@ CASES = [
          '::test_an_id_one_past_the_highest_issued_fails_the_request',
          'timed out after'),
 
+    # Without the guard, a stale-id frame arriving while another request is in
+    # flight kills the innocent request on the old answer, and its own answer
+    # then kills the next one. A real doubly-answered SUBS is the only observed
+    # producer of such a frame.
     Case('streaming/stale-id-is-not-this-requests-answer',
          'schwaby/streaming.py',
          "        if response_id != request_id and "
@@ -728,12 +725,11 @@ CASES = [
          '::test_an_unparsable_frame_is_reported_exactly_once',
          '1 != 2'),
 
-    # --- 3.0.0 / 3.0.1: the exception surface -------------------------------
+    # --- the exception surface -----------------------------------------------
     #
-    # Red-proofed by hand, these had a blind spot the harness does not: a
-    # grep for `FAILED` cannot see a subTest, which pytest reports as
-    # SUBFAILED, so a mutation that was caught reads as "nothing noticed".
-    # These cases go through the return code instead.
+    # A grep for `FAILED` cannot see a subTest, which pytest reports as
+    # SUBFAILED, so a hand-run check would read a caught mutation here as
+    # "nothing noticed". The harness reads the return code instead.
 
     Case('exceptions/parent-side-cryptography',
          'schwaby/auth.py',
@@ -784,8 +780,7 @@ CASES = [
          'True is not false'),
 
     # Raised only after a successful response AND a parsed id, so an order is
-    # live -- on an account the caller did not expect. 2.x parsed the id one
-    # line above and threw it away.
+    # live -- on an account the caller did not expect.
     Case('exceptions/hash-mismatch-carries-the-order',
          'schwaby/utils.py',
          '        self.order_id = order_id',
@@ -805,8 +800,8 @@ CASES = [
          'ResponseTimeoutError'),
 
     # These carry the thing they are about as a leading positional and pass
-    # only the message to BaseException, so the default reconstruction called
-    # __init__ with the message alone.
+    # only the message to BaseException, so the default reconstruction would
+    # call __init__ with the message alone.
     Case('exceptions/reconstruction-across-a-boundary',
          'schwaby/utils.py',
          '    def __reduce__(self):\n        # Exceptions here take the thing',
@@ -815,7 +810,7 @@ CASES = [
          '::test_every_exception_survives_a_process_boundary',
          'TypeError'),
 
-    # --- 3.0.1: packaging and the install collision -------------------------
+    # --- packaging -----------------------------------------------------------
 
     # Without encoding= Python decodes with the locale's preferred one. A wheel
     # built on Linux is correct and one built on Windows is quietly corrupt.
@@ -870,8 +865,8 @@ CASES = [
          "        if False:",
          'tests/orders/generic_test.py::NonNumericOrderFieldTest'
          '::test_the_prebuilt_templates_refuse_a_string_quantity_too',
-         # The pre-fix symptom on the leg path: the string reached
-         # `quantity <= 0` and raised this instead.
+         # Without the guard on the leg path, the string reaches
+         # `quantity <= 0` and raises this instead.
          "not supported between instances of 'str'"),
 
     # Building an order from two good values and checking json.dumps would
@@ -886,7 +881,7 @@ CASES = [
 
     # bool is an int subclass, so the serializer's own predicate lets it
     # through -- and `_build_object` passes it on, so `set_quantity(True)`
-    # built `{"quantity": true}`. A JSON true is not a number in Schwab's
+    # would build `{"quantity": true}`. A JSON true is not a number in Schwab's
     # schema: the bytes ending, reached by the one type `(int, float)` admits.
     Case('orders/bool-is-not-a-quantity',
          'schwaby/orders/generic.py',
@@ -906,7 +901,7 @@ CASES = [
          '::test_every_documented_order_template_call_still_builds',
          'is marked `# raises` and did not'),
 
-    # A numeric field taking a string: `set_price_offset('abc')` built
+    # A numeric field taking a string: `set_price_offset('abc')` would build
     # `{"priceOffset": "abc"}`. The string branch exists for the price fields,
     # so the caller has to say which kind of field it is guarding.
     Case('orders/string-on-a-numeric-field',
@@ -915,13 +910,12 @@ CASES = [
          "        if False:",
          'tests/orders/generic_test.py::NonNumericOrderFieldTest'
          '::test_a_string_is_refused_on_a_field_schwab_types_as_a_number',
-         # The pre-fix symptom itself: set_quantity('1.5') fell through to
-         # `quantity <= 0` and raised this, naming neither field nor value.
+         # Without the guard, set_quantity('1.5') falls through to
+         # `quantity <= 0` and raises this, naming neither field nor value.
          "not supported between instances of 'str'"),
 
-    # Every client_from_* entry point funnels into this one, and no test took
-    # its asyncio branch -- so the async token writer was neither reached nor
-    # measured.
+    # Every client_from_* entry point funnels into this one, and within it the
+    # async token writer is reached only through its asyncio branch.
     Case('auth/async-entry-point',
          'schwaby/auth.py',
          '            wrapped_token_write_func(t, *args, **kwargs)\n'
@@ -979,8 +973,8 @@ CASES = [
          # refusal arriving one line later rather than a red from elsewhere.
          'AssertionError'),
 
-    # A datetime is accepted and narrowed to its date. Untested, and the
-    # symbol it builds has to match the one the equivalent date builds.
+    # A datetime is accepted and narrowed to its date, and the symbol it builds
+    # has to match the one the equivalent date builds.
     Case('options/datetime-expiration-narrows',
          'schwaby/orders/options.py',
          "        elif _is_instance(expiration_date, datetime.datetime):",
@@ -989,8 +983,8 @@ CASES = [
          '::test_a_datetime_expiration_is_narrowed_to_its_date',
          '!= datetime.datetime'),
 
-    # `convert_enum` next door was covered both ways; this one was covered
-    # only where every element was already the right enum.
+    # A wrong element must be refused; a list whose every element is already
+    # the right enum cannot show that.
     Case('utils/enum-iterable-enforcement',
          'schwaby/utils.py',
          "            elif self.enforce_enums:\n"
@@ -1002,7 +996,7 @@ CASES = [
          'ValueError not raised'),
 
     # The suggestion is only offered when the string appears in some member's
-    # full name. Every existing test passed one that did.
+    # full name, so the test passes one that appears in none.
     Case('utils/no-suggestion-when-nothing-matches',
          'schwaby/utils.py',
          "            if possible_members:",
@@ -1013,7 +1007,7 @@ CASES = [
 
     # Runs on the failure path, where raising would replace a useful exception
     # with a useless one. [1,2,3] and "a string" are valid JSON and both raise
-    # AttributeError on .get; nothing sent it either.
+    # AttributeError on .get.
     Case('utils/error-body-is-not-an-object',
          'schwaby/utils.py',
          "        if not isinstance(body, dict):",
@@ -1031,9 +1025,8 @@ CASES = [
                     'and because if that handler is ever narrowed, this case '
                     'goes red again and should.'),
 
-    # Public, documented with automethod, and called by no test at all.
-    # Anchored across the following def, because the assignment line on its
-    # own also appears in __init__.
+    # Public and documented with automethod. Anchored across the following def,
+    # because the assignment line on its own also appears in __init__.
     Case('utils/set-account-hash',
          'schwaby/utils.py',
          "        self.account_hash = account_hash\n"
@@ -1085,8 +1078,8 @@ CASES = [
          "'NoneType' object has no attribute 'recv'"),
 
     # Order templates are called positionally in the documentation, and
-    # `bad_keywords_in` inspects only keyword arguments -- so the exact shape
-    # 4.1.0 broke, `equity_buy_market('AAPL', '10')`, was invisible to every
+    # `bad_keywords_in` inspects only keyword arguments -- so a positional
+    # string quantity, `equity_buy_market('AAPL', '10')`, is invisible to every
     # other check over these files.
     Case('docs/documented-template-calls-build',
          'docs/order-templates.rst',
@@ -1157,8 +1150,8 @@ CASES = [
          '::test_a_corrupt_scale_is_refused_even_with_no_mantissa_to_scale',
          'UnusableDecimalScale not raised'),
 
-    # An explicit JSON null is an absence in every slot. The member loop
-    # always treated one that way and the scale briefly did not.
+    # An explicit JSON null is an absence in every slot: the scale treats one
+    # the way the member loop does.
     Case('contrib/decimal-null-scale-is-an-absent-scale',
          'schwaby/contrib/util.py',
          "    scale = _unsigned(0 if scale_member is None else scale_member,",
@@ -1277,9 +1270,9 @@ CASES = [
                     'the escape is gone.'),
 
     # `int()` refuses a digit string past sys.get_int_max_str_digits() with a
-    # bare ValueError, and the range check below it cannot run until int()
-    # has returned -- so the guard written to stop members escaping had an
-    # escape inside it.
+    # bare ValueError, and the range check below it cannot run until int() has
+    # returned -- so without this the guard written to stop members escaping
+    # has an escape inside it.
     Case('contrib/decimal-member-width-precedes-int',
          'schwaby/contrib/util.py',
          "            ok = len(digits) <= len(str(2 ** bits - 1))",
@@ -1292,7 +1285,7 @@ CASES = [
     # genuinely long member, and stripping leading zeros stops a padded one
     # being judged on its width rather than its value. A fixture of
     # '0' * 4300 + '1' satisfies the first through the second and leaves the
-    # length check unproven -- which is how it went GREEN the first time.
+    # length check unproven, and this case GREEN.
     Case('contrib/decimal-member-width-ignores-padding',
          'schwaby/contrib/util.py',
          "            digits = member.lstrip('0') or '0'   # an all-zero member",
@@ -1335,8 +1328,8 @@ CASES = [
          '1 != 0'),
 
     # Reported and then carried past. Refusing the frame over an unread
-    # compartment would turn an addition into an outage, which is the whole
-    # failure this work exists to avoid.
+    # compartment would turn an addition into an outage, which is the failure
+    # reporting and carrying on exists to avoid.
     Case('streaming/unknown-channel-does-not-drop-the-frame',
          'schwaby/streaming.py',
          "                    names, frame=msg, force=first)",
@@ -1442,9 +1435,9 @@ CASES = [
          'Exceeds the limit'),
 
     # A case per call site, not per helper. `_safe_key` has three callers --
-    # the report and the two refusal messages -- and a case on the helper's
-    # own body proves only that *some* caller reaches it. Reverting both
-    # refusal sites left the whole suite green.
+    # the report and the two refusal messages -- and a case on the helper's own
+    # body proves only that *some* caller reaches it, while both refusal sites
+    # could revert unseen.
     Case('contrib/decimal-refusal-message-cannot-raise',
          'schwaby/contrib/util.py',
          "                'is not visible from here: {}'.format(\n"
@@ -1465,8 +1458,8 @@ CASES = [
          '::test_a_refusal_message_cannot_raise_on_the_keys_it_names',
          'Exceeds the limit'),
 
-    # Bounded in count as well as per key: the join did not cap, so 100,000
-    # unknown keys produced a 2.9 MB exception message.
+    # Bounded in count as well as per key: uncapped, 100,000 unknown keys
+    # produce a 2.9 MB exception message.
     Case('contrib/decimal-refusal-message-bounded-in-count',
          'schwaby/contrib/util.py',
          "    if len(names) <= 8:",
@@ -1530,9 +1523,9 @@ CASES = [
          removed=_DECODING_AROUND_A_KEY_REMOVED),
 
 
-    # The cap is justified by input nobody here controls, and `update`
-    # before the check let one object carrying 500 unknown keys put all 500
-    # into a set bounded at 32.
+    # The cap is justified by input nobody here controls, and `update` before
+    # the check would let one object carrying 500 unknown keys put all 500 into
+    # a set bounded at 32.
     Case('contrib/decimal-reported-keys-bounded-per-call',
          'schwaby/contrib/util.py',
          "    fresh = sorted({_safe_key(k) for k in unknown} "
@@ -1542,7 +1535,7 @@ CASES = [
          '::test_the_unknown_key_report_is_bounded',
          'not less than or equal to'),
 
-    # Key-shaped corruption reached the mantissa-less shortcut and decoded as
+    # Key-shaped corruption reaching the mantissa-less shortcut would decode as
     # zero without anything having inspected it -- and zero is what a $0
     # commission and a completed fill look like.
     Case('contrib/decimal-object-keys-are-known',
@@ -1566,8 +1559,8 @@ CASES = [
     # The report is the whole of what refusing-with-a-message adds over
     # refusing quietly, and its budget is bounded, module-level and never
     # cleared -- so a caller handing this function the wrong object must not
-    # spend it. One ACCT_ACTIVITY frame walked generically filled all 32
-    # slots, after which a genuine schema addition logged nothing.
+    # spend it. One ACCT_ACTIVITY frame walked generically would fill all 32
+    # slots, after which a genuine schema addition would log nothing.
     Case('contrib/decimal-wrong-object-does-not-spend-the-budget',
          'schwaby/contrib/util.py',
          "        if not fields:",
@@ -1600,8 +1593,8 @@ CASES = [
          '::test_the_unknown_key_report_is_bounded',
          '32 != 0'),
 
-    # The whole rule, in one line. Three attempts at something cleverer are
-    # `removed=` above with the reason; this is what replaced them.
+    # The whole rule, in one line. The cleverer alternatives are `removed=`
+    # above, each with the reason it fails.
     Case('contrib/decimal-unknown-key-refuses',
          'schwaby/contrib/util.py',
          "    if unknown:",
@@ -1610,11 +1603,11 @@ CASES = [
          '::test_any_unrecognised_key_refuses_the_object',
          'UnusableDecimalScale not raised'),
 
-    # `_absorb` coalesces across service names, because its counter is keyed
-    # on a fixed string. Five new services on one connection and the fourth
-    # was never named, in no log line and no callback, over a thousand
-    # frames. The field path already guaranteed a line per distinct id; the
-    # worse event had the weaker guarantee.
+    # `_absorb` coalesces across service names, because its counter is keyed on
+    # a fixed string. Without a line per distinct service, the fourth of five
+    # new services on one connection goes unnamed, in no log line and no
+    # callback, over a thousand frames. The field path guarantees a line per
+    # distinct id, and the worse event must not have the weaker guarantee.
     Case('streaming/every-unknown-service-is-named',
          'schwaby/streaming.py',
          "            first = self._report_new_shape('service', service)",
@@ -1633,8 +1626,8 @@ CASES = [
          'chanD'),
 
     # `_pretty`'s whole purpose is that a formatting failure stays cosmetic,
-    # and its `repr` fallback raised on a dict holding a wide integer key --
-    # the third instance of that hazard in this module.
+    # and unguarded, its `repr` fallback raises on a dict holding a wide
+    # integer key -- one more instance of that hazard in this module.
     Case('streaming/pretty-fallback-cannot-raise',
          'schwaby/streaming.py',
          "            try:\n"
@@ -1647,9 +1640,9 @@ CASES = [
          '::test_a_channel_name_that_cannot_be_named_does_not_escape',
          'Exceeds the limit'),
 
-    # A top-level frame key is whatever the decoder produced. `str()` of a
-    # wide integer raises past the digit limit, and this ran on the channel
-    # path in two places without the guard `_safe_repr` already had.
+    # A top-level frame key is whatever the decoder produced. `str()` of a wide
+    # integer raises past the digit limit, and on the channel path it runs in
+    # two places, which need the guard `_safe_repr` has.
     Case('streaming/unnameable-channel-key-does-not-escape',
          'schwaby/streaming.py',
          "        text = '<{} that cannot be named>'.format("
@@ -1660,10 +1653,10 @@ CASES = [
          'Exceeds the limit'),
 
     # `json.loads` maps `1e999` and `Infinity` to `float('inf')`, and
-    # `int(inf)` raises OverflowError -- in neither guard tuple, so an
-    # ordinary JSON number literal ended the receive loop and killed the
-    # in-flight request with a bare non-SchwabError. `NaN` raises
-    # ValueError, which is why one of the two spellings was covered.
+    # `int(inf)` raises OverflowError -- outside the guard tuple, an ordinary
+    # JSON number literal would end the receive loop and kill the in-flight
+    # request with a bare non-SchwabError. `NaN` raises ValueError, which the
+    # tuple catches either way, so only the infinite spellings need this.
     Case('streaming/non-finite-requestid-validate',
          'schwaby/streaming.py',
          "        except (AttributeError, IndexError, KeyError, OverflowError,\n"
@@ -1684,9 +1677,9 @@ CASES = [
          '::test_a_non_finite_requestid_does_not_end_the_receive_loop',
          'OverflowError'),
 
-    # A case per call site, not per helper. Reverting the helper reds off
-    # one site and reports the whole sweep proven -- three of the five were
-    # green, including the routing-path one the work was justified by.
+    # A case per call site, not per helper. Reverting the helper reds off one
+    # site and reports the whole sweep proven, while the other sites, the
+    # routing path among them, could revert unseen.
     Case('streaming/routing-path-response-value-is-safe',
          'schwaby/streaming.py',
          "                                _safe_value(code),\n"
@@ -1732,9 +1725,10 @@ CASES = [
          'Exceeds the limit'),
 
     # `_is_mapping` is structural on purpose -- `get` and `__contains__`,
-    # nothing about iteration -- and `set(msg)` requires iteration. The
-    # unknown-channel check ended the receive loop on shapes 4.2.0
-    # handled, through a documented public extension point.
+    # nothing about iteration -- and `set(msg)` requires iteration. Unguarded,
+    # the unknown-channel check would end the receive loop on a mapping the
+    # client otherwise handles, arriving through a documented public extension
+    # point.
     Case('streaming/unenumerable-mapping-still-dispatches',
          'schwaby/streaming.py',
          "        try:\n"
@@ -1747,9 +1741,9 @@ CASES = [
          '::test_a_mapping_that_cannot_be_enumerated_still_dispatches',
          'not iterable'),
 
-    # The three formats above the one that was swept. A case per site,
-    # because reverting the shared helper reds off whichever site a test
-    # happens to drive.
+    # The other three messages in `_validate_response`, above its code message.
+    # A case per site, because reverting the shared helper reds off whichever
+    # site a test happens to drive.
     Case('streaming/validate-response-service-is-bounded',
          'schwaby/streaming.py',
          "                resp, 'unexpected service: {}'.format(\n"
@@ -1864,15 +1858,14 @@ CASES = [
          '::test_the_report_is_bounded',
          '64 != 192'),
 
-    # The call's job is to hand the override a plain, bounded str that could
-    # not raise getting there. The length half is now also enforced where the
-    # name is kept -- the reporter bounds it after folding -- so mutating this
-    # to `str(token)` left the length test green. What only this call covers is
-    # the rest: a str subclass whose `__str__` returns itself reached the
-    # override's `casefold`, which raised and dropped the element. Since
-    # 4.7.2 the empty-type check reads it first, so its own `__len__` of 0
-    # makes a real type look empty and go unreported instead: the same
-    # override reached, one line earlier.
+    # The call's job is to hand the override a plain, bounded str that cannot
+    # raise getting there. The length half is also enforced where the name is
+    # kept -- the reporter bounds it after folding -- so mutating this to
+    # `str(token)` leaves the length test green. What only this call covers is
+    # the rest: a str subclass whose `__str__` returns itself would carry its
+    # own methods into the override -- its `__len__`, read first by the
+    # empty-type check, where 0 makes a real type look empty and go unreported,
+    # and its `casefold`, which can raise and drop the element.
     Case('streaming/unobserved-message-type-name-is-bounded',
          'schwaby/streaming.py',
          "                name = _safe_name(token)",
@@ -1904,9 +1897,10 @@ CASES = [
          '::test_it_is_exactly_the_observed_types',
          'Items in the first set but not the second'),
 
-    # Reachable with ordinary JSON: a newline in a `service` on the
-    # orphan-response path forged a second line reading as a real WARNING
-    # from this logger. The `%s` sweep had stopped at the shape path.
+    # Reachable with ordinary JSON: logged bare, a newline in a `service` on
+    # the orphan-response path forges a second line reading as a real WARNING
+    # from this logger. The orphan path needs quoting as much as the shape
+    # path does.
     Case('streaming/response-log-cannot-be-forged',
          'schwaby/streaming.py',
          "                    _safe_value(response.get('service')),\n"
@@ -1919,8 +1913,8 @@ CASES = [
          '::test_venue_text_cannot_forge_a_response_log_line',
          "'\\nWARNING' unexpectedly found"),
 
-    # A subscribe Schwab *accepted* raised a bare ValueError out of the
-    # message built for the late rejection beside it.
+    # Unguarded, a subscribe Schwab *accepted* raises a bare ValueError out of
+    # the message built for the late rejection beside it.
     Case('streaming/response-value-cannot-break-the-line',
          'schwaby/streaming.py',
          "    except Exception:\n"
@@ -1942,9 +1936,10 @@ CASES = [
          '::test_an_unnameable_service_does_not_end_the_receive_loop',
          'no name for you'),
 
-    # `%r`, like `_absorb` ten lines away. With `%s` a newline in a
-    # venue-controlled name forged a second log line indistinguishable from
-    # a real WARNING from this logger.
+    # `%r`, for the reason `_absorb` goes through `_safe_value`. With `%s` a
+    # newline in a
+    # venue-controlled name forges a second log line indistinguishable from a
+    # real WARNING from this logger.
     Case('streaming/venue-name-reaches-the-log-quoted',
          'schwaby/streaming.py',
          "                'Schwab sent a %s this version of schwaby does not "
@@ -1955,9 +1950,9 @@ CASES = [
          '::test_a_venue_name_reaches_the_log_quoted',
          "'\\nWARNING' unexpectedly found"),
 
-    # The service path called bare `str()` while the channel path went
-    # through `_safe_name`, three lines apart. A decoder producing such a
-    # service escaped `handle_message` entirely.
+    # The service path goes through `_safe_name`, as the channel path does.
+    # With bare `str()`, a decoder producing such a service escapes
+    # `handle_message` entirely.
     Case('streaming/unnameable-service-does-not-escape',
          'schwaby/streaming.py',
          "        seen = (what, _safe_name(name))",
@@ -1978,8 +1973,8 @@ CASES = [
          'as many as schwaby will name'),
 
     # The guarantee must live where the callback lives: held module-wide it
-    # deduped across clients, so a second client's handler heard about three
-    # of five new services and never about the other two.
+    # would dedupe across clients, so a second client's handler hears about
+    # three of five new services and never about the other two.
     Case('streaming/shape-budget-is-per-client',
          'schwaby/streaming.py',
          "        self._reported_shapes = set()",
@@ -1990,8 +1985,9 @@ CASES = [
          also=("_MAX_REPORTED_SHAPES = 64",
                "_MAX_REPORTED_SHAPES = 64\n_SHARED_SHAPES = set()")),
 
-    # Its own promises, all four of which were green: "reported once, not
-    # per message", the cap, the truncation, and the kind discriminator.
+    # Its own promises: "reported once, not per message", the cap, the
+    # truncation, and the kind discriminator. The first three have a case
+    # each below.
     Case('streaming/new-shape-report-is-once-per-name',
          'schwaby/streaming.py',
          "        if seen in self._reported_shapes:\n"
@@ -2020,8 +2016,8 @@ CASES = [
          '::test_the_new_shape_report_keeps_its_own_promises',
          'not less than or equal to'),
 
-    # Fields and shapes must not share a budget: 254 declared ids against 64
-    # slots meant the lesser event could consume the worse one's.
+    # Fields and shapes must not share a budget: with 254 declared ids against
+    # 64 slots, the lesser event could consume the worse one's.
     Case('streaming/fields-and-shapes-have-separate-budgets',
          'schwaby/streaming.py',
          "        seen = (what, _safe_name(name))",
@@ -2054,9 +2050,9 @@ CASES = [
 
     # A key is not guaranteed to be a string: StreamJsonDecoder is a public
     # extension point and a decoder normalising field ids to ints is a
-    # plausible thing to write. Keyed on the raw object such a message went
-    # unrelabeled, and bare `.isdigit()` on it raised AttributeError, which
-    # the relabel guard absorbed -- dropping a message 4.2.0 delivered.
+    # plausible thing to write. Keyed on the raw object, such a message goes
+    # unrelabeled, and bare `.isdigit()` on it raises AttributeError, which the
+    # relabel guard absorbs -- dropping a message that should be delivered.
     Case('streaming/a-non-string-field-key-is-not-dropped',
          'schwaby/streaming.py',
          "                text_key = str.__str__(str(old_key))",
@@ -2112,9 +2108,9 @@ CASES = [
          'not less than or equal to'),
 
     # The scale is bounded explicitly rather than left to the arithmetic:
-    # scaleb's operand limit only trips far out, so every scale from roughly
-    # two million to four million underflowed to a zero that compares equal to
-    # zero -- the worst wrong answer available on a fill feed.
+    # scaleb's operand limit only trips far out, so unbounded, every scale from
+    # roughly two million to four million underflows to a zero that compares
+    # equal to zero -- the worst wrong answer available on a fill feed.
     Case('contrib/decimal-scale-is-bounded',
          'schwaby/contrib/util.py',
          "    if not 0 <= scale <= MAX_SIGN_SCALE:",
@@ -2142,8 +2138,8 @@ CASES = [
                  'followed by a separate negation is the obvious thing to '
                  'reach for again.'),
 
-    # The mantissa-less guard keyed on `lo` alone, so a value carried only in
-    # `mid` decoded as zero -- the slice-reading defect the function exists to
+    # Keyed on `lo` alone, the mantissa-less guard would decode a value carried
+    # only in `mid` as zero -- the slice-reading defect the function exists to
     # fix, in the guard immediately before it.
     Case('contrib/decimal-guard-reads-all-three-fields',
          'schwaby/contrib/util.py',
@@ -2155,7 +2151,7 @@ CASES = [
 
     # Every *operation* on a Decimal applies the caller's context; only
     # construction does not. Building the value from a string and then negating
-    # it was exact for positive values and rounded negative ones -- the branch
+    # it is exact for positive values and rounds negative ones -- the branch
     # EstimatedPrincipalAmount arrives on.
     Case('contrib/decimal-sign-is-context-free-too',
          'schwaby/contrib/util.py',
@@ -2190,8 +2186,8 @@ CASES = [
     # only that *some* branch reaches it.
     #
     # Branch one: what the member is. A bool passes `isinstance(x, int)`, and
-    # `int(True)` is 1 -- so a JSON `true` in a mantissa decoded as a number
-    # rather than as the corruption it is.
+    # `int(True)` is 1 -- so unchecked, a JSON `true` in a mantissa would
+    # decode as a number rather than as the corruption it is.
     Case('contrib/decimal-member-type-is-checked',
          'schwaby/contrib/util.py',
          "    if issubclass(kind, bool) or not issubclass(kind, (int, str)):",
@@ -2227,8 +2223,8 @@ CASES = [
          'UnusableDecimalScale not raised'),
 
     # The layout Schwab sends: `lo` alone, carrying the whole mantissa. Held to
-    # 32 bits it refused 129 of 5,843 recorded objects, 33 of them principals
-    # that equalled price times quantity once read whole.
+    # 32 bits it would refuse 129 of 5,843 recorded objects, 33 of them
+    # principals that equal price times quantity once read whole.
     Case('contrib/decimal-lone-lo-is-the-whole-mantissa',
          'schwaby/contrib/util.py',
          "        mantissa = 0 if lo is None else _unsigned(lo, 'lo', value, 96)",
@@ -2267,8 +2263,8 @@ CASES = [
          'UnusableDecimalScale not raised'),
 
     # A plain int, not the subclass that arrived. The lone-lo path formats the
-    # member straight into the result, so a subclass's own `format` decided
-    # the number -- or raised past the one `except` callers write.
+    # member straight into the result, so a subclass's own `format` would
+    # decide the number -- or raise past the one `except` callers write.
     Case('contrib/decimal-member-is-a-plain-int',
          'schwaby/contrib/util.py',
          "        member = int.__index__(member)",
@@ -2306,8 +2302,8 @@ CASES = [
          'tests/contrib/util_test.py::DecodeDecimalTest::test_a_huge_bare_exponent_is_refused_not_escaped',
          'not a number'),
 
-    # Key names are quoted in the refusal. Joined bare, a newline in one forged
-    # a second line wherever the exception was logged.
+    # Key names are quoted in the refusal. Joined bare, a newline in one would
+    # forge a second line wherever the exception was logged.
     Case('contrib/decimal-refusal-quotes-key-names',
          'schwaby/contrib/util.py',
          '    quoted = repr(name)',
@@ -2315,8 +2311,8 @@ CASES = [
          'tests/contrib/util_test.py::DecodeDecimalTest::test_a_refusal_cannot_forge_a_log_line',
          'unexpectedly found'),
 
-    # A str subclass member is reduced to plain text; its own `isdigit` and
-    # `lstrip` decided the value.
+    # A str subclass member is reduced to plain text; otherwise its own
+    # `isdigit` and `lstrip` would decide the value.
     Case('contrib/decimal-member-text-is-plain-str',
          'schwaby/contrib/util.py',
          '        member = str.__str__(member)',
@@ -2325,8 +2321,8 @@ CASES = [
          '0.000999'),
 
     # The mapping is read through its own `items()`. Through `dict.items`, a
-    # dict subclass keeping its data elsewhere, as DotMap does, looked empty and
-    # decoded a $5,000 principal as a clean zero.
+    # dict subclass keeping its data elsewhere, as DotMap does, looks empty and
+    # decodes a $5,000 principal as a clean zero.
     Case('contrib/decimal-mapping-read-through-its-items',
          'schwaby/contrib/util.py',
          '        pairs = [(key, member) for key, member in value.items()]',
@@ -2343,8 +2339,8 @@ CASES = [
          'tests/contrib/util_test.py::DecodeDecimalTest::test_a_mapping_is_read_once_from_what_it_stores',
          'boom'),
 
-    # A bare Decimal subclass is copied to an exact Decimal; its own `is_finite`
-    # raised past the one `except`.
+    # A bare Decimal subclass is copied to an exact Decimal; otherwise its own
+    # `is_finite` could raise past the one `except`.
     Case('contrib/decimal-bare-decimal-is-copied',
          'schwaby/contrib/util.py',
          '        value = result = decimal.Decimal(value)',
@@ -2352,8 +2348,8 @@ CASES = [
          'tests/contrib/util_test.py::DecodeDecimalTest::test_subclasses_decode_as_their_plain_values',
          'boom'),
 
-    # A bare int subclass is reduced with `int.__index__`; its own `bit_length`
-    # raised.
+    # A bare int subclass is reduced with `int.__index__`; otherwise its own
+    # `bit_length` could raise.
     Case('contrib/decimal-bare-int-is-plain',
          'schwaby/contrib/util.py',
          '        value = int.__index__(value)',
@@ -2361,8 +2357,8 @@ CASES = [
          'tests/contrib/util_test.py::DecodeDecimalTest::test_subclasses_decode_as_their_plain_values',
          'boom'),
 
-    # A bare float subclass is reduced with `float.__float__`; its own `__str__`
-    # decided the number.
+    # A bare float subclass is reduced with `float.__float__`; otherwise its
+    # own `__str__` would decide the number.
     Case('contrib/decimal-bare-float-is-plain',
          'schwaby/contrib/util.py',
          '        value = float.__float__(value)',
@@ -2392,9 +2388,9 @@ CASES = [
          superseded='before_cut, which every bounded value now passes '
                     'through, makes the text a plain str itself'),
 
-    # A MESSAGE_TYPE str subclass whose `__str__` returns itself kept its own
-    # `casefold`, which raised and absorbed the whole element, valid items with
-    # it.
+    # A MESSAGE_TYPE str subclass whose `__str__` returns itself would keep its
+    # own `casefold`, which can raise and absorb the whole element, valid items
+    # with it.
     Case('streaming/safe-name-is-plain-str',
          'schwaby/streaming.py',
          "    text = _redact.before_cut(str.__str__(text), 64)\n    return text if len(text) <= 64 else text[:61] + '...'",
@@ -2404,9 +2400,9 @@ CASES = [
          superseded='before_cut, which every bounded value now passes '
                     'through, makes the text a plain str itself'),
 
-    # Folded without cutting again. A second cut after folding made two
-    # different types, 'ß'*33 + 'A' and 'ß'*33 + 'B', share one report; the name
-    # is already bounded and folding at most triples one.
+    # Folded without cutting again. A second cut after folding would make two
+    # different types, 'ß'*33 + 'A' and 'ß'*33 + 'B', share one report; the
+    # name is already bounded and folding at most triples one.
     Case('streaming/reported-type-folded-without-cutting-again',
          'schwaby/streaming.py',
          '    folded = name.casefold()',
@@ -2415,7 +2411,7 @@ CASES = [
          '2 != 1'),
 
     # Any Mapping is a decimal object, not only a dict: a UserDict or a
-    # mappingproxy was refused as 'not a number'.
+    # mappingproxy must not be refused as 'not a number'.
     Case('contrib/decimal-any-mapping-is-a-decimal-object',
          'schwaby/contrib/util.py',
          '        is_mapping = issubclass(type(value), collections.abc.Mapping)',
@@ -2442,8 +2438,8 @@ CASES = [
          'UnusableDecimalScale not raised'),
 
     # A bare value is routed on its real type. `isinstance` believes
-    # `__class__`, so a claimed int reached int's own conversion and escaped as
-    # TypeError.
+    # `__class__`, so a claimed int would reach int's own conversion and escape
+    # as TypeError.
     Case('contrib/decimal-bare-value-routed-on-real-type',
          'schwaby/contrib/util.py',
          '    kind = type(value)   # not `isinstance`; see `decode_decimal`',
@@ -2452,7 +2448,7 @@ CASES = [
          'TypeError'),
 
     # A member is routed on its real type, for the same reason: a claimed str
-    # reached str's own conversion and escaped as TypeError.
+    # would reach str's own conversion and escape as TypeError.
     Case('contrib/decimal-member-routed-on-real-type',
          'schwaby/contrib/util.py',
          '    kind = type(member)   # not `isinstance`; see `decode_decimal`',
@@ -2460,8 +2456,8 @@ CASES = [
          'tests/contrib/util_test.py::DecodeDecimalTest::test_a_claimed_class_is_not_believed',
          'TypeError'),
 
-    # A bare str subclass is reduced to plain text; its own `isascii` ran before
-    # the pattern and raised.
+    # A bare str subclass is reduced to plain text; otherwise its own `isascii`
+    # runs before the pattern and can raise.
     Case('contrib/decimal-bare-text-is-plain-str',
          'schwaby/contrib/util.py',
          '        value = str.__str__(value)',
@@ -2469,9 +2465,9 @@ CASES = [
          'tests/contrib/util_test.py::DecodeDecimalTest::test_subclasses_decode_as_their_plain_values',
          'boom'),
 
-    # The type name in a refusal is read through type's own descriptor, inside a
-    # guard: a metaclass whose __name__ raises escaped from the branch written
-    # to be safe.
+    # The type name in a refusal is read through type's own descriptor, inside
+    # a guard: otherwise a metaclass whose __name__ raises escapes from the
+    # branch written to be safe.
     Case('contrib/decimal-type-name-cannot-raise',
          'schwaby/contrib/util.py',
          "        name = str.__str__(type.__dict__['__name__'].__get__(type(value)))\n    except Exception:",
@@ -2480,7 +2476,7 @@ CASES = [
          'boom'),
 
     # Each quoted key name is bounded: repr escapes a character to as many as
-    # ten, so eight names grew the refusal to several kilobytes.
+    # ten, so unbounded, eight names grow the refusal to several kilobytes.
     Case('contrib/decimal-quoted-key-names-are-bounded',
          'schwaby/contrib/util.py',
          "    return quoted if len(quoted) <= 80 else quoted[:77] + '...'",
@@ -2489,8 +2485,8 @@ CASES = [
          'not less than 1500'),
 
     # _safe_value returns a plain str. A decoder's str subclass whose __repr__
-    # returns itself kept its own __len__, which ended the receive loop when it
-    # raised.
+    # returns itself would keep its own __len__, which ends the receive loop
+    # when it raises.
     Case('streaming/safe-value-is-plain-str',
          'schwaby/streaming.py',
          "    text = str.__str__(text)\n    # Redacted before it is cut, so a secret across the cut leaves nothing.\n    text = _redact.before_cut(text, 200)\n"
@@ -2552,7 +2548,7 @@ CASES = [
          'TypeError'),
 
     # A type name is reduced to a plain str: a class's __name__ may be a str
-    # subclass, whose own __len__ ran outside the guard.
+    # subclass, whose own __len__ would run outside the guard.
     Case('contrib/decimal-type-name-is-plain-str',
          'schwaby/contrib/util.py',
          "        name = str.__str__(type.__dict__['__name__'].__get__(type(value)))",
@@ -2570,7 +2566,7 @@ CASES = [
          'unexpectedly found'),
 
     # The once-per-key log line joins bounded quoted names too; unbounded,
-    # thirty-two non-printable keys logged twenty kilobytes at once.
+    # thirty-two non-printable keys log twenty kilobytes at once.
     Case('contrib/decimal-report-line-is-bounded',
          'schwaby/contrib/util.py',
          "            ', '.join(_quoted(k) for k in fresh))",
@@ -2579,8 +2575,8 @@ CASES = [
          'not less than 4000'),
 
     # _safe_str returns a plain str. str() of a KeyError is its key's repr, and
-    # a decoder's key can hand back itself, whose own __len__ ended the receive
-    # loop.
+    # a decoder's key can hand back itself, whose own __len__ can end the
+    # receive loop.
     Case('streaming/safe-str-is-plain-str',
          'schwaby/streaming.py',
          '    text = str.__str__(text)   # a plain str; `_safe_value` says why',
@@ -2601,9 +2597,9 @@ CASES = [
          'boom'),
 
     # A refresh response that is not a usable token is refused before authlib
-    # parses it, so nothing unusable is written or kept: an object without a
-    # token was written to the token file, and a list or string was kept in
-    # memory.
+    # parses it, so nothing unusable is written or kept: otherwise an object
+    # without a token would be written to the token file, and a list or string
+    # kept in memory.
     Case('auth/unusable-refresh-response-is-refused-before-parsing',
          'schwaby/auth.py',
          "    if isinstance(body, dict) and _is_usable_token(body):",
@@ -2619,9 +2615,9 @@ CASES = [
          'tests/utils_test.py::HTTPStatusErrorTest::test_a_refresh_response_that_is_not_a_token_is_not_stored',
          'Lists differ'),
 
-    # A client from a login builds its session through the shared builder. It
-    # built its own, without the check, and kept storing whatever the token
-    # endpoint returned.
+    # A client from a login builds its session through the shared builder; a
+    # session it built for itself would lack the check and store whatever the
+    # token endpoint returns.
     Case('auth/login-client-uses-the-shared-session-builder',
          'schwaby/auth.py',
          '        _new_session(session_class, api_key, app_secret, token,\n                     oauth_client_update_token),\n        token_metadata=metadata_manager, enforce_enums=enforce_enums)',
@@ -2642,9 +2638,9 @@ CASES = [
                  'HTTP status, so the line this mutated is gone; the guard '
                  'is auth/rejection-with-an-error-body-is-reported-as-one.'),
 
-    # The same guard since the hook raises the rejection itself: an error
-    # body that fell through to the usable-token check would be refused as
-    # unusable, and a dead refresh token would read as retryable.
+    # The same guard, where the hook raises the rejection itself: an error body
+    # that fell through to the usable-token check would be refused as unusable,
+    # and a dead refresh token would read as retryable.
     Case('auth/rejection-with-an-error-body-is-reported-as-one',
          'schwaby/auth.py',
          "    if isinstance(body, dict) and 'error' in body:",
@@ -2693,8 +2689,8 @@ CASES = [
          '200 != None'),
 
     # A usable token is kept only from a success. authlib keeps one at any
-    # status, so a refusal carrying a token was stored as the new one, at a
-    # login and at a refresh alike. A case per test, a case per side of each
+    # status, so a refusal carrying a token would be stored as the new one, at
+    # a login and at a refresh alike. A case per test, a case per side of each
     # end of 2xx, and one for the status the refusal carries.
     Case('auth/a-login-refuses-a-token-at-a-refusal',
          'schwaby/auth.py',
@@ -2909,8 +2905,8 @@ CASES = [
          'not less than 400'),
 
     # An absorbed cause's type is named through _type_name; `type(x).__name__`
-    # consults the metaclass first, and raising there ended the receive loop
-    # with nothing logged.
+    # consults the metaclass first, and raising there would end the receive
+    # loop with nothing logged.
     Case('streaming/absorbed-cause-type-name-cannot-raise',
          'schwaby/streaming.py',
          "                else ' Cause: {}: {}'.format(\n                    _type_name(cause), _safe_str(cause)))",
@@ -2988,8 +2984,8 @@ CASES = [
          'tests/utils_test.py::HTTPStatusErrorTest::test_a_server_error_with_a_json_body_is_still_a_server_error',
          'unusable_token_response'),
 
-    # The token a login exchanges its code for is checked too: it was written
-    # unchecked, and {"message": "Unauthorized"} became the token file.
+    # The token a login exchanges its code for is checked too: unchecked,
+    # {"message": "Unauthorized"} becomes the token file.
     Case('auth/login-exchange-hook-is-registered',
          'schwaby/auth.py',
          "    oauth.register_compliance_hook(\n"
@@ -3055,7 +3051,8 @@ CASES = [
          'tests/streaming_test.py::AccountActivityMessageTypeTest::test_a_custom_repr_or_class_name_cannot_forge_a_log_line',
          'unexpectedly found'),
 
-    # A class's __name__ can be a str subclass; its own __len__ ran next.
+    # A class's __name__ can be a str subclass, whose own __len__ would run
+    # next.
     Case('streaming/type-name-is-plain-str',
          'schwaby/streaming.py',
          "        name = str.__str__(type.__dict__['__name__'].__get__(type(value)))",
@@ -3089,8 +3086,9 @@ CASES = [
          'tests/client_test.py::ClientTest::test_a_local_unsupported_token_type_without_expiry_is_terminal',
          'False is not true'),
 
-    # A local failure with an expiry never reached Schwab; its message said
-    # "Schwab did not say the refresh token itself is invalid".
+    # A local failure with an expiry never reached Schwab, so its message says
+    # nothing was sent rather than "Schwab did not say the refresh token itself
+    # is invalid".
     Case('client/local-failure-with-an-expiry-says-nothing-was-sent',
          'schwaby/client/base.py',
          "            elif isinstance(e, UnsupportedTokenTypeError):",
@@ -3117,9 +3115,9 @@ CASES = [
          '1 != 2'),
 
     # The stored-token classification asks the same helper as the response
-    # check, bound included. It counted any int as an expiry, so a stored
-    # token with a milliseconds expiry was reported retryable on every call
-    # while the same expiry in a response was refused as never reached.
+    # check, bound included. Counting any int as an expiry would report a
+    # stored token with a milliseconds expiry as retryable on every call, while
+    # the same expiry in a response is refused as never reached.
     Case('client/stored-expiry-must-be-reachable',
          'schwaby/utils.py',
          "            and expires_at <= time.time() + _LONGEST_EXPIRY)",
@@ -3136,8 +3134,8 @@ CASES = [
          'False is not true'),
 
     # authlib refreshes only with a refresh token, so a stored token it cannot
-    # send, with a good expiry and no refresh token, is never replaced. It was
-    # told "may clear on its own".
+    # send, with a good expiry and no refresh token, is never replaced, so the
+    # advice must not say it "may clear on its own".
     Case('client/stored-token-needs-a-refresh-token-to-be-refreshed',
          'schwaby/client/base.py',
          "                        and issubclass(type(refresh_token), str)\n"
@@ -3156,8 +3154,9 @@ CASES = [
          'tests/auth_test.py::TokenFileAgeTest::test_the_file_modification_time_is_not_the_clock',
          '82 != 0'),
 
-    # json.load returns whatever the file held; a list, null or a string failed
-    # later with an indexing error that said nothing about the file.
+    # json.load returns whatever the file held; unchecked, a list, null or a
+    # string would fail later with an indexing error that says nothing about
+    # the file.
     Case('auth/token-file-must-hold-a-json-object',
          'schwaby/auth.py',
          "        if not issubclass(type(token), collections.abc.Mapping):",
@@ -3239,7 +3238,8 @@ CASES = [
          'tests/utils_test.py::FindAccountHashTest::test_a_type_name_is_read_without_trusting_a_metaclass',
          'metaclass raised'),
 
-    # A str subclass is reduced to its text: its own __eq__ decided the match.
+    # A str subclass is reduced to its text; otherwise its own __eq__ would
+    # decide the match.
     Case('utils/account-hash-number-reduced-to-plain-str',
          'schwaby/utils.py',
          "    account_number = str.__str__(account_number)\n",
@@ -3342,7 +3342,8 @@ CASES = [
          'tests/contrib/util_test.py::ParseMessageDataTest::test_anything_else_is_refused',
          'does not match'),
 
-    # A str subclass is read as its text: its own strip decided the answer.
+    # A str subclass is read as its text; otherwise its own strip would decide
+    # the answer.
     Case('contrib/message-data-reduced-to-plain-str',
          'schwaby/contrib/util.py',
          "    text = str.__str__(value)\n    stripped = text.strip()",
@@ -3392,8 +3393,8 @@ CASES = [
          'tests/contrib/util_test.py::ParseMessageDataTest::test_text_that_starts_like_an_object_but_is_not_one_raises',
          'unexpectedly found'),
 
-    # A token_read_func may hand back any mapping; 4.4.2 built a client from
-    # a UserDict, and the dict-only check refused it.
+    # A token_read_func may hand back any mapping, a UserDict among them, which
+    # a dict-only check would refuse.
     Case('auth/token-mapping-accepted',
          'schwaby/auth.py',
          "        if not issubclass(type(token), collections.abc.Mapping):",
@@ -3427,7 +3428,7 @@ CASES = [
          'not raised'),
 
     # A Decimal is not a numbers.Real, and a token store such as DynamoDB hands
-    # one back; token_age() has always accepted it.
+    # one back; token_age() accepts it.
     Case('auth/token-timestamp-decimal-accepted',
          'schwaby/auth.py',
          "(numbers.Real, decimal.Decimal))\n",
@@ -3470,7 +3471,7 @@ CASES = [
          'RecursionError'),
 
     # A Decimal age, from a token store such as DynamoDB, cannot be divided by
-    # a float, which turned the refresh failure into a TypeError.
+    # a float, which would turn the refresh failure into a TypeError.
     Case('client/refresh-advice-reads-a-decimal-age',
          'schwaby/client/base.py',
          ").format(float(age) / 86400.0) if age is not None else (",
@@ -3485,8 +3486,8 @@ CASES = [
          'tests/auth_test.py::TokenFileAgeTest::test_a_malformed_token_raises_valueerror_and_nothing_else',
          'KeyError'),
 
-    # token_file_age and a client built from the same file report the same
-    # age. The earlier test compared token_file_age with the function it calls.
+    # token_file_age and a client built from the same file report the same age.
+    # Comparing token_file_age with the function it calls would prove nothing.
     Case('client/token-age-agrees-with-the-token-file',
          'schwaby/client/base.py',
          "        return self.token_metadata.token_age()",
@@ -3664,14 +3665,6 @@ CASES = [
          'tests/orders/options_test.py::OptionSymbolLayoutTest::test_the_other_refusals_keep_their_messages',
          'does not match'),
 
-    # A code block nested in an admonition must stop at the paragraph after
-    # it, which dedents to a shallower margin than the code; running on, the
-    # whole block would be an `unexpected indent`. bad_keywords_in swallows a
-    # SyntaxError, so such a block would be skipped and nothing would count
-    # it.
-    # A literal inside bold renders its backticks. The check parses with
-    # docutils; one case for the detector, one per source it reads, and one
-    # for the count that says it read them.
     # authlib refreshes 300 seconds before the expiry, so the advice says the
     # token is replaced as the expiry nears, not once it passes.
     Case('client/refreshable-token-advice-says-as-expiry-nears',
@@ -4519,10 +4512,10 @@ CASES = [
          'tests/auth_test.py::LoginExchangeErrorTest::test_refusal_text_is_escaped_and_cut',
          'not less than or equal to 200'),
 
-    # 4.6.1: a value whose __class__ raises is refused like any instance of
-    # its class, one case per type check that reads a caller's value; and a
-    # refresh failure escapes the endpoint's text without replacing the error
-    # it chains.
+    # A value whose __class__ raises is refused like any instance of its class,
+    # one case per type check that reads a caller's value; and a refresh
+    # failure escapes the endpoint's text without replacing the error it
+    # chains.
     Case('hostile-class/utils-line-36-col-11',
          'schwaby/utils.py',
          '        if _is_instance(value, str):\n',
@@ -4754,8 +4747,8 @@ CASES = [
          'tests/client_test.py::ClientTest::test_token_refresh_error_keeps_this_librarys_own_description',
          'not found in'),
 
-    # 4.7.0: the public token-file writer leaves the file the library reads,
-    # and refuses a path that is not one before any login.
+    # The public token-file writer leaves the file the library reads, and
+    # refuses a path that is not one before any login.
     Case('auth/token-file-writer-writes-the-librarys-token-file',
          'schwaby/auth.py',
          '    return __make_update_token_func(token_path)\n',
@@ -4803,8 +4796,8 @@ CASES = [
          'tests/utils_test.py::HostileClassTest::test_a_class_that_raises_is_refused_like_any_other_instance',
          'RuntimeError'),
 
-    # The widening moved to utils._format_iso_instant so the order builder can
-    # share it; the test still reaches it through the client's date parameters.
+    # The check lives in utils._format_iso_instant, which the order builder
+    # shares; the test reaches it through the client's date parameters.
     Case('hostile-class/client-iso-date-formatter',
          'schwaby/utils.py',
          '    if not _is_instance(dt, _DATETIME):',
@@ -4812,8 +4805,7 @@ CASES = [
          'tests/utils_test.py::HostileClassTest::test_a_class_that_raises_is_refused_like_any_other_instance',
          'RuntimeError'),
 
-    # Had no case before it moved to utils. Dropping the conversion sends
-    # another zone's wall clock labelled as UTC.
+    # Dropping the conversion sends another zone's wall clock labelled as UTC.
     Case('dates/aware-datetime-is-converted-to-utc',
          'schwaby/utils.py',
          '        dt = dt.astimezone(_datetime.timezone.utc)\n',
@@ -5025,7 +5017,6 @@ CASES = [
          # test source always has a comma after the keys.
          "'keys': 'AAPL,MSFT'}"),
 
-    # VIEW. No keys, SYMBOL added, fields handled as distinct numbers.
     # One definition of an aware datetime, shared by the client's warning and
     # the conversion both it and set_cancel_time go through.
     Case('utils/iso-conversion-keys-on-the-offset',
@@ -5088,8 +5079,8 @@ CASES = [
          'convert_enum'),
 
     # A prefix match on the defining path would let the internal base class
-    # take its public set_enforce_enums along with it -- the defect this list
-    # had before it went member by member.
+    # take its public set_enforce_enums along with it, which is why the list
+    # goes member by member.
     Case('doc-coverage/defining-path-match-is-exact',
          'tests/packaging_test.py',
          "            return path in cls.INTERNAL or cls.defined_as(obj) in cls.INTERNAL\n",
@@ -5228,10 +5219,10 @@ CASES = [
          '::test_an_incremental_build_updates_the_index',
          'Client.get_quotes()'),
 
-    # The prefix check the comment warns about, whole: without the second
-    # half, importing the empty module name of an unqualified `StreamClient`
-    # raised ValueError, a crash whose text appears only in the source pytest
-    # echoes, which the harness does not match against.
+    # The prefix check the comment warns about, whole: without the second half,
+    # importing the empty module name of an unqualified `StreamClient` raises
+    # ValueError, a crash whose text appears only in the source pytest echoes,
+    # which the harness does not match against.
     Case('docs-config/ignore-list-is-standard-library-only',
          'tests/packaging_test.py',
          "                ok = (module.split('.')[0] in sys.stdlib_module_names\n",
@@ -5666,10 +5657,10 @@ CASES = [
          '::test_a_record_names_the_line_that_logged_it',
          'Lists differ'),
 
-    # Pickled with its raw arguments: the LazyLog's secret goes into the
-    # bytes. The mutation this replaced recursed inside pickle and never
-    # shipped anything, and its expect, 'protocol=', was the test's own
-    # subtest keyword, which matched with every assertion deleted.
+    # Pickled with its raw arguments: the LazyLog's secret goes into the bytes.
+    # A mutation that recursed inside pickle would ship nothing, and an expect
+    # of the test's own subtest keyword, 'protocol=', would match with every
+    # assertion deleted.
     Case('secrets/message-pickles-redacted',
          'schwaby/_redact.py',
          "        # would otherwise ship the raw message, or fail on a LazyLog.\n"
@@ -5779,6 +5770,7 @@ CASES = [
          '::test_book_names_each_per_exchange_field',
          "'SEQUENCE': 62767878"),
 
+    # VIEW. No keys, SYMBOL added, fields handled as distinct numbers.
     Case('view/sends-no-keys',
          'schwaby/streaming.py',
          "        parameters = {'fields': ','.join(str(n) for n in sorted(numbers))}\n",
@@ -5804,8 +5796,8 @@ CASES = [
          '::test_view_sends_symbol_once_when_the_caller_names_it',
          "'0,0,1,1'"),
 
-    # Superseded by the rewrite: fields are converted and held as numbers, so
-    # there is no list of the caller's to copy or append to.
+    # Fields are converted and held as numbers, so there is no list of the
+    # caller's to copy or append to.
     Case('view/copies-the-callers-list',
          'schwaby/streaming.py',
          "        fields = list(fields)\n        if not fields:\n",
@@ -5952,10 +5944,10 @@ CASES = [
          'unhashable type'),
 
     # Order leg quantityType. Emitted only when asked for, so a leg built
-    # without one is byte-identical to every earlier version's.
+    # without one carries no quantityType key at all.
     # Mutated to emit a default rather than to emit None: a None value crashes
-    # build() before the assertion runs, which is a red for the wrong reason.
-    # A default is also the regression that could actually ship.
+    # build() before the assertion runs, which is a red for the wrong reason. A
+    # default is also the regression that could actually ship.
     Case('quantity-type/absent-unless-given',
          'schwaby/orders/generic.py',
          "        if quantity_type is not None:\n"
@@ -5984,8 +5976,8 @@ CASES = [
          "            instruction, common.OptionInstrument(symbol)",
          "        return self.__add_order_leg(\n"
          "            instruction, common.OptionInstrument(symbol)",
-         # Its own test and the rendered failure. The earlier expect matched
-         # only the test's source listing, over a build() crash.
+         # Its own test and the rendered failure: an expect matching only the
+         # test's source listing would also match a build() crash.
          'tests/orders/generic_test.py::OrderBuilderTest'
          '::test_add_option_leg_quantity_type_wrong_type',
          'ValueError not raised'),
@@ -6057,7 +6049,7 @@ CASES = [
          'tests/auth_test.py::TokenFileWriterTest::test_a_nul_is_refused_where_realpath_would_let_it_through',
          'ValueError not raised'),
 
-    # 4.7.1: token_file_age applies the client's token-shape check.
+    # token_file_age applies the client's token-shape check.
     Case('auth/token-file-age-refuses-what-the-client-refuses',
          'schwaby/auth.py',
          '    _stored_token_for_session(metadata.token)\n    return metadata.token_age()\n',
@@ -6065,9 +6057,9 @@ CASES = [
          'tests/auth_test.py::TokenFileAgeTest::test_a_token_the_client_refuses_is_refused_here_too',
          'ValueError not raised'),
 
-    # 4.7.1: find_account_hash skips an unusable entry that provably names
-    # another account, reports each kind once, and still refuses one that
-    # could be the account asked for.
+    # find_account_hash skips an unusable entry that provably names another
+    # account, reports each kind once, and still refuses one that could be the
+    # account asked for.
     Case('utils/find-account-hash-skips-an-unusable-entry-for-another-account',
          'schwaby/utils.py',
          '            _report_skipped_account_entry(entry)\n            continue\n',
@@ -6140,7 +6132,7 @@ CASES = [
          'tests/utils_test.py::FindAccountHashTest::test_an_unusable_entry_for_another_account_is_skipped_once_reported',
          'has an empty hashValue'),
 
-    # 4.7.2: the empty MESSAGE_TYPE carrying Schwab's notices is not reported.
+    # The empty MESSAGE_TYPE carrying Schwab's notices is not reported.
     Case('streaming/the-empty-message-type-is-not-reported',
          'schwaby/streaming.py',
          '                notice = not name and _is_notice_text(\n',
@@ -6179,6 +6171,9 @@ CASES = [
          'tests/streaming_test.py::AccountActivityMessageTypeTest::test_an_empty_type_carrying_a_payload_is_still_reported',
          'no logs of level WARNING'),
 
+    # A literal inside bold renders its backticks. The check parses with
+    # docutils; one case for the detector, one per source it reads, and one
+    # for the count that says it read them.
     Case('docs/bold-literal-detector-sees-one',
          'tests/packaging_test.py',
          "                if '``' in node.astext()]",
@@ -6207,6 +6202,11 @@ CASES = [
          'tests/packaging_test.py::DocBoldLiteralTest::test_no_documentation_page_puts_a_literal_inside_bold',
          'CONTRIBUTING.rst is not among the pages checked'),
 
+    # A code block nested in an admonition must stop at the paragraph after
+    # it, which dedents to a shallower margin than the code; running on, the
+    # whole block would be an `unexpected indent`. bad_keywords_in swallows a
+    # SyntaxError, so such a block would be skipped and nothing would count
+    # it.
     Case('docs/code-blocks-all-parse',
          'tests/packaging_test.py',
          'elif len(lines[j]) - len(lines[j].lstrip()) > base:',
@@ -6234,9 +6234,9 @@ CASES = [
          '::test_the_documentation_imports_nothing_by_the_old_package_name',
          'index.rst'),
 
-    # The README's uninstall-first instruction was correct through 3.0.3 and
-    # strands anyone who still imports `schwab` from 4.0.0 on. Asserting that
-    # the README merely *names* `schwab-py` cannot catch its return.
+    # An uninstall-first instruction in the README strands anyone who still
+    # imports `schwab`, which `schwaby` does not provide. Asserting that the
+    # README merely *names* `schwab-py` cannot catch the instruction.
     Case('packaging/readme-does-not-say-uninstall-first',
          'README.md',
          '''```shell
@@ -6254,9 +6254,9 @@ That is the whole install.''',
          'uninstall'),
 
     # The port guard fetches a status path and takes a 200 as "that is my own
-    # server". Through 3.0.3 the path was `schwab-py`'s, which serves it for
-    # the same purpose -- so the one occupant the guard is most likely to meet
-    # was the one it could not tell from itself.
+    # server". The path must not be `schwab-py`'s, which serves one for the
+    # same purpose, or the one occupant the guard is most likely to meet is the
+    # one it cannot tell from itself.
     Case('auth/internal-status-path-is-ours',
          'schwaby/auth.py',
          "INTERNAL_STATUS_PATH = '/schwaby-internal/status'",
@@ -6265,16 +6265,14 @@ That is the whole install.''',
          '::test_the_internal_status_path_is_not_one_schwab_py_also_serves',
          'schwab-py'),
 
-    # Without the separator, `.../schwabytools` starts with `.../schwaby`, so
-    # a sibling package's frames are skipped as if they were ours and the
+    # Without the separator, `.../schwabytools` starts with `.../schwaby`, so a
+    # sibling package's frames are skipped as if they were ours and the
     # naive-datetime warning blames whoever called *them*.
     #
-    # This case exists because the test went inert without anyone touching it.
-    # Its fixture was a sibling called `schwabtools`, which collided with the
-    # package root while that root was `.../schwab` and stopped colliding the
-    # moment 4.0.0 renamed it -- so the mutation below went GREEN on a guard
-    # that was still perfectly correct, and the suite still passed. A fixture
-    # built around a name is one the next rename can empty.
+    # The test's sibling has to share a prefix with the package root as it is
+    # named now. A fixture built around a name is one the next rename can
+    # empty: the mutation below would then go GREEN on a guard that is still
+    # correct, with the suite still passing.
     Case('client/sibling-package-prefix',
          'schwaby/client/base.py',
          'if not filename.startswith(cls._PACKAGE_ROOT + os.sep):',
@@ -6283,8 +6281,8 @@ That is the whole install.''',
          '::test_a_sibling_package_is_not_mistaken_for_ours',
          'should name the sibling package'),
 
-    # find_packages() with no arguments matched `tests` as well, so every wheel
-    # through 2.6.0 installed a top-level tests package into site-packages.
+    # find_packages() with no arguments matches `tests` as well, so the wheel
+    # would install a top-level tests package into site-packages.
     Case('packaging/only-schwaby-is-shipped',
          'setup.py',
          "setuptools.find_packages(include=['schwaby', 'schwaby.*'])",
@@ -6361,10 +6359,10 @@ That is the whole install.''',
          '::test_a_class_calling_the_flow_by_an_alias_runs_it',
          "'CallsAMethodNamedLikeAnAlias'"),
 
-    # The auth tests register tokens 'a' and 'r' in the process-wide
-    # redactor, so a test run after them found its logged line redacted letter
-    # by letter. The file's own order hid it; `-n auto` did not keep that
-    # order. Needs two nodes in sequence -- alone, the test passes either way.
+    # The auth tests register tokens 'a' and 'r' in the process-wide redactor,
+    # so a test run after them finds its logged line redacted letter by letter.
+    # The file's own order hides it, and `-n auto` does not keep that order.
+    # Needs two nodes in sequence -- alone, the test passes either way.
     Case('debug/fresh-redactor-per-test',
          'tests/debug_test.py',
          "    for patcher in (patch.object(schwaby, 'LOG_REDACTOR',\n"
@@ -6404,8 +6402,8 @@ That is the whole install.''',
          'the collection flag was not put back'),
 
     # kill() only sends the signal. Without the join, a login flow started
-    # straight after found the port still held by the server just killed:
-    # 38 of 720 starts on a loaded machine, none with it.
+    # straight after finds the port still held by the server just killed: 38 of
+    # 720 starts on a loaded machine, none with it.
     Case('auth/callback-server-is-waited-for',
          'schwaby/auth.py',
          '            server.join(10)',
@@ -6417,8 +6415,8 @@ That is the whole install.''',
 
 
 # The harness's own guards. A guard here that stops working reports a broken
-# check as PROVEN with nothing to show it. Many below mutated the kept-verdict
-# machinery, deleted since, and are kept as removed.
+# check as PROVEN with nothing to show it. Many below mutate kept-verdict
+# machinery that no longer exists, and are kept as removed.
 HARNESS_CASES = [
     # What a child process reads is recorded nowhere.
     Case('harness/a-started-process-is-never-kept',
@@ -6802,8 +6800,8 @@ TIMING_CASES = [
          'tests/streaming_test.py::StreamClientTest'
          '::test_a_slow_error_handler_holds_up_handle_message',
          'the report is no longer awaited inline'),
-    # The design this replaced: delivering the batched rejection where it is
-    # read, inside the response deadline with the read lock held.
+    # Mutated to the obvious design: delivering the batched rejection where it
+    # is read, inside the response deadline with the read lock held.
     Case('streaming/a-batched-rejection-is-not-reported-inside-the-deadline',
          'schwaby/streaming.py',
          '                                self._read_and_route('
@@ -6831,9 +6829,9 @@ TIMING_CASES = [
 ]
 
 TIMING_CASES.append(
-    # close() returns without waiting on handlers in flight: the guarantee
-    # that replaced the drain. Its test parked the handler on a sleep until
-    # the clock-free rewrite; this is the entry it never had.
+    # close() returns without waiting on handlers in flight: waiting would
+    # hold shutdown for as long as the slowest handler runs, and a handler
+    # that calls close() itself would wait on its own task forever.
     Case('streaming/close-does-not-wait-for-handlers',
          'schwaby/streaming.py',
          '        self._absorbed_kinds.clear()\n\n'
@@ -7070,8 +7068,8 @@ CASES += PIN_CASES
 # The harness's judging, its snapshot and its kept-verdict store. Each
 # breaks one guard, or one of its fixes.
 HARNESS_JUDGING_CASES = [
-    # The expect text appeared in the test source pytest echoes, so a failure
-    # on another assertion read as PROVEN: 150 entries were exposed.
+    # If the expect text appears in the test source pytest echoes, a failure on
+    # another assertion would read as PROVEN.
     Case('harness/expect-is-matched-against-what-failed',
          'tools/redproof.py',
          "        elif line.startswith('E '):\n"
@@ -7177,8 +7175,8 @@ CASES += HARNESS_JUDGING_CASES
 # More of the harness's judging and its store.
 HARNESS_JUDGING_CASES_2 = [
     # A subtest's label qualifies a failure and is never matched on its own:
-    # it is text the test chose, and matching it proved an entry whose test
-    # had no assertion left.
+    # it is text the test chose, and matching it would prove an entry whose
+    # test had no assertion left.
     Case('harness/a-subtest-label-is-never-the-match',
          'tools/redproof.py',
          '    return any(case.expect in said\n',
@@ -7238,7 +7236,8 @@ TOOLS_CASES = [
          '::test_ci_tests_the_pinned_pythons',
          'sets up a Python other than the pinned one'),
     # pyflakes writes some line numbers into its messages ("redefinition of
-    # unused 'os' from line 1"), which made a moved warning a new one.
+    # unused 'os' from line 1"), so unnormalised, a moved warning reads as a
+    # new one.
     Case('light-check/line-numbers-in-a-message-are-not-the-warning',
          'tools/light_check.py',
          "        self.messages.append(re.sub(r'\\bline \\d+', 'line N',\n"
@@ -7248,8 +7247,8 @@ TOOLS_CASES = [
          'tests/light_check_test.py::LightCheckTest'
          '::test_a_warning_that_names_a_line_is_the_same_when_moved',
          'a warning naming a line was blamed'),
-    # A symlink replaced by a file is a type change, T, which the filter
-    # dropped: staged code that skipped both checks.
+    # A symlink replaced by a file is a type change, T, and a filter that drops
+    # it lets staged code skip both checks.
     Case('light-check/a-type-change-is-checked',
          'tools/light_check.py',
          "'-M', '--diff-filter=ACMRT')",
@@ -7655,7 +7654,7 @@ CASES.extend([
          'a read was recorded as a write'),
 ])
 
-# Kept verdicts were deleted: a suite whose whole run takes about a minute and
+# There are no kept verdicts: a suite whose whole run takes about a minute and
 # a half gains nothing from reusing one. Each of these mutated the store, its
 # keys or the gates that decided when a verdict could be kept. Kept, with the
 # reason, as removed cases are.
@@ -7713,7 +7712,7 @@ for _case in CASES:
 del _case
 
 CASES.extend([
-    # The worker pool: a case for each of its branches that had none.
+    # The worker pool, a case per branch.
     Case('harness/an-item-for-a-gone-worker-waits-for-its-replacement',
          'tools/redproof.py',
          '        except OSError:\n            return False\n',
@@ -7867,7 +7866,7 @@ CASES.extend([
 ])
 
 CASES.extend([
-    # More of the worker pool: a case for each of its branches that had none.
+    # More of the worker pool, a case per branch.
     Case('harness/a-stopped-worker-kills-its-own-tests',
          'tools/redproof.py',
          '        for pid in list(_live):\n            kill_group(pid)\n'
@@ -8082,8 +8081,8 @@ CASES.extend([
 ])
 
 CASES.extend([
-    # A fixed callback port made two runs of the suite on one machine fail
-    # each other; nothing in one run can see one coming back.
+    # A fixed callback port would make two runs of the suite on one machine
+    # fail each other, and nothing in one run can see one coming back.
     # The source scan misses a port written a line above the URL that uses
     # it, the shape the two bind-path tests have; the check on the port each
     # flow is given does not.
@@ -8777,8 +8776,9 @@ CASES.extend([
          "'docs/index.rst', "),
 ])
 
-# The login-flow tests' xdist group and the harness's port-group lock were
-# retired once each test took a free callback port of its own.
+# The cases named below mutated the login-flow tests' xdist group and the
+# harness's port-group lock, neither of which exists: each test takes a free
+# callback port of its own.
 _PORT_GROUP_RETIRED = (
     'The xdist group that kept the login-flow tests on one worker, and the '
     "harness's port-group lock, are gone: each of those tests takes a free "

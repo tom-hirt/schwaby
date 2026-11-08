@@ -699,7 +699,7 @@ class RegistrationTest(unittest.TestCase):
     @no_duplicates
     def test_no_bounded_text_leaves_the_head_of_a_secret(self):
         # Each helper that bounds a value for a message cuts it. Cutting
-        # before redacting left the digits before the cut.
+        # before redacting would leave the digits before the cut.
         from schwaby import streaming, utils
         from schwaby.contrib import util as contrib
         number = str(10 ** 7 + uuid.uuid4().int % (9 * 10 ** 7))
@@ -784,8 +784,8 @@ class WebsocketLoggerTest(unittest.TestCase):
 
     @no_duplicates
     def test_websockets_is_given_a_protected_logger(self):
-        # Over the logger websockets uses when given none, so its records come
-        # from where they always did. No filter is put on it: every other
+        # Over the logger websockets uses when given none, so its records still
+        # come from that logger. No filter is put on it: every other
         # client in the process logs there, and the adapter covers the frames.
         logger = _prepare_connect_args({})['logger']
         self.assertIsInstance(logger, _redact.FrameRedactingAdapter)
@@ -795,7 +795,8 @@ class WebsocketLoggerTest(unittest.TestCase):
     @no_duplicates
     def test_configuration_of_websockets_client_still_applies(self):
         # A filter or `disabled` on websockets.client applies to the records
-        # websockets makes, as it did before this library wrapped the logger.
+        # websockets makes, as it would if this library did not wrap the
+        # logger.
         client = logging.getLogger('websockets.client')
         out = self.capture(client)
         drop = logging.Filter()

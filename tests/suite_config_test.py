@@ -175,8 +175,8 @@ class ActionPinsTest(unittest.TestCase):
     '''A workflow that pins an action to a commit names the release beside
     it, and every use of that action agrees on both, so a bump that reaches
     some uses and not others, or moves the commit and not its comment,
-    fails here. Whether the commit is that release is GitHub's to say:
-    RELEASING.md gives the check to run when a pin moves.'''
+    fails here. Whether the commit is that release only GitHub can say, so
+    this test does not check it.'''
 
     def workflows(self):
         root = os.path.join(ROOT, '.github', 'workflows')

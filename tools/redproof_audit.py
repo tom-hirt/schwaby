@@ -74,8 +74,8 @@ _CHANGES = {
 
 def _fd_path(fd):
     '''The path a directory descriptor names: through /proc on Linux, and
-    fcntl's F_GETPATH where there is no /proc (macOS), where a write
-    relative to one went unplaced.'''
+    fcntl's F_GETPATH where there is no /proc (macOS), so a write relative
+    to one is placed there too.'''
     try:
         return os.readlink('/proc/self/fd/%d' % fd)
     except OSError:

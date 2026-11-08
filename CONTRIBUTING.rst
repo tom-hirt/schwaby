@@ -7,7 +7,7 @@ it up? All welcome, and no improvement is too small.
 
 Branch from ``main``, one concern per branch. `RELEASING.md
 <https://github.com/tom-hirt/schwaby/blob/main/RELEASING.md>`__ collects the
-rules this project has learned by getting them wrong, and is worth ten minutes
+project's working rules and the reason for each, and is worth ten minutes
 before a first patch.
 
 ------------------------------
@@ -126,7 +126,7 @@ measures which lines executed, not whether what they produced was correct.
 
 So when you add a test: **revert your fix and watch it fail.** A test that passes
 either way is worse than no test, because it looks like protection. Two things
-that have made that check lie here, both worth knowing:
+can make that check lie, both worth knowing:
 
 - Clear ``__pycache__`` first. CPython invalidates bytecode on modification time
   and size, so a same-second edit can leave a stale ``.pyc`` in place and you

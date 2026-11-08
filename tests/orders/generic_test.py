@@ -251,12 +251,12 @@ class OrderBuilderTest(unittest.TestCase):
 
     @no_duplicates
     def test_the_venue_enum_lands_on_the_field_schwab_enumerates(self):
-        # Until 3.0.0 the Destination enum was applied to destinationLinkName,
-        # which Schwab's schema types as a free string; requestedDestination is
-        # the field whose enumeration is exactly these twelve values. An order
-        # asking for NYSE therefore carried the venue in a field that does not
-        # select one, and nothing rejected it -- the request was well-formed,
-        # so the only symptom was routing you did not choose.
+        # requestedDestination is the field whose enumeration in Schwab's
+        # schema is exactly these twelve values; destinationLinkName is typed
+        # as a free string. An order carrying NYSE in destinationLinkName
+        # names the venue in a field that does not select one, and nothing
+        # rejects it -- the request is well-formed, so the only symptom is
+        # routing you did not choose.
         built = (OrderBuilder()
                  .set_requested_destination(Destination.NYSE)
                  .build())
@@ -269,8 +269,8 @@ class OrderBuilderTest(unittest.TestCase):
     @no_duplicates
     def test_destination_link_name_takes_a_free_string(self):
         # Schwab's schema says `destinationLinkName: string`, with no
-        # enumeration. Validating it against Destination refused every legal
-        # value and accepted only twelve that belong to another field.
+        # enumeration. Validating it against Destination would refuse every
+        # legal value and accept only twelve that belong to another field.
         self.order_builder.set_destination_link_name('anything at all')
         self.assertFalse(has_diff({
             'destinationLinkName': 'anything at all'
@@ -284,9 +284,9 @@ class OrderBuilderTest(unittest.TestCase):
 
     @no_duplicates
     def test_tax_lot_method_success(self):
-        # The enum was exported from schwaby.orders.common from the beginning
-        # and had no setter, so the field could not be sent at all. It matters
-        # on a closing order: FIFO and LIFO realise different gains.
+        # Without a setter the exported enum could not be sent at all. The
+        # field matters on a closing order: FIFO and LIFO realise different
+        # gains.
         self.order_builder.set_tax_lot_method(TaxLotMethod.LIFO)
         self.assertFalse(has_diff({
             'taxLotMethod': 'LIFO'
@@ -305,7 +305,7 @@ class OrderBuilderTest(unittest.TestCase):
     def test_every_tax_lot_method_schwab_lists_is_available(self):
         # Schwab's order schema enumerates these seven. An enum that advertises
         # values the venue rejects, or omits ones it accepts, is the defect
-        # this asserts against -- it has happened here before.
+        # this asserts against.
         self.assertEqual(
                 ['AVERAGE_COST', 'FIFO', 'HIGH_COST', 'LIFO', 'LOSS_HARVESTER',
                  'LOW_COST', 'SPECIFIC_LOT'],
@@ -531,9 +531,9 @@ class OrderBuilderTest(unittest.TestCase):
 
     @no_duplicates
     def test_price_offset_completes_the_price_link_trio(self):
-        # The stop-price side already had basis, type and offset. The
-        # price-linked side had a basis and a type but no offset, so a
-        # price-linked order could not actually be expressed.
+        # Like the stop-price side, the price-linked side needs an offset as
+        # well as a basis and a type; without one a price-linked order cannot
+        # be expressed.
         self.order_builder.set_price_link_basis(PriceLinkBasis.BASE)
         self.order_builder.set_price_link_type(PriceLinkType.VALUE)
         self.order_builder.set_price_offset(1.5)
@@ -954,25 +954,12 @@ class OrderBuilderTest(unittest.TestCase):
 
 
 class QuantityValidationTest(unittest.TestCase):
-    """Two tests that were dead, and wrong, for at least a release.
+    """Quantity validation on a bare builder.
 
-    This class was called `OrderBuilderExamplesTest`, the same name as the one
-    below it, which shadowed it -- so neither of these ran. `no_duplicates`
-    could not see it: it keys on `__qualname__`, and the two qualnames were
-    identical.
-
-    Neither survived being woken up as written. `test_quantity_negative` used
-    `self.order_builder`, which this class's `setUp` never created, so it
-    raised AttributeError rather than exercising anything. And
-    `test_quantity_wrong_type_no_check` asserted that
-    `OrderBuilder(enforce_enums=False).set_quantity('')` builds
-    `{'quantity': ''}` -- measured against the released v4.0.0, that already
-    raised TypeError, so the test documented a contract the library had
-    stopped honouring before anyone renamed the package.
-
-    That is the shape worth keeping: a test can be dead *and* stale, and the
-    duplicate name hid a check that would otherwise have failed during the
-    change it was relevant to.
+    The class name must not repeat another in this module: the second
+    definition would shadow this one and neither of these would run, and
+    `no_duplicates` cannot see that, because it keys on `__qualname__` and the
+    two qualnames would be identical.
     """
 
     def setUp(self):
@@ -986,10 +973,9 @@ class QuantityValidationTest(unittest.TestCase):
 
     @no_duplicates
     def test_enforce_enums_false_does_not_disable_the_numeric_checks(self):
-        # Replaces `test_quantity_wrong_type_no_check`, which asserted the
-        # opposite. `enforce_enums` governs enum arguments; `_assert_finite`
-        # never consulted it, so a builder with enforcement off still refuses
-        # a quantity that is not a number.
+        # `enforce_enums` governs enum arguments; `_assert_finite` does not
+        # consult it, so a builder with enforcement off still refuses a
+        # quantity that is not a number.
         builder = OrderBuilder(enforce_enums=False)
 
         with self.assertRaises(ValueError):
@@ -1494,9 +1480,9 @@ class PricesAreStringsTest(unittest.TestCase):
     @no_duplicates
     def test_copy_price_accepts_a_decimal(self):
         # copy_* skip validation, so a Decimal reaches _build_object raw. It
-        # has no __dict__, so without a branch there it fell through to vars()
-        # and raised `vars() argument must have __dict__ attribute` at build()
-        # time -- far from the call, naming neither field nor type.
+        # has no __dict__, so without a branch there it would fall through to
+        # vars() and raise `vars() argument must have __dict__ attribute` at
+        # build() time -- far from the call, naming neither field nor type.
         for setter, field in (('copy_price', 'price'),
                               ('copy_stop_price', 'stopPrice')):
             builder = OrderBuilder()
@@ -1519,7 +1505,7 @@ class PricesAreStringsTest(unittest.TestCase):
     @no_duplicates
     def test_a_decimal_in_a_numeric_field_is_refused_at_the_setter(self):
         # Refused where the field is still known. Rejecting it at build()
-        # named the value but not which of several numeric fields held it.
+        # would name the value but not which of several numeric fields held it.
         for setter in ('set_quantity', 'set_stop_price_offset',
                        'set_activation_price', 'set_price_offset'):
             builder = OrderBuilder()
@@ -1534,8 +1520,8 @@ class PricesAreStringsTest(unittest.TestCase):
         # branch for it, the object builder falls to its reflection path and
         # raises `vars() argument must have __dict__ attribute`, naming
         # neither the field nor the type. Rendering every Decimal as a string
-        # instead was worse -- Schwab types quantity, stopPriceOffset and
-        # activationPrice as numbers, so they went out as "10" and "0.50".
+        # instead would be worse -- Schwab types quantity, stopPriceOffset and
+        # activationPrice as numbers, so they would go out as "10" and "0.50".
         builder = OrderBuilder()
         builder._quantity = decimal.Decimal('10')
         with self.assertRaises(ValueError) as cm:
@@ -1544,10 +1530,11 @@ class PricesAreStringsTest(unittest.TestCase):
 
     @no_duplicates
     def test_no_setter_lets_a_non_finite_decimal_through(self):
-        # _assert_finite read float(Decimal('sNaN')) raising ValueError as
-        # "not a number at all" and returned, so every numeric setter passed a
-        # signalling NaN to a `<= 0` comparison that raised a bare
-        # decimal.InvalidOperation -- the failure it runs first to prevent.
+        # float(Decimal('sNaN')) raises ValueError. Read as "not a number at
+        # all" and let through, every numeric setter would pass a signalling
+        # NaN to a `<= 0` comparison that raises a bare
+        # decimal.InvalidOperation -- the failure _assert_finite runs first to
+        # prevent.
         for setter in ('set_price', 'set_stop_price', 'set_quantity',
                        'set_activation_price', 'set_stop_price_offset',
                        'set_price_offset'):
@@ -1559,20 +1546,20 @@ class PricesAreStringsTest(unittest.TestCase):
 
     @no_duplicates
     def test_decimal_depth_is_not_policed(self):
-        # A guard on decimal places was tried and removed. Schwab types both
+        # There is no guard on decimal places. Schwab types both
         # price fields number($double), so a long spelling parses to the same
         # double a short one does -- unreadable, not wrong -- and no digit
         # count separates a float's expansion from honest arithmetic: measured
         # over realistic inputs, float-derived values span 0 to 53 places and
-        # string arithmetic spans 1 to 9. Policing depth therefore refused
-        # valid computed limits to prevent a merely long payload.
+        # string arithmetic spans 1 to 9. Policing depth would therefore
+        # refuse valid computed limits to prevent a merely long payload.
         cases = (
             # an ordinary computed limit: a 0.025% offset on a four-place quote
             decimal.Decimal('123.4567') * decimal.Decimal('1.00025'),
             # two four-place factors, which leaves trailing zeros
             decimal.Decimal('100.00') * decimal.Decimal('1.0500')
             * decimal.Decimal('1.0500'),
-            # the float expansion the guard existed to catch
+            # the float expansion such a guard would be for
             decimal.Decimal(0.1),
         )
 
@@ -1586,17 +1573,17 @@ class PricesAreStringsTest(unittest.TestCase):
 
     @no_duplicates
     def test_copy_stop_price_names_its_own_field(self):
-        # Both copy_ setters share a renderer. It hardcoded 'price', so an
-        # order setting both told the caller the wrong one had been rejected.
+        # Both copy_ setters share a renderer. Hardcoding 'price' there would
+        # tell a caller setting both that the wrong one had been rejected.
         with self.assertRaises(ValueError) as cm:
             OrderBuilder().copy_stop_price(decimal.Decimal('NaN'))
         self.assertIn('stop price', str(cm.exception))
 
     @no_duplicates
     def test_the_error_does_not_recommend_a_rounding_conversion(self):
-        # '{:.2f}'.format rounds where the removed conversion truncated, so
-        # recommending it as a drop-in would move prices by a tick. The message
-        # has to say so rather than suggest it bare.
+        # '{:.2f}'.format rounds where truncating the float does not, so
+        # recommending it bare in place of truncation would move prices by a
+        # tick. The message has to say so rather than suggest it bare.
         with self.assertRaises(ValueError) as cm:
             OrderBuilder().set_price(8.2)
         self.assertIn('rounds', str(cm.exception))
@@ -1766,13 +1753,13 @@ class NonNumericOrderFieldTest(unittest.TestCase):
     #    `isinstance(price, numbers.Real)` accepts it -- and it then reaches
     #    `vars()` in `_build_object` and dies there. The predicate has to be
     #    the serializer's, `(int, float)`, not a mathematical one. Without
-    #    this entry the two spellings are indistinguishable and the case went
-    #    GREEN under mutation.
+    #    this entry the two spellings are indistinguishable.
     #  * True is an `int` subclass, so it satisfies `isinstance(price,
     #    (int, float))` -- and `_build_object` passes it through, so
-    #    `set_quantity(True)` built `{"quantity": true}`. The serializer's
-    #    predicate is the right one to copy and this is the single type it
-    #    lets through that Schwab's schema does not call a number.
+    #    `set_quantity(True)` would build `{"quantity": true}`. The
+    #    serializer's predicate is the right one to copy and this is the
+    #    single type it lets through that Schwab's schema does not call a
+    #    number.
     NOT_NUMBERS = (None, [], {}, b'1', object(), fractions.Fraction(3, 2),
                    True, False)
 
@@ -1798,10 +1785,11 @@ class NonNumericOrderFieldTest(unittest.TestCase):
 
     @no_duplicates
     def test_a_string_is_refused_on_a_field_schwab_types_as_a_number(self):
-        # These reached `_assert_finite`'s string branch, which exists for the
-        # price fields and returns quietly for anything it cannot parse. The
-        # offsets have no comparison after the call, so `set_price_offset('abc')`
-        # built `{"priceOffset": "abc"}` and sent it.
+        # Without a refusal these would reach `_assert_finite`'s string
+        # branch, which exists for the price fields and returns quietly for
+        # anything it cannot parse. The offsets have no comparison after the
+        # call, so `set_price_offset('abc')` would build
+        # `{"priceOffset": "abc"}` and send it.
         for setter in self.SETTERS:
             for value in self.NOT_NUMBERS_BUT_STRINGS:
                 with self.subTest(setter=setter, value=value):
@@ -1813,7 +1801,7 @@ class NonNumericOrderFieldTest(unittest.TestCase):
 
     @no_duplicates
     def test_the_price_fields_still_take_a_string(self):
-        # The other half of the same change, and the reason `_assert_finite`
+        # The other half of the string rule, and the reason `_assert_finite`
         # takes a flag rather than deciding from the value: a price field is a
         # string in Schwab's schema and a numeric field is not.
         builder = OrderBuilder()
@@ -1824,9 +1812,9 @@ class NonNumericOrderFieldTest(unittest.TestCase):
 
     @no_duplicates
     def test_the_offsets_do_not_silently_accept_one(self):
-        # Separate from the assertion above because these two are the ones
-        # that raised nothing at all: the failure was an order that built
-        # cleanly with the field missing, not an exception of the wrong type.
+        # Separate from the assertion above because these two would raise
+        # nothing at all: the failure would be an order that builds cleanly
+        # with the field missing, not an exception of the wrong type.
         for setter in ('set_stop_price_offset', 'set_price_offset'):
             with self.subTest(setter=setter):
                 builder = OrderBuilder()
@@ -1878,8 +1866,9 @@ class NonNumericOrderFieldTest(unittest.TestCase):
         # `__add_order_leg` calls the same validator, so this reaches every
         # template in the package -- which is the most-used entry point here
         # and the place existing callers are most likely to break.
-        # `equity_buy_market('AAPL', '10')` built `{"quantity": "10"}` and
-        # sent a string where Schwab's schema says number.
+        # Unrefused, `equity_buy_market('AAPL', '10')` would build
+        # `{"quantity": "10"}` and send a string where Schwab's schema says
+        # number.
         from schwaby.orders.equities import (
                 equity_buy_market, equity_sell_limit)
 
@@ -1896,8 +1885,8 @@ class NonNumericOrderFieldTest(unittest.TestCase):
     @no_duplicates
     def test_the_prebuilt_templates_still_take_a_number(self):
         # The control. Everything above passes against a template that refuses
-        # every quantity, and the price stays a string -- that half is
-        # unchanged and is the reason the two kinds of field are told apart.
+        # every quantity, and the price stays a string -- which is the reason
+        # the two kinds of field are told apart.
         from schwaby.orders.equities import equity_sell_limit
 
         built = equity_sell_limit('AAPL', 10, '25.50').build()
@@ -1917,11 +1906,10 @@ class AcceptedTypesTableTest(unittest.TestCase):
     takes a string or a Decimal, a numeric field takes an int or a float --
     which is exactly the shape a single sentence gets wrong.
 
-    The validator names the walk below matches are themselves sized against
-    what existed when it was written. `set_cancel_time` validates through
-    `_cancel_time_string`, so it was invisible here and absent from the table
-    while this test asserted the table omits nothing. A fourth validator will
-    need adding to that set too.
+    The walk below matches a fixed set of validator names, so a setter that
+    validates through one not in that set is invisible here, and can be
+    absent from the table while this test asserts the table omits nothing. A
+    new validator has to be added to that set.
     """
 
     @staticmethod
@@ -2022,7 +2010,7 @@ class AcceptedTypesTableTest(unittest.TestCase):
         self.assertEqual('no', documented['set_quantity']['str'])
         self.assertEqual('yes', documented['set_quantity']['float'])
 
-        # And bool is refused by every one of them -- True was accepted as a
-        # quantity through 4.0.0 and became a silent one-share order.
+        # And bool is refused by every one of them -- accepted as a quantity,
+        # True would be a silent one-share order.
         for setter in self.validated_setters():
             self.assertEqual('no', documented[setter]['bool'], setter)

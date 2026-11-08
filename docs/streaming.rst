@@ -334,8 +334,9 @@ a discriminator. ``UnparsableMessage`` carries the frame as it arrived, text or 
 ``UnusableMessage`` reports the containing frame as ``message``, which is
 non-``None`` in every case but a top-level JSON ``null``. Test
 ``isinstance(exception, UnusableMessage)`` before anything else if you branch
-on the kind. Registering none keeps the
-existing behaviour exactly, and the log line is written either way.
+on the kind. Registering none is fine: each
+failure is handled as this page describes, and the log line is written either
+way.
 
 **A frame whose JSON will not decode is the one failure this client does not
 absorb.** It is reported to your handler as ``UnparsableMessage`` and *also*
@@ -427,7 +428,7 @@ knowing:
 
 * **Keep it quick.** It runs on the path that found the failure, so a handler
   that blocks holds up ``handle_message`` — exactly as a slow synchronous
-  handler always has. If you need to do something slow, hand off to a task of
+  stream handler does. If you need to do something slow, hand off to a task of
   your own and return.
 * An error handler may itself call ``close()`` or ``logout()``. Tearing the
   stream down is a reasonable reaction to a failure, and it is safe however many
@@ -560,12 +561,11 @@ Stream Statuses
 ---------------
 
 Schwab's streaming functionality is closely modelled on that of the former
-TDAmeritrade API, and this module was adapted from an implementation written
+TDAmeritrade API, and this module is adapted from an implementation written
 against it.
 
-As a result, some streams may have been carried over which don't actually work.
-Some never worked at all, and were implemented only because now-defunct
-documentation referred to them.
+As a result, some streams here may not actually work. Some are known only from
+documentation that no longer exists.
 
 Which of them still work is not documented anywhere, so it is worked out by
 trying them. If you find one that behaves differently from what is described
@@ -1356,8 +1356,8 @@ to an instrument means joining on the order id --- and a symbol lookup there
 returns nothing rather than raising. The last three come from a small sample
 on a single account.
 
-The symbol findings above come from equity captures. Option orders have been
-captured since --- see :ref:`price changes <account_activity_price_change>` ---
+The symbol findings above come from equity captures. Option orders have also
+been captured --- see :ref:`price changes <account_activity_price_change>` ---
 but what these keys hold on one has not been observed.
 
 **Order statuses that end an order** are exported as
@@ -1564,8 +1564,8 @@ the sibling frame.
 **Numbers are** ``{"lo": "<mantissa>", "signScale": N}``, **and an odd**
 ``signScale`` **means the value is negative.**
 
-**This library ships one**, because every consumer was writing it and the
-first attempt is reliably wrong in at least one of the ways below:
+**This library ships one**, because every consumer needs it and a first
+attempt is reliably wrong in at least one of the ways below:
 
 .. code-block:: python
 
@@ -1648,7 +1648,7 @@ it refuses costs that field; decoded in one ``try``, it costs the message:
 float for the reason :ref:`price_strings` gives. A value decoded into a binary
 float cannot be fed back into a reprice without going through the conversion
 this library exists to avoid, and accumulating one over a day's principal
-reintroduces exactly the error class that made limit prices a cent low. The
+reintroduces exactly the error class that sends a limit price a cent low. The
 value is built from a string, sign included, because **every operation** on a
 ``Decimal`` applies the caller's context --- only construction, and the
 ``copy_`` methods such as ``copy_abs()``, do not: a consumer who sets

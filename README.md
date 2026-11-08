@@ -293,10 +293,6 @@ particular reason to prioritise — the
 guarantees under [Why use it](#why-use-it) above, most of which needed changes to
 existing behaviour rather than additions on top of it.
 
-Those changes were offered upstream first. They were not taken up, so rather than run
-an ever-growing private patch set against someone else's release schedule, they were
-consolidated here and this became its own project with its own release line.
-
 ## License
 
 `schwaby` is released under the [MIT license](LICENSE).

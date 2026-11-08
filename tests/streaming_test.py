@@ -345,10 +345,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         # dict belongs to the caller, who may well be holding one and reusing
         # it across logins -- it must not come back with our key in it.
         #
-        # This guards the invariant rather than any particular change to it:
-        # the version this replaced also copied, just at the top of the
-        # function instead of the bottom. It is here because the copy is easy
-        # to drop while rearranging, and nothing else would notice.
+        # This guards the invariant rather than where the copy is made. It is
+        # here because the copy is easy to drop while rearranging, and
+        # nothing else would notice.
         self.client = StreamClient(self.http_client, ssl_context='ssl_context')
 
         self.http_client.get_user_preferences.return_value = MockResponse(
@@ -6677,8 +6676,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         # server and this client disagreeing about what was asked, not a late
         # answer to something abandoned. It must fail the request rather than
         # be set aside as an orphan, which is what `<` rather than `<=`
-        # decides. Nothing else in this file uses that one value: loosening
-        # the comparison left every other test in the suite passing.
+        # decides. Nothing else in this file uses that one value, so
+        # loosening the comparison would leave every other test passing.
         socket = await self.login_and_get_socket(ws_connect)
         self.client._response_timeout = 0.5
 
@@ -6848,8 +6847,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     ###########################################################################
     # Private member _service_op
     #
-    # Note: https://developer.schwabmeritrade.com/content/streaming-data#_Toc504640564
-    # parameters are optional and in the case of UNSUBS commands,
+    # Note: parameters are optional and in the case of UNSUBS commands,
     # fields should not be required since unsubscribing from a service
     # will return no data on the service or symbol
 
@@ -6908,8 +6906,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     async def test_service_op_sends_no_fields_for_sub_without_field_type(self, ws_connect):
         """
         There's no service's sub/add commands without field_type defined but this tests for fields=None behavior if field_type=None
-        Warning: Sub commands seems to fail if there's no fields parameters,
-        (observed on the older tda-api implementation this was adapted from)
+        Warning: Sub commands are assumed to fail without a fields parameter.
 
         The streaming client will properly throw UnexpectedResponse
         """
@@ -6937,8 +6934,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     async def test_service_op_sends_no_fields_for_sub_with_fields(self, ws_connect):
         """
         There's no service's sub/add commands without field_type defined but this tests for fields=None behavior if field_type=None
-        Warning: Sub commands seems to fail if there's no fields parameters,
-        (observed on the older tda-api implementation this was adapted from)
+        Warning: Sub commands are assumed to fail without a fields parameter.
 
         The streaming client will properly throw UnexpectedResponse
         """
@@ -7363,8 +7359,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
             self, ws_connect):
         # _validate_response reads element 0 only, because that is the answer
         # to the outstanding request. A frame carrying a second response hands
-        # it to the waiter unexamined, so a rejection sitting there went
-        # unmentioned by anything.
+        # it to the waiter unexamined, so without this a rejection sitting
+        # there would go unmentioned by anything.
         #
         # Logged where it is found. The report is queued for handle_message,
         # because this runs holding the read lock, on the request path the
@@ -7441,10 +7437,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
             self, ws_connect):
         # The reason the extra-response report is queued rather than delivered
         # where it is found. That runs inside the response deadline and holding
-        # the read lock, so calling a user handler there let a slow one cancel
-        # the wait -- and the subscription came back as ResponseTimeoutError
-        # even though element 0 was code 0 and the future had already been
-        # resolved.
+        # the read lock, so calling a user handler there would let a slow one
+        # cancel the wait -- and the subscription would come back as
+        # ResponseTimeoutError even though element 0 was code 0 and the
+        # future had already been resolved.
         #
         # The handler is slow only where the hazard is: called with a lock
         # held, it never returns, so the response deadline is what ends it.
@@ -7669,7 +7665,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
             self, ws_connect):
         # A code is whatever the venue sent. Judged by membership in a set it
         # would raise TypeError and end the receive loop; it must be reported
-        # as a rejection instead, as `!= 0` always did.
+        # as a rejection instead.
         socket = await self.login_and_get_socket(ws_connect)
         socket.recv.side_effect = [
             json.dumps({'response': [self._late_response('9999', [26])]})]
@@ -7747,7 +7743,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_a_handler_may_resubscribe_from_a_queued_report(
             self, ws_connect):
-        # The hazard that made this a queue rather than an inline call. Where
+        # The reason this is a queue rather than an inline call. Where
         # the rejection is found, the read lock is held and on the request path
         # the request lock too, so a handler which subscribed would block on a
         # lock its own caller holds. The drain runs with both released.
@@ -7993,8 +7989,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         # The drain is in a finally. The caller's exception is element 0's
         # rejection and says nothing about element 1, and a failed subscribe is
         # usually followed by tearing the client down rather than reading it
-        # again -- so draining only on success dropped the batched rejection
-        # exactly when nothing else would report it.
+        # again -- so draining only on success would drop the batched
+        # rejection exactly when nothing else would report it.
         socket = await self.login_and_get_socket(ws_connect)
 
         errors = []
@@ -8106,8 +8102,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         # Both shapes, because they are stopped by different guards. A bare
         # string is caught by the element check; a mapping whose `content` is
         # null gets past that one and is caught by the content check. Testing
-        # only the first left the second unexercised, and a mutation removing
-        # it kept this test green.
+        # only the first would leave the second unexercised, and a mutation
+        # removing it would keep this test green.
         payloads = ('not a dict at all',
                     {'service': 'ACCT_ACTIVITY', 'command': 'SUBS',
                      'requestid': '77', 'content': None},
@@ -8281,17 +8277,16 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_both_framings_survive_a_malformed_element(self, ws_connect):
         # The contract is that a late rejection behaves the same whether Schwab
-        # sends it alone or batched. Two loops parsing the same JSON drift: one
-        # was hardened and the other was not, so an identical payload was
-        # skipped with a warning in one framing and ended the caller's receive
-        # loop with an AttributeError in the other.
+        # sends it alone or batched. Two loops parsing the same JSON can
+        # drift: if one is hardened and the other is not, an identical payload
+        # is skipped with a warning in one framing and ends the caller's
+        # receive loop with an AttributeError in the other.
         #
-        # The element chosen matters. {'content': None} would not do: it
-        # does not raise -- `or {}` turns it into a code of None and it is
-        # skipped as neither a rejection nor a success.
-        # So the except clause it meant to exercise never ran, and reporting
-        # malformed elements instead of skipping them left the test green. A
-        # bare string raises on .get, which is the path that matters.
+        # The element chosen matters. {'content': None} would not do: content
+        # that is not a mapping is normalised to {}, so it yields a code of
+        # None and never reaches the element check. A bare string fails
+        # `_is_mapping` and is absorbed, which is the path both framings must
+        # share.
         raises = 'not a dict at all'
         rejection = {'service': 'ACCT_ACTIVITY', 'command': 'SUBS',
                      'requestid': '99',
@@ -8304,7 +8299,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
                     if isinstance(exc, schwaby.streaming.UnexpectedResponseCode)]
 
         def absorbed(pairs):
-            # exc.message, not the handler's `message`: the latter is now the
+            # exc.message, not the handler's `message`: the latter is the
             # containing frame, which differs between the two framings by
             # construction.
             return [exc.message for exc, _, _ in pairs
@@ -8378,12 +8373,12 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_a_malformed_frame_does_not_fail_an_in_flight_request(
             self, ws_connect):
-        # The version of the above that matters, and the one the first attempt
-        # missed. _read_and_route reads element 0's requestid before anything
-        # reaches the parser, so with a request outstanding a malformed frame
-        # raised there instead -- taking out the in-flight request through
-        # _fail_pending_request and ending the receive loop, while the same
-        # frame with nothing pending was logged and harmless.
+        # The version of the above that matters. _read_and_route reads element
+        # 0's requestid before anything reaches the parser, so with a request
+        # outstanding an unguarded read would raise there instead -- taking
+        # out the in-flight request through _fail_pending_request and ending
+        # the receive loop, while the same frame with nothing pending is
+        # logged and harmless.
         socket = await self.login_and_get_socket(ws_connect)
 
         for broken in ({'not': 'a list'}, [], [{'no': 'requestid'}],
@@ -8406,10 +8401,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_a_frame_read_during_the_socket_swap_is_discarded(
             self, ws_connect):
-        # The clears run after the new socket is in place. Clearing first left
-        # a hole: a concurrent reader on the old socket appends to
+        # The clears run after the new socket is in place. Clearing first
+        # would leave a hole: a concurrent reader on the old socket appends to
         # _overflow_items while this coroutine is suspended in close() or
-        # connect(), and that frame survived into the new session.
+        # connect(), and that frame would survive into the new session.
         first = await self.login_and_get_socket(ws_connect)
 
         handled = []
@@ -8434,11 +8429,11 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_a_malformed_answer_fails_only_its_own_request(
             self, ws_connect):
-        # The sibling of the requestid guard. _validate_response read four more
-        # fields straight after it, unguarded, and a KeyError there reached
-        # _fail_pending_request -- which sets it on the future AND re-raises,
-        # so one unreadable field failed the request with a bare KeyError and
-        # ended the caller's receive loop too.
+        # The sibling of the requestid guard. _validate_response reads four
+        # more fields straight after it. Unguarded, a KeyError there would
+        # reach _fail_pending_request -- which sets it on the future AND
+        # re-raises, so one unreadable field would fail the request with a
+        # bare KeyError and end the caller's receive loop too.
         socket = await self.login_and_get_socket(ws_connect)
 
         for missing in ('service', 'command', 'content'):
@@ -8493,9 +8488,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     async def test_a_malformed_data_element_does_not_end_the_receive_loop(
             self, ws_connect):
         # d.get('service') is evaluated at the call site, outside the try in
-        # _dispatch_to_handlers, so a non-dict element ended the receive loop
-        # with an AttributeError -- on the highest-volume channel. The response
-        # path was hardened first and this one, three lines below it, was not.
+        # _dispatch_to_handlers, so unguarded, a non-dict element would end
+        # the receive loop with an AttributeError -- on the highest-volume
+        # channel.
         socket = await self.login_and_get_socket(ws_connect)
 
         handled = []
@@ -8540,10 +8535,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_a_frame_which_is_not_an_object_is_ignored(self, ws_connect):
-        # A regression the channel hardening introduced and this pins shut.
         # `'data' in msg` tolerates any container; `msg.get('data')` does not,
-        # so a top-level JSON array or string went from being ignored to
-        # raising AttributeError out of the receive loop.
+        # so without the mapping check a top-level JSON array or string would
+        # raise AttributeError out of the receive loop.
         socket = await self.login_and_get_socket(ws_connect)
 
         handled = []
@@ -8568,9 +8562,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_a_service_which_is_not_a_name_is_ignored(self, ws_connect):
         # The handler lookup is evaluated in the `for` header, outside the
-        # per-handler try, so an unhashable service raised TypeError out of the
-        # receive loop. The element type was guarded; the field inside it was
-        # not.
+        # per-handler try, so unguarded, an unhashable service would raise
+        # TypeError out of the receive loop. Guarding the element type does
+        # not guard the field inside it.
         socket = await self.login_and_get_socket(ws_connect)
 
         handled = []
@@ -8595,8 +8589,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_a_null_frame_is_logged_like_any_other(self, ws_connect):
-        # A top-level JSON null was indistinguishable from the sentinel meaning
-        # "this was routed to its waiter", so it was dropped without the
+        # A top-level JSON null must not be mistaken for the sentinel meaning
+        # "this was routed to its waiter", or it would be dropped without the
         # warning every other unusable frame gets.
         socket = await self.login_and_get_socket(ws_connect)
 
@@ -8655,8 +8649,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @no_duplicates
     def test_an_absorbed_cause_whose_type_cannot_be_named_is_reported(self):
         # The line names the cause's type, and `type(x).__name__` consults the
-        # metaclass first. Raising there escaped `handle_message`, ending the
-        # receive loop with nothing logged and nothing reported.
+        # metaclass first. Raising there would escape `handle_message`, ending
+        # the receive loop with nothing logged and nothing reported.
         class Meta(type):
             @property
             def __name__(cls):
@@ -8673,9 +8667,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     def test_absorbed_warnings_do_not_flood(self):
-        # Before this, a systematically malformed high-volume channel logged
-        # one line per element per tick, forever -- a log-volume incident on
-        # top of the data outage.
+        # Without coalescing, a systematically malformed high-volume channel
+        # would log one line per element per tick, forever -- a log-volume
+        # incident on top of the data outage.
         records = []
 
         class Capture(logging.Handler):
@@ -8702,7 +8696,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
             self, ws_connect):
         # set_json_decoder is a public hook which promises only "the decoded
         # JSON". A decoder returning a Mapping which is not a dict, or tuples
-        # for arrays, worked before the type guards were added and must still.
+        # for arrays, must get past the type guards.
         import collections
 
         socket = await self.login_and_get_socket(ws_connect)
@@ -8731,10 +8725,11 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_a_mismatched_request_id_is_named_as_such(self, ws_connect):
-        # Reading all five fields first meant a frame with an id this client
-        # never issued AND a missing field was reported as "malformed response
+        # Reading all five fields first would report a frame with an id this
+        # client never issued AND a missing field as "malformed response
         # frame: KeyError: 'service'". The id mismatch is the more diagnostic
-        # fact and was hidden behind whichever field happened to be absent.
+        # fact and would be hidden behind whichever field happened to be
+        # absent.
         socket = await self.login_and_get_socket(ws_connect)
 
         frame = self.success_response(
@@ -8752,10 +8747,11 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     def test_a_flood_of_one_kind_does_not_silence_another(self):
-        # One shared counter meant a framing change on a few hundred symbols
-        # drove the count past a thousand within two ticks, after which a
-        # different fault was neither logged nor reported -- so an operator
-        # investigating the first outage saw no trace of the second.
+        # With one shared counter, a framing change on a few hundred symbols
+        # would drive the count past a thousand within two ticks, after which
+        # a different fault would be neither logged nor reported -- so an
+        # operator investigating the first outage would see no trace of the
+        # second.
         records = []
 
         class Capture(logging.Handler):
@@ -8815,10 +8811,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     def test_set_json_decoder_refuses_something_that_is_not_one(self):
-        # The refusal itself, which nothing exercised -- only the accepting
-        # path had a test. The check exists because the alternative is an
-        # AttributeError from deep inside the read loop the first time a frame
-        # arrives, long after the mistake was made.
+        # The refusal itself, not only the accepting path. The check exists
+        # because the alternative is an AttributeError from deep inside the
+        # read loop the first time a frame arrives, long after the mistake
+        # was made.
         # Install a real one first, so the assertion after the loop is about
         # the refusal leaving it alone rather than about the default.
         class Decoder(streaming.StreamJsonDecoder):
@@ -8920,8 +8916,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         # A tuple is the realistic custom-decoder case and must work. A
         # generator is not: routing indexes element 0, validation reads it
         # again and handlers are given the frame afterwards, so a single-pass
-        # iterable cannot serve however tolerant the iteration is -- it was
-        # accepted for one release and made every subscribe time out.
+        # iterable cannot serve however tolerant the iteration is. Accepted,
+        # it would make every subscribe time out.
         self.client._pending_reports.clear()
         self.client._log_extra_responses({'response': (
             {'service': 'X', 'command': 'SUBS', 'content': {'code': 0}},
@@ -8954,9 +8950,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     async def test_a_relabel_failure_is_absorbed_not_blamed_on_handlers(
             self, ws_connect):
         # Relabeling is this library's work. Reporting its failure as "your
-        # handler raised" blamed the consumer's code for a shape the venue
-        # sent, and did it once per registered handler -- uncounted, so a
-        # framing change flooded at one report per element per handler per tick.
+        # handler raised" would blame the caller's code for a shape the venue
+        # sent, once per registered handler -- uncounted, so a framing change
+        # would flood at one report per element per handler per tick.
         socket = await self.login_and_get_socket(ws_connect)
 
         errors = []
@@ -8984,8 +8980,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_an_unusable_message_is_not_mistaken_for_a_close_failure(
             self, ws_connect):
-        # docs/streaming.rst designates (service=None, message=None) as the
-        # logout-close signature, and a caller branches on exactly that. A
+        # (service=None, message=None) is the documented logout-close
+        # signature, and a caller branches on exactly that. A
         # null channel must not produce the same pair.
         socket = await self.login_and_get_socket(ws_connect)
 
@@ -9058,7 +9054,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     async def test_a_service_name_that_raises_does_not_end_the_loop(
             self, ws_connect):
         # The report is built inside an except block, so a __str__ that
-        # raised there escaped handle_message.
+        # raised there would escape handle_message.
         class RaisingName(str):
             def __str__(self):
                 raise RuntimeError('no')
@@ -9131,8 +9127,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     def test_an_unusable_message_carries_its_counts_as_numbers(self):
-        # The docs position the running count as the mitigation for suppressed
-        # reports. A consumer alerting on drop volume should not have to parse
+        # The running count is the documented mitigation for suppressed
+        # reports. A caller alerting on drop volume should not have to parse
         # it out of prose.
         self.client._pending_reports.clear()
 
@@ -9148,8 +9144,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_an_unusable_request_id_is_absorbed_not_only_logged(
             self, ws_connect):
-        # The one unusable-message path that bypassed _absorb: uncounted,
-        # uncoalesced, and with no programmatic signal at all -- while
+        # Outside _absorb, an unusable request id would be uncounted,
+        # uncoalesced, and give no programmatic signal at all -- while
         # repeating per re-read inside a single subscribe.
         socket = await self.login_and_get_socket(ws_connect)
 
@@ -9215,9 +9211,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_an_unparsable_frame_is_quoted_and_cut_in_its_message(
             self, ws_connect):
-        # The frame is whatever arrived. A line break in it forged a line in
-        # anything that printed the exception, and all of it went into the
-        # text however long it was.
+        # The frame is whatever arrived. Quoted as it came, a line break in it
+        # would forge a line in anything that printed the exception, and all
+        # of it would go into the text however long it was.
         socket = await self.login_and_get_socket(ws_connect)
 
         raw = 'not json\nCRITICAL forged' + 'A' * 100000
@@ -9236,9 +9232,11 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     async def test_a_frame_json_cannot_read_at_all_is_unparsable(
             self, ws_connect):
         # A binary frame that is not UTF-8 raises UnicodeDecodeError, one
-        # that is bytes but not JSON failed while its message was built, and
-        # one nested past the interpreter's depth raises RecursionError. None
-        # of them was UnparsableMessage, so each ended the loop unreported.
+        # that is bytes but not JSON raises JSONDecodeError and has to be
+        # quoted rather than concatenated onto text, which would raise
+        # TypeError, and one nested past the interpreter's depth raises
+        # RecursionError. Each must reach the caller as UnparsableMessage,
+        # reported, rather than end the loop.
         socket = await self.login_and_get_socket(ws_connect)
         errors = []
         self.client.add_error_handler(
@@ -9312,10 +9310,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
             self, ws_connect):
         # handle_message hands the same exception to the waiting request
         # through _fail_pending_request before reporting it, so both readers
-        # see one object for one bad frame. Reporting from both -- which is
-        # what fixing the missing-report bug first produced -- turned "fires or
-        # does not" into "fires once or twice", and both reports carry an
-        # identical triple a consumer cannot tell from two distinct frames.
+        # see one object for one bad frame. Reporting from both would turn
+        # "fires or does not" into "fires once or twice", and both reports
+        # would carry an identical triple a caller cannot tell from two
+        # distinct frames.
         socket = await self.login_and_get_socket(ws_connect)
 
         errors = []
@@ -9356,11 +9354,11 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_an_unparsable_frame_reports_from_the_request_path_too(
             self, ws_connect):
-        # Two coroutines can be holding the read lock when a frame arrives, and
-        # v2.5.0 reported from only one of them. Which one reads any given
-        # frame is a lock race the caller cannot see, so a callback wired on
-        # one path and not the other fires or does not fire for reasons nothing
-        # in the API explains.
+        # Either of two coroutines can be holding the read lock when a frame
+        # arrives, so both must report. Which one reads any given frame is a
+        # lock race the caller cannot see, so a callback wired on one path
+        # and not the other would fire or not fire for reasons nothing in the
+        # API explains.
         socket = await self.login_and_get_socket(ws_connect)
 
         errors = []
@@ -9474,9 +9472,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_a_null_channel_is_absorbed_not_dropped(self, ws_connect):
-        # {"data": null} is a malformed channel, and was the one shape
-        # indistinguishable from a frame carrying no data at all -- so it was
-        # dropped without a word while {"data": 5} was reported.
+        # {"data": null} is a malformed channel, and the one shape easily
+        # mistaken for a frame carrying no data at all -- treated that way, it
+        # would be dropped without a word while {"data": 5} is reported.
         socket = await self.login_and_get_socket(ws_connect)
 
         errors = []
@@ -9634,10 +9632,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_registering_no_error_handler_changes_nothing(
             self, ws_connect):
-        # The behaviour without a callback is the behaviour before it existed:
-        # the handler was called, it raised, the failure was absorbed, and the
-        # stream is still usable. Asserting the handler list is empty would be
-        # true whether or not any of that held.
+        # Without a callback, the handler is called, it raises, the failure
+        # is absorbed, and the stream is still usable. Asserting the handler
+        # list is empty would be true whether or not any of that held.
         handler = Mock(side_effect=ValueError('handler blew up'))
         await self.subscribe_and_deliver(ws_connect, handler)
 
@@ -9695,8 +9692,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     def test_the_new_shape_report_keeps_its_own_promises(self):
         """Its dedup, cap, truncation and kind discriminator, each pinned.
 
-        Every one of those is stated in its own log line or in the changelog
-        -- "reported once, not per message", bounded, per kind.
+        Every one of those is a promise the report makes -- "reported once,
+        not per message", bounded, per kind.
         """
 
         # Once, not per message.
@@ -9735,8 +9732,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     async def test_a_channel_name_that_cannot_be_named_does_not_escape(
             self, ws_connect):
         # A top-level frame key is whatever the decoder produced, and
-        # `StreamJsonDecoder` is a public extension point -- the same
-        # argument that made `relabel_message` handle a non-string key.
+        # `StreamJsonDecoder` is a public extension point -- the same reason
+        # `relabel_message` handles a non-string key.
         # `str()` of a wide integer raises past the digit limit.
         socket = await self.login_and_get_socket(ws_connect)
         delivered = []
@@ -9779,17 +9776,19 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         self.assertEqual(1, len(delivered))
         self.assertEqual(1, self.client._absorbed)
         # And the debug line says what arrived. The redaction filter catches
-        # a line that cannot be formatted, so a failure here no longer
-        # escapes either way; without the fallback, the line would name the
+        # a line that cannot be formatted, so a failure here does not
+        # escape either way; without the fallback, the line would name the
         # lazy wrapper instead of the frame.
         self.assertIn('Receive', out.getvalue())
         self.assertNotIn('LazyLog object', out.getvalue())
 
     @no_duplicates
     def test_a_venue_name_reaches_the_log_quoted(self):
-        # `%r`, like `_absorb` ten lines away. With `%s` a newline in a
-        # service name forged a second line indistinguishable from a real
-        # WARNING from this logger, and an empty name rendered as nothing.
+        # `%r`, for the reason `_absorb` goes through `_safe_value`. With `%s`
+        # a newline in a
+        # service name would forge a second line indistinguishable from a
+        # real WARNING from this logger, and an empty name would render as
+        # nothing.
         forged = 'EVIL\nWARNING:schwaby.streaming:Schwab sent a service: FAKE'
         with self.assertLogs(streaming.get_logger(), level='WARNING') as got:
             self.client._report_new_shape('service', forged)
@@ -9801,10 +9800,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     def test_a_service_name_that_cannot_be_named_does_not_escape(self):
-        # The service path called bare `str()` while the channel path went
-        # through `_safe_name` -- three lines apart, one guarded. A decoder
-        # producing such a service escaped `handle_message` entirely, ending
-        # the receive loop and losing the good element in the same frame.
+        # The service path goes through `_safe_name`, as the channel path
+        # does. With a bare `str()` there, a decoder producing such a service
+        # would escape `handle_message` entirely, ending the receive loop and
+        # losing the good element in the same frame.
         class Unnameable:
             def __str__(self):
                 raise RuntimeError('no name for you')
@@ -9825,7 +9824,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
             self, ws_connect):
         # The end-to-end half, which the direct call above cannot show: the
         # loop survives and the good element in the same frame still reaches
-        # its handler. Its channel sibling asserted this; this one did not.
+        # its handler.
         socket = await self.login_and_get_socket(ws_connect)
         delivered = []
         self.client.add_level_one_equity_handler(delivered.append)
@@ -9856,10 +9855,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_venue_text_cannot_forge_a_response_log_line(
             self, ws_connect):
-        # Reachable with ordinary JSON, no custom decoder: a newline in a
-        # `service` on the orphan-response path went to the log through `%s`,
-        # forging a second line that reads as a real WARNING from this
-        # logger. `_absorb` a few lines away already used `%r`.
+        # Reachable with ordinary JSON, no custom decoder: logged bare, a
+        # newline in a `service` on the orphan-response path would forge a
+        # second line that reads as a real WARNING from this logger. It goes
+        # through `_safe_value`, as `_absorb`'s offender does.
         socket = await self.login_and_get_socket(ws_connect)
         forged = 'OK\nWARNING:schwaby.streaming:Schwab rejected your order'
         socket.recv.side_effect = [json.dumps({'response': [{
@@ -9874,10 +9873,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_a_response_value_that_cannot_be_formatted_is_survivable(
             self, ws_connect):
-        # A subscribe Schwab *accepted* raised a bare ValueError out of the
-        # message built for the late rejection beside it -- not a
-        # SchwabError, not absorbed, reported to no handler, from a request
-        # that had already succeeded.
+        # Unguarded, a subscribe Schwab *accepted* would raise a bare
+        # ValueError out of the message built for the late rejection beside
+        # it -- not a SchwabError, not absorbed, reported to no handler, from
+        # a request that had already succeeded.
         socket = await self.login_and_get_socket(ws_connect)
 
         class Decoder(streaming.StreamJsonDecoder):
@@ -9898,7 +9897,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     def test_the_field_cap_says_so_rather_than_going_quiet(self):
         # Going quiet at a cap is indistinguishable from nothing new
         # arriving, which is the one reading an operator must not be left to
-        # make. The shapes cap said so; the fields cap did not.
+        # make, so the fields cap says so, as the shapes cap does.
         streaming._reported_fields.clear()
         fields = streaming.StreamClient.LevelOneEquityFields
         raw = {'key': 'F'}
@@ -9913,8 +9912,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @no_duplicates
     def test_fields_and_shapes_do_not_share_a_budget(self):
         # 254 declared field ids across 14 tables against 64 slots. Sharing
-        # one budget let the lesser event consume it and leave a dropped
-        # service unnamed -- the defect `_report_new_shape` exists to close.
+        # one budget would let the lesser event consume it and leave a
+        # dropped service unnamed -- the defect `_report_new_shape` exists to
+        # close.
         streaming._reported_fields.clear()
         fields = streaming.StreamClient.LevelOneEquityFields
         raw = {'key': 'F'}
@@ -9925,8 +9925,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         self.assertEqual(streaming._MAX_REPORTED_FIELDS,
                          len(streaming._reported_fields))
         # Saturated on one side, untouched on the other. Guaranteed by
-        # construction once the shapes set moved into `__init__`, so it is
-        # kept as a statement of intent and the real guard is below: a shape
+        # construction, since the shapes set is created in `__init__`, so
+        # this is a statement of intent and the real guard is below: a shape
         # still reports with the field budget full.
         self.assertEqual(set(), self.client._reported_shapes)
         with self.assertLogs(streaming.get_logger(), level='WARNING'):
@@ -9943,13 +9943,13 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         Its counter is keyed on a fixed `what` string -- deliberately, so a
         value the venue chooses cannot grow the dict -- which means every
         unknown service shares one counter and the first-three-then-powers-
-        of-ten rule applies across names. Measured before this: five new
-        services on one connection and the fourth was never named, in no log
-        line and no callback, over a thousand frames.
+        of-ten rule applies across names. Left at that, five new services on
+        one connection would leave the fourth never named, in no log line and
+        no callback, over a thousand frames.
 
-        That was the wrong way round. A dropped service is a worse event than
-        an unnamed field, and the field path already guarantees a line per
-        distinct id.
+        A dropped service is a worse event than an unnamed field, and the
+        field path guarantees a line per distinct id, so each service is
+        named on its first sighting too.
         """
         streaming._reported_fields.clear()
         socket = await self.login_and_get_socket(ws_connect)
@@ -10047,8 +10047,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
             with self.subTest(channel=name):
                 self.assertIn(name, blob)
         # And through the callback. Without this the channel half of `force`
-        # is unproven: its red-proof mutation also kills the log line, so it
-        # reds on the log assertions above and reads as covering both.
+        # is unproven: a mutation of it also kills the log line, so it fails
+        # on the log assertions above and would read as covering both.
         await self.client._drain_pending_reports()
         self.assertEqual(set(names), set(reported))
         streaming._reported_fields.clear()
@@ -10060,10 +10060,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
             self, ws_connect):
         """The guarantee lives where the callback lives.
 
-        Held module-wide, the report deduped across every client in the
+        Held module-wide, the report would dedupe across every client in the
         process -- so a second client, with its own error handler that had
-        never heard anything, was told about three of five new services and
-        never about the other two. `_reported_fields` stays module-wide,
+        never heard anything, would be told about three of five new services
+        and never about the other two. `_reported_fields` is module-wide,
         because that report is log-only and the log is process-wide.
         """
         names = ['SVC_%s' % c for c in 'ABCDE']
@@ -10095,16 +10095,15 @@ class StreamClientTest(IsolatedAsyncioTestCase):
             self, ws_connect):
         """`json.loads` maps `1e999` and `Infinity` to `float('inf')`.
 
-        `int(inf)` raises `OverflowError`, which was in neither guard tuple,
-        so an ordinary JSON number literal ended the receive loop and killed
-        the in-flight request with a bare non-SchwabError, reported nowhere.
-        `NaN` takes the same route and raises `ValueError`, which is why one
-        of the two non-finite spellings was covered and this read as
-        complete.
+        `int(inf)` raises `OverflowError`. Missing from the guard tuple, it
+        would let an ordinary JSON number literal end the receive loop and
+        kill the in-flight request with a bare non-SchwabError, reported
+        nowhere. `NaN` takes the same route but raises `ValueError`, which the
+        tuple catches anyway, so a test of `NaN` alone passes without
+        `OverflowError` in the tuple.
 
-        This is the framing dependence `_read_and_route`'s own comment says
-        it exists to remove: with nothing pending the same frame was logged
-        and harmless.
+        With nothing pending the same frame is logged and harmless, and the
+        outcome must not depend on framing.
         """
         bad = ('{"response":[{"requestid":%s,'
                '"service":"LEVELONE_EQUITIES","command":"SUBS",'
@@ -10120,9 +10119,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
                 # are two counters and only one goes into `requestid`:
                 # `_request_id` is the request's, `request_number` is the
                 # receive counter behind the debug lines. Reading the wrong
-                # one made the "good" frame a mismatched id, so every case
-                # passed down the id-mismatch path instead of the one it
-                # names -- red under mutation either way, and testing
+                # one would make the "good" frame a mismatched id, so every
+                # case would pass down the id-mismatch path instead of the
+                # one it names -- red under mutation either way, and testing
                 # something else.
                 good = ('{"response":[{"requestid":"%d",'
                         '"service":"LEVELONE_EQUITIES","command":"SUBS",'
@@ -10165,7 +10164,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         # The routing-path half. A frame whose element 0 accepts the request
         # and whose element 1 is a late rejection carrying a value that
         # cannot be formatted: the subscribe has already succeeded, and the
-        # message built for the rejection beside it raised at the caller.
+        # message built for the rejection beside it must not raise at the
+        # caller.
         socket = await self.login_and_get_socket(ws_connect)
 
         class Decoder(streaming.StreamJsonDecoder):
@@ -10204,9 +10204,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     async def test_an_absorbed_offender_does_not_lose_its_own_log_line(
             self, ws_connect):
         # `_absorb`'s line is the complete record and the callback is the
-        # convenience, so losing the line whole is the wrong way round. It
-        # used `%r` on a venue-controlled offender, which logging swallows
-        # when it raises -- the record dropped, the callback still firing.
+        # convenience, so losing the line whole is the wrong way round. `%r`
+        # on a venue-controlled offender can raise, which logging swallows
+        # -- the record would be dropped with the callback still firing.
         socket = await self.login_and_get_socket(ws_connect)
 
         class Decoder(streaming.StreamJsonDecoder):
@@ -10224,15 +10224,14 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_a_mapping_that_cannot_be_enumerated_still_dispatches(
             self, ws_connect):
-        """`_is_mapping` is structural on purpose; the channel check was not.
+        """`_is_mapping` is structural, so the channel check must tolerate a
+        mapping it cannot enumerate.
 
-        Its docstring says the test is `get` + `__contains__` and nothing
-        about iteration, *because* "a lightweight mapping-like object worked
-        before the type checks were added and would have had every frame
-        dropped afterwards". `set(msg)` requires iteration. So a channel
-        check that iterates ended the receive loop with a
-        non-SchwabError on shapes 4.2.0 handled, through a documented public
-        extension point.
+        The test is `get` + `__contains__` and nothing about iteration, so
+        a lightweight mapping-like object from a custom decoder is accepted.
+        `set(msg)` requires iteration. So a channel check that iterates
+        would end the receive loop with a non-SchwabError on such a shape,
+        through a documented public extension point.
         """
         payload = {'data': [{'service': 'LEVELONE_EQUITIES',
                              'command': 'SUBS',
@@ -10284,10 +10283,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     def test_every_validate_response_message_is_bounded_and_quoted(self):
-        # Four venue-controlled formats in one function. One was swept and
-        # the three above it were not -- a `service` of 100,000 characters
-        # made a 100,000-character exception where the line twenty rows
-        # below caps at 200, and a newline in one reached whatever the
+        # Four venue-controlled formats in one function, each bounded and
+        # quoted. Unbounded, a `service` of 100,000 characters would make a
+        # 100,000-character exception where the line twenty rows below caps
+        # at 200, and unquoted, a newline in one would reach whatever the
         # caller logs unescaped.
         for field, frame in (
                 # An int, not a digit string: `mismatched_id` is what
@@ -10472,8 +10471,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
 class LevelOneOptionStrikeFieldTest(IsolatedAsyncioTestCase):
     """Field 20 of LEVELONE_OPTIONS is documented by Schwab as "Strike Price".
-    It was named STRIKE_TYPE, which is a different thing, so messages were
-    relabeled with a name that described neither the field nor its contents."""
+    STRIKE_TYPE is a different thing, and would relabel messages with a name
+    that described neither the field nor its contents."""
 
     @no_duplicates
     def test_field_twenty_is_the_strike_price(self):
@@ -10483,9 +10482,9 @@ class LevelOneOptionStrikeFieldTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     def test_the_old_spelling_is_gone(self):
-        # STRIKE_TYPE was kept as an alias through the rename. Code still
-        # naming it now fails at the point of use rather than silently reading
-        # a field whose label no longer matches what it asked for.
+        # STRIKE_TYPE is not an alias. Code naming it fails at the point of
+        # use rather than silently reading a field whose label does not match
+        # what it asked for.
         fields = streaming.StreamClient.LevelOneOptionFields
         with self.assertRaises(AttributeError):
             fields.STRIKE_TYPE
@@ -10494,8 +10493,8 @@ class LevelOneOptionStrikeFieldTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     def test_an_alias_does_not_decide_the_label(self):
-        # key_mapping used to iterate __members__, which yields aliases too, so
-        # whichever alias came last would have named the field.
+        # key_mapping iterates the enum rather than __members__, which yields
+        # aliases too, so that whichever alias came last cannot name the field.
         fields = streaming.StreamClient.LevelOneOptionFields
         self.assertNotIn('STRIKE_TYPE', fields.key_mapping().values())
 
@@ -10504,8 +10503,8 @@ class AccountActivityMessageTypeTest(IsolatedAsyncioTestCase):
     """ACCT_ACTIVITY types outside the observed vocabulary are named once.
 
     Schwab documents the MESSAGE_TYPE vocabulary nowhere, and only fourteen
-    types have been captured. A message of any other type is still delivered; what
-    is new is that it no longer passes silently.
+    types have been captured. A message of any other type is still delivered,
+    and is reported rather than passing silently.
     """
 
     fields = streaming.StreamClient.AccountActivityFields
@@ -10664,9 +10663,9 @@ class AccountActivityMessageTypeTest(IsolatedAsyncioTestCase):
     @no_duplicates
     def test_folding_keeps_distinct_types_distinct_and_bounded(self):
         # Folding can lengthen a name: 'ß' becomes 'ss'. Cutting again after
-        # folding made two different types share one report, so the name is
-        # cut once, before folding, and what is kept is bounded by folding's
-        # own limit of three characters for one.
+        # folding would make two different types share one report, so the
+        # name is cut once, before folding, and what is kept is bounded by
+        # folding's own limit of three characters for one.
         with self.assertLogs(streaming.get_logger(), level='WARNING') as got:
             self.relabel('\u00df' * 33 + 'A')
             self.relabel('\u00df' * 33 + 'B')
@@ -10678,7 +10677,7 @@ class AccountActivityMessageTypeTest(IsolatedAsyncioTestCase):
     def test_a_str_formatted_for_a_log_line_is_plain_and_bounded(self):
         # `_safe_str` formats an exception beside its type name. `str()` of a
         # KeyError is the repr of its key, and a decoder's key object can hand
-        # back itself -- whose own `__len__` then ran, measured ending the
+        # back itself. Unguarded, its own `__len__` would run next, ending the
         # receive loop and losing a valid quote in the same frame.
         class Key(str):
             def __repr__(self):
@@ -10694,7 +10693,8 @@ class AccountActivityMessageTypeTest(IsolatedAsyncioTestCase):
     @no_duplicates
     def test_a_type_name_that_is_a_str_subclass_is_read_as_plain_text(self):
         # A class's `__name__` can be set to a str subclass, and the
-        # descriptor hands it back as it is; its own `__len__` ran next.
+        # descriptor hands it back as it is; unguarded, its own `__len__`
+        # would run next.
         class Name(str):
             def __len__(self):
                 raise RuntimeError('boom')
@@ -10754,7 +10754,7 @@ class AccountActivityMessageTypeTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     def test_an_unnameable_type_does_not_escape_a_name(self):
-        # The fallback that names an unprintable value read
+        # The fallback that names an unprintable value must not read
         # `type(x).__name__`, which consults the metaclass first.
         class Meta(type):
             @property
@@ -10770,9 +10770,9 @@ class AccountActivityMessageTypeTest(IsolatedAsyncioTestCase):
     @no_duplicates
     def test_a_value_formatted_for_a_log_line_is_plain_and_bounded(self):
         # `_safe_value` reprs a whole frame when one is absorbed. A decoder's
-        # str subclass whose `__repr__` returns itself kept its own `__len__`:
-        # raising ended the receive loop with nothing logged, and returning 0
-        # logged the whole frame.
+        # str subclass whose `__repr__` returns itself keeps its own
+        # `__len__`: unguarded, raising would end the receive loop with
+        # nothing logged, and returning 0 would log the whole frame.
         class Frame(str):
             def __repr__(self):
                 return self
@@ -10796,9 +10796,10 @@ class AccountActivityMessageTypeTest(IsolatedAsyncioTestCase):
     @no_duplicates
     async def test_a_str_subclass_type_is_still_delivered(self):
         # A custom decoder can hand over a str subclass, and `str()` returns
-        # one untouched when its `__str__` returns itself. Its own `casefold`
-        # then ran unguarded -- raising absorbed the whole element, valid
-        # items with it -- and its own `__len__` passed the length bound.
+        # one untouched when its `__str__` returns itself. Unguarded, its own
+        # `casefold` would run -- raising would absorb the whole element,
+        # valid items with it -- and its own `__len__` would pass the length
+        # bound.
         class Type(str):
             def __str__(self):
                 return self
@@ -10887,12 +10888,12 @@ class AccountActivityMessageTypeTest(IsolatedAsyncioTestCase):
 
 
 class UnknownStreamFieldTest(IsolatedAsyncioTestCase):
-    """A field Schwab adds reaches a handler. Nobody was told it exists.
+    """A field Schwab adds reaches a handler, and is reported once.
 
-    The delivering half is deliberate and predates this: an id the field
-    table does not have is left on the message verbatim while every known
-    field still relabels, so a schema addition does not break a consumer.
-    What was missing is any way to learn it happened.
+    The delivering half is deliberate: an id the field table does not have
+    is left on the message verbatim while every known field still relabels,
+    so a schema addition does not break a caller. The report is how anyone
+    learns it happened.
     """
 
     def setUp(self):
@@ -11032,8 +11033,8 @@ class KnownServiceSetTest(IsolatedAsyncioTestCase):
         registered = set(re.findall(r"_handlers\['([A-Z_0-9]+)'\]", source))
 
         # Non-empty, or two typos in a regex would make this pass by matching
-        # nothing at all. A floor rather than the exact count: pinning 13 made
-        # *correctly* adding a service fail, with a message pointing at
+        # nothing at all. A floor rather than the exact count: pinning it would
+        # make *correctly* adding a service fail, with a message pointing at
         # nothing wrong, which is a check that punishes the thing it exists to
         # support.
         self.assertGreater(len(subscribed), 10)

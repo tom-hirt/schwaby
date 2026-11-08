@@ -5,8 +5,8 @@ long-running one wants: a queue between the socket and your processing, so a
 slow consumer drops old data rather than stalling the reader, and an error
 handler so a feed that quietly stops looks different from a quiet market.
 
-Run it with a token file you already have --- see the getting started guide for
-how to create one.
+Run it with a token file you already have. `schwaby.auth.easy_client` creates
+one.
 """
 
 import asyncio
@@ -70,8 +70,10 @@ class StreamConsumer:
 
     async def handle_error(self, service, exception, message):
         # Note the order: service first. And do not treat service and message
-        # both being None as a signature meaning anything -- see
-        # add_error_handler's documentation for why.
+        # both being None as a signature meaning anything. It is not a
+        # contract, and a kind of failure added later with nothing to say
+        # would arrive the same way, so tell them apart by the exception's
+        # type.
         print('stream error on %r: %r' % (service, exception))
 
     async def handle_queue(self):

@@ -192,7 +192,8 @@ class JudgeTest(unittest.TestCase):
 
     def test_a_subtest_label_is_never_the_match(self):
         # The test's own subtest keyword, and a failure that is a crash, not
-        # the assertion: this was PROVEN with every assertion deleted.
+        # the assertion: matching the label would call this PROVEN with every
+        # assertion deleted.
         crashed = '\n'.join([
             self.section('T.test_x (protocol=0)',
                          'E   RecursionError: maximum recursion depth exceeded'),
@@ -847,7 +848,7 @@ print('dies-after', sorted(got), flush=True)
     def test_a_dead_worker_is_reported_and_its_tests_killed(self):
         lines = self.run_script()
         # Whatever the script started is killed however the test ends: an
-        # assertion failing first left them running for two minutes.
+        # assertion failing first would leave them running for two minutes.
         for name in ('orphan', 'stopped-orphan', 'busy-group', 'wedged-group',
                      'late-group', 'own-group', 'reaped-group', 'slow-group',
                      'wedged2-group', 'late2-group'):
@@ -952,7 +953,7 @@ print('dies-after', sorted(got), flush=True)
 
     def test_an_entry_judged_without_running_has_no_split(self):
         # A worker is forked with whatever the parent's first baseline left
-        # in the timing, and printed it for an entry that never ran.
+        # in the timing, and would print it for an entry that never ran.
         import threading
         from unittest import mock
         run = types.SimpleNamespace(

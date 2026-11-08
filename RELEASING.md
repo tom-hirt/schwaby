@@ -52,8 +52,9 @@ or defines a test pytest would run), such as `utils.py` or a data file, can
 reach every test, so then it runs every entry.
 
 **Check the mutation actually applied.** A `sed` expression spanning two lines
-matches nothing, and a restore within the same second reuses stale bytecode
-(CPython invalidates on mtime and size). Both have produced a false green here.
+matches nothing, so the mutant never runs and the test stays green. A restore
+within the same second can reuse the mutant's bytecode (CPython invalidates on
+mtime and size), so a passing test looks failed.
 Clear `__pycache__`, and confirm the file changed before believing the result.
 
 **The suite mocks the network.** It proves the library builds the request it
@@ -63,33 +64,34 @@ assertion should say so and give the date.
 
 **Never send a price as a binary float.** `set_price` and `set_stop_price` take a
 string or a `decimal.Decimal` and refuse a float, because scaling one and
-truncating sent a price a tick low.
+truncating can send a price a tick low.
 
 **When fixing a defect class, grep for the shape rather than the instance.**
-`truncate_float` was fixed to truncate in decimal rather than binary. The
-identical defect — `int(float(value) * 1000)` — sat untouched in
-`OptionSymbol.build()` for another release and mis-encoded 590 of the 100,000
-cent-granular strikes between `$0.01` and `$1000.00`, naming a different contract
-on the order-placement path. Nobody looked, because the first fix felt complete.
-The same shape recurred in 3.0.0: a fix removed one empty package from the wheel
-and stopped, while `find_packages()` was also shipping `tests/`.
+The same mistake is usually written in more than one place, and fixing the one
+that was reported feels complete while the others go on shipping. A float
+scaled and truncated in one helper, such as `int(float(value) * 1000)`, is
+likely scaled and truncated somewhere else too --- and in an option symbol, a
+mis-encoded strike names a different contract. A packaging mechanism that
+ships one directory it should not may be shipping others: ask what else
+`find_packages()` matches.
+Search for the expression or the mechanism, not for the function in the report.
 
-**Ask what the bug was covering for.** Several times now a correctness fix has
-exposed something worse the defect had been masking. Truncating prices hid that a
-`Decimal` built from a float renders its 57-character binary expansion. Migrating
-to `httpx2` for correct types flipped the exception hierarchy under any retry
+**Ask what the bug was covering for.** A correctness fix can expose something
+worse that the defect had been masking. Truncating a price hides that a
+`Decimal` built from a float renders its 57-character binary expansion. Moving
+to `httpx2` for correct types changes the exception hierarchy under any retry
 code catching `httpx` exceptions. The question belongs in the fix, not the postmortem.
 
 **An assertion about an empty result needs a positive control.**
 `assertEqual([], offenders)` holds when the guard works *and* when the input
 never reached it. Prove the collection found something, in the same test.
 
-**A statement is made where it lands, not where you stand.** This has cost twice
-now: a diff range measured as `vPREV..HEAD` and asserted about `vPREV..vNEXT`,
-and a patch written against the unreleased version and applied to the released
-one, where `str(None)` quietly became the string `"None"`. Both
-were true where they were written. Before sending or committing a claim, ask
-which version, which range, and which machine it will be read on.
+**A statement is made where it lands, not where you stand.** A claim true where
+it was written can be false where it is read: a diff range measured as
+`vPREV..HEAD` says nothing about `vPREV..vNEXT`, and a patch written against an
+unreleased version can behave differently applied to the released one. Before
+sending or committing a claim, ask which version, which range, and which
+machine it will be read on.
 
 **A claim nothing checks will drift, silently.** A README, a changelog preamble
 or a docstring asserting something no test covers goes stale without a symptom.
@@ -105,25 +107,25 @@ that each pass can still fail together. It costs four seconds.
 ## Dependencies
 
 `.github/dependabot.yml` watches the GitHub Actions used by the workflows and
-opens a pull request when one goes stale. They had drifted five major versions
-behind before anyone noticed, and the only symptom was a deprecation warning
-inside a job annotation nobody reads.
+opens a pull request when one goes stale. Without it they drift major versions
+behind, and the only symptom is a deprecation warning inside a job annotation
+nobody reads.
 
 **A `dependabot.yml` in the repository is not the mechanism, only half of it.**
-In this repository Dependabot did nothing until the dependency graph was
-switched on in its own settings; until then the file said it watched the CI
-actions while they fell majors behind, and the only symptom was a deprecation
-annotation. Same shape as every other guard here that looks present and does
-nothing: check that the thing has run, not that the config exists.
+Dependabot opened nothing here while the dependency graph was switched off in
+the repository's settings; in that state the file says it watches the CI
+actions while they fall majors behind, and the only symptom is a deprecation
+annotation. As with any guard that can look present and do nothing, check that
+the thing has run, not that the config exists.
 
 **Dependabot offers one action per pull request, and two of these only work
 in pairs.** `upload-artifact` and `download-artifact` are versioned separately
 and their majors are offset by one from v5 onward, because download took a
 breaking change upload did not. The versions that go together are the ones
-released on the same day --- upload v7 with download v8. Dependabot opened a
-pull request bumping upload to v7 and none for download, which would have left
-`publish.yml` handing an artifact between mismatched majors on the one path
-that only runs during a release. Merge both or neither, and prove the pair
+released on the same day --- upload v7 with download v8. Dependabot can open a
+pull request bumping one and none for the other, which leaves `publish.yml`
+handing an artifact between mismatched majors on the one path that only runs
+during a release. Merge both or neither, and prove the pair
 round-trips a file before believing it.
 
 **An action pinned to a commit names its release beside the pin, and a
@@ -140,8 +142,10 @@ the verification below — not a bot's pull request merged on a quiet afternoon.
 
 **There are no optional dependencies and there should not be any.** `dev` is the
 only extra. An extra that everybody has to install is a hard dependency with a
-way to get it wrong, and `pip freeze` silently drops extras — which is what
-turned the 2.3.0 `login` split from a saving into three late failure modes.
+way to get it wrong. `pip freeze` writes `schwaby==X.Y.Z` without its extras,
+so a requirements line taken from it installs the library without the extra's
+packages, and the environment looks complete until code needing them first
+runs.
 
 ## Cutting a release
 
@@ -152,7 +156,7 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
    renamed**, minor for added surface or changed behaviour, patch for fixes
    alone.
 
-   Since 2.6.0 this is on PyPI, so `schwaby` or `schwaby>=2.6` in a requirements
+   This is on PyPI, so `schwaby` or `schwaby>=2.6` in a requirements
    file resolves to whatever is newest and upgrades into a breaking release by
    accident. A changelog banner does not reach someone who never opens one, so
    the version number has to carry it.
@@ -167,18 +171,14 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
 
    The first should be empty. Prose naming a version is worse than a pin,
    because it will not match a pin grep and the release may land under a
-   different number than the one written. That is not hypothetical: "Since
-   3.0.1 `import schwab` warns" was once written into `README.md` and
-   `docs/getting-started.rst`, and this step, which then looked only for
-   pins, could not catch it.
+   different number than the one written.
 
-   `tests/` is in the walk because a test docstring named the release before
-   the tag existed --- "4.1.0 made this raise", written while the number was
-   still a proposal. It is prose about a version like any other, and the
-   original walk covered only the three published paths.
+   `tests/` is in the walk because a test docstring can name a release before
+   its tag exists, while the number is still a proposal. It is prose about a
+   version like any other.
 
    Hence the second grep, and note what it is *not*: an allowlist of lead-ins
-   like `Since|As of|New in` catches the sentence that was found and misses
+   like `Since|As of|New in` catches some phrasings and misses
    `3.0.1 added a warning`, `starting with 3.0.1`, `from v3.0.1 onward`. A
    check justified by a class of problem has to match the shape --- any
    version-looking number --- not the phrasings already seen. It will have
@@ -209,8 +209,7 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
    PKG = 'schwaby/'
    # A pathspec that matches nothing returns an empty list, which reads as
    # "no library file changed" -- so a wrong path passes this check for any
-   # release at all. 4.0.0 renamed the package and left this pointing at
-   # `schwab/`; assert the path before trusting its silence.
+   # release at all. Assert the path before trusting its silence.
    assert pathlib.Path(PKG).is_dir(), PKG + ' is not the package directory'
    changed = subprocess.run(['git', 'diff', '--name-only', PREV + '..HEAD',
                              '--', PKG],
@@ -234,10 +233,10 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
    EOF
    ```
 
-   A text diff cannot answer this. 3.0.3 changed 139 lines across six files,
-   including 66 in `client/base.py` and 41 in `streaming.py`, and a careful
-   reader looking at that diff would reasonably go hunting for a behaviour
-   change that is not there. Comparing the parsed trees with docstrings
+   A text diff cannot answer this. A docstring change can touch a hundred
+   lines across several files of the package, and a careful reader looking at
+   that diff would reasonably go hunting for a behaviour change that is not
+   there. Comparing the parsed trees with docstrings
    stripped separates prose from behaviour, and leaves `version.py` as the
    only executable difference --- which is the safest shape a bump can have.
 
@@ -255,10 +254,10 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
    python -m sphinx -W docs/ /tmp/docs-build
    ```
 
-   **`twine check`'s output must be read, not glanced at.** It once reported a
-   failure that was missed in truncated output, which would have published a
-   release with no description. Note it is a much weaker gate for a markdown
-   README than it was for reStructuredText: measured, it rejects only an empty or
+   **`twine check`'s output must be read, not glanced at.** A failure is easy
+   to miss in truncated output, and a missed one publishes a release with no
+   description. Note it is a much weaker gate for a markdown
+   README than for reStructuredText: measured, it rejects only an empty or
    whitespace-only document. `tests/packaging_test.py::LongDescriptionTest`
    asserts the real property, and `readme_renderer[md]` must be installed or the
    check silently passes having rendered nothing.
@@ -284,8 +283,8 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
    it there.
 
 7. Commit, then `git tag -a vX.Y.Z`. Write the message from a file — backticks in
-   `git tag -m` are executed as command substitution, which silently swallowed a
-   word from the v2.5.0 tag.
+   `git tag -m` are executed as command substitution, which silently swallows
+   words from the message.
 
 8. `git push origin main && git push origin vX.Y.Z`
 
@@ -332,8 +331,9 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
 
 10. **If you move a tag, say so — a normal `git fetch` will not follow it.**
 
-   Deleting and re-creating a pushed tag is sometimes right; v3.0.0 was re-cut
-   before publishing to fold in a documentation change. But git will not move a
+   Deleting and re-creating a pushed tag is sometimes right, for instance to
+   fold a late documentation change into a release before it is published. But
+   git will not move a
    tag ref a client already holds, and says nothing while declining to. So
    anyone who fetched the old one keeps it silently, and the check most likely
    to care — does this artifact match the tag I audited — is exactly the one
@@ -359,26 +359,23 @@ turned the 2.3.0 `login` split from a saving into three late failure modes.
 
 ## The distribution name and the import name
 
-Both are `schwaby`, as of 4.0.0. `pip install schwaby` then `import schwaby`,
-and there is nothing further to explain to a reader.
+Both are `schwaby`. `pip install schwaby` then `import schwaby`, and there is
+nothing further to explain to a reader.
 
-They used to differ: the distribution was renamed to `schwaby` at 2.6.0 and the
-package stayed `schwab`, so that moving over meant changing one line of
-`requirements.txt` and nothing else. The cost was that `schwaby` and `schwab-py`
-both provided a directory called `schwab`, so whichever pip installed second
-silently overwrote the other's files --- no warning, no failure at install time,
-and a version banner that named whichever project had won. 3.0.1 shipped an
-import-time check for it, which could itself be overwritten by the collision it
-detected, and 3.0.2 withdrew that. 4.0.0 renamed the package instead.
+Keep them that way. An import name another distribution also ships is a
+directory both write to: whichever pip installs second silently overwrites the
+other's files --- no warning, no failure at install time, and a version banner
+naming whichever project won. An import-time check cannot guard against that,
+because the collision can overwrite the check along with everything else.
 
-So: the two install side by side now, and **the install documentation must not
-tell anyone to uninstall `schwab-py` first.** It was correct through 3.0.3 and
-is wrong from 4.0.0 --- an instruction to uninstall the package that owns
-`schwab/` will strand anyone who still imports it.
+`schwaby` and `schwab-py` install side by side, so **the install documentation
+must not tell anyone to uninstall `schwab-py` first.** `schwab-py` owns
+`schwab/`, and an instruction to uninstall it will strand anyone who still
+imports it.
 
 `tests/packaging_test.py::…test_the_distribution_and_the_package_have_the_same_name`
-holds the names together. If a future release wants them to diverge again, that
-test is the thing to argue with first.
+holds the names together. If a release wants them to diverge, that test is the
+thing to argue with first.
 
 A git install works for testing an unreleased commit:
 

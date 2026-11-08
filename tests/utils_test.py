@@ -5,8 +5,8 @@ class PicklableResponse:
     '''Stands in for a response where the test really pickles.
 
     MagicMock is not picklable, so a round-trip test built on one can only ever
-    call copy() -- which is in-process, and therefore not the thing the fix is
-    about. Module level so pickle can find it by name.
+    call copy() -- which is in-process, and therefore crosses no process
+    boundary. Module level so pickle can find it by name.
     '''
 
     def __init__(self, marker='response'):
@@ -35,7 +35,7 @@ import unittest
 
 
 class HTTPStatusErrorTest(unittest.TestCase):
-    """The name a consumer catches must be the class a real call raises.
+    """The name a caller catches must be the class a real call raises.
 
     `httpx2` shares no exception hierarchy with `httpx`, so a handler written
     against the wrong package does not match and says nothing. The alias only
@@ -138,10 +138,10 @@ class HTTPStatusErrorTest(unittest.TestCase):
     def test_a_refresh_response_that_is_not_a_token_is_not_stored(self):
         # authlib takes any JSON object without an `error` key as the new
         # token, and keeps JSON that is not an object before failing on it.
-        # {"message": "Unauthorized"} was written to the token file, and a
-        # list or a string was kept in memory; either way every call after it
-        # failed without contacting Schwab. Now none is stored: the call
-        # raises, and the next one refreshes again and recovers once the
+        # Stored, {"message": "Unauthorized"} would be written to the token
+        # file, and a list or a string kept in memory; either way every call
+        # after it would fail without contacting Schwab. None is stored: the
+        # call raises, and the next one refreshes again and recovers once the
         # endpoint does. Each body is sent at a success as well as at a
         # refusal: a token is kept only from a success, so at a refusal a
         # body wrongly judged usable is refused anyway, and only the success
@@ -182,7 +182,7 @@ class HTTPStatusErrorTest(unittest.TestCase):
     def test_a_server_error_with_a_json_body_is_still_a_server_error(self):
         # The pre-parse check leaves a 5xx to authlib whatever its body. The
         # empty 503 above passes through the not-JSON branch anyway, so it
-        # proved nothing about this one.
+        # proves nothing about this one.
         client, requests = self._refreshing_client(
                 lambda request: self._json_response(
                     503, {'message': 'Service Unavailable'}, request))
@@ -192,9 +192,9 @@ class HTTPStatusErrorTest(unittest.TestCase):
 
     @no_duplicates
     def test_a_login_does_not_store_a_token_that_is_not_usable(self):
-        # The token a login exchanges its code for was written unchecked:
-        # {"message": "Unauthorized"} became the token file, and every call
-        # after it failed without contacting Schwab.
+        # The token a login exchanges its code for is checked too. Written
+        # unchecked, {"message": "Unauthorized"} would become the token file,
+        # and every call after it would fail without contacting Schwab.
         import httpx2
         from unittest.mock import patch
         from authlib.integrations.base_client.errors import OAuthError
@@ -229,7 +229,7 @@ class HTTPStatusErrorTest(unittest.TestCase):
     def test_a_stored_token_that_cannot_be_sent_needs_a_new_login(self):
         # authlib raises UnsupportedTokenTypeError locally, before any
         # request, when the stored token has no access token of a type it can
-        # send -- a token file damaged before refreshes were checked, say.
+        # send -- a token file holding a refusal body, say.
         # Without a refresh token retrying never helps, so it says to log in.
         # With one, the token has no expiry authlib acts on, so it is
         # refreshed first, and a refresh that works replaces it. Schwab's own
@@ -295,9 +295,10 @@ class HTTPStatusErrorTest(unittest.TestCase):
 
     @no_duplicates
     def test_a_client_from_a_login_does_not_store_a_bad_refresh_response(self):
-        # The check was first added where token files and access functions
-        # build their session, and a client returned by a login built its
-        # own, so it went on storing whatever the token endpoint returned.
+        # A client returned by a login builds its own session, not the one
+        # token files and access functions build, so the check has to reach
+        # that session too, or it would store whatever the token endpoint
+        # returned.
         import httpx2
         from unittest.mock import patch
         from authlib.integrations.httpx_client import OAuth2Client
@@ -332,8 +333,8 @@ class HTTPStatusErrorTest(unittest.TestCase):
     @no_duplicates
     def test_a_refusal_without_a_json_body_is_a_token_refresh_error(self):
         # authlib changed what this raised at 1.9 -- json.JSONDecodeError
-        # before, HTTPStatusError after -- so the class callers were told to
-        # catch depended on which authlib a fresh install resolved. Refused
+        # before, HTTPStatusError after -- so left alone, the class callers
+        # catch would depend on which authlib a fresh install resolved. Refused
         # here instead, so it is TokenRefreshError under either; this test
         # runs against whichever authlib is installed, and CI installs fresh.
         import httpx2
@@ -613,11 +614,10 @@ class EnumEnforcerTest(unittest.TestCase):
 
 
 class ConvertEnumIterableTest(unittest.TestCase):
-    """`convert_enum_iterable`, which had no test for the rejecting branch.
+    """`convert_enum_iterable`, both ways.
 
-    `convert_enum` next to it was covered both ways. This one was covered only
-    where every element was already the right enum, so the arm that refuses a
-    wrong element -- the reason `enforce_enums` exists -- was never taken.
+    A test where every element is already the right enum never takes the arm
+    that refuses a wrong element, which is the reason `enforce_enums` exists.
     """
 
     class TestClass(EnumEnforcer):
@@ -662,10 +662,10 @@ class ConvertEnumIterableTest(unittest.TestCase):
     @no_duplicates
     def test_a_string_matching_no_member_gets_no_did_you_mean(self):
         # `type_error` only offers a suggestion when the string appears in
-        # some member's full name. Every existing test passed a string that
-        # did, so the branch where nothing matches -- which is the common case
-        # for a genuine typo -- was never taken, and a broken suggestion
-        # builder would have gone unnoticed for exactly those callers.
+        # some member's full name. A string that appears in one never takes
+        # the branch where nothing matches -- which is the common case for a
+        # genuine typo -- so without this a broken suggestion builder would
+        # go unnoticed for exactly those callers.
         t = self.TestClass(enforce_enums=True)
         with self.assertRaises(ValueError) as ctx:
             t.convert(['nothing_like_a_member_name'])
@@ -699,7 +699,7 @@ class DescribeErrorTest(unittest.TestCase):
     useful exception with a useless one -- so it yields no suffix rather than
     an error of its own. `[1,2,3]`, `"a string"` and `null` are all valid JSON
     and all raise AttributeError on `.get`, which is the shape the guard is
-    for and which nothing sent it.
+    for.
     """
 
     @no_duplicates
@@ -719,10 +719,8 @@ class DescribeErrorTest(unittest.TestCase):
 
 
 class SetAccountHashTest(unittest.TestCase):
-    """`Utils.set_account_hash`, which no test called.
-
-    Public, documented on the util page with `automethod`, and reached by
-    nothing -- so whether it takes effect on the next call was unverified.
+    """`Utils.set_account_hash`, which is public and documented: the hash it
+    sets is the one the next call uses.
     """
 
     @no_duplicates
@@ -772,9 +770,9 @@ class UtilsTest(unittest.TestCase):
     @no_duplicates
     def test_extract_order_id_order_not_ok(self):
         # assertRaises' `msg` is the message printed when the *assertion*
-        # fails, not a pattern the exception has to match -- so the version of
-        # this test that passed `msg='order not successful'` asserted nothing
-        # about the exception at all and would have passed on any wording.
+        # fails, not a pattern the exception has to match -- so passing
+        # `msg='order not successful'` would assert nothing about the
+        # exception at all and pass on any wording.
         response = MockResponse({}, 403)
         with self.assertRaisesRegex(
                 UnsuccessfulOrderException, 'order not successful: status 403'):
@@ -862,8 +860,8 @@ class UtilsTest(unittest.TestCase):
 
     @no_duplicates
     def test_a_broad_except_valueerror_does_not_swallow_it(self):
-        # The point of raising was that a live, untracked order must not be
-        # silent. Inheriting ValueError would have handed that back: it is the
+        # The point of raising is that a live, untracked order must not be
+        # silent. Inheriting ValueError would hand that back: it is the
         # idiom people reach for around int() and float(), and order specs
         # coerce exactly those a few lines from this call.
         self.assertFalse(issubclass(OrderIdNotFoundError, ValueError))
@@ -876,9 +874,9 @@ class UtilsTest(unittest.TestCase):
 
     @no_duplicates
     def test_the_two_siblings_keep_valueerror(self):
-        # They had it before SchwabError existed, and code catching them that
-        # way predates this release. Dropping it would break that for no gain;
-        # they describe a caller mistake, which is what ValueError means.
+        # Callers catch these as ValueError. Dropping it would break that for
+        # no gain; they describe a caller mistake, which is what ValueError
+        # means.
         self.assertTrue(issubclass(UnsuccessfulOrderException, ValueError))
         self.assertTrue(issubclass(AccountHashMismatchException, ValueError))
 
@@ -895,10 +893,10 @@ class UtilsTest(unittest.TestCase):
 
         # Seeded with `schwaby` itself: walk_packages yields only SUBmodules,
         # and schwaby/__init__.py already runs module-level code, so an
-        # exception defined there would never be looked at. Verified by hand
-        # rather than by mutation, because nothing in __init__.py raises today
-        # so a mutation of the seed is green either way: with an exception
-        # added there, the seeded walk fails and the unseeded one passes.
+        # exception defined there would never be looked at. A mutation of the
+        # seed is green either way while __init__.py defines no exception;
+        # with one added there, the seeded walk fails and the unseeded one
+        # passes.
         #
         # onerror re-raises rather than defaulting to None, which silently
         # drops a subpackage out of the walk if one of its imports ever fails.
@@ -937,7 +935,7 @@ class UtilsTest(unittest.TestCase):
         # The library raises plain ValueError for argument validation in about
         # thirty places, so `except SchwabError` is NOT everything it can
         # throw. This pins the BEHAVIOUR; it does not read the docstring, so it
-        # cannot stop the wording drifting back on its own -- the assertion
+        # cannot stop the wording drifting on its own -- the assertion
         # below does that part.
         from schwaby.orders.generic import OrderBuilder
 
@@ -963,9 +961,9 @@ class UtilsTest(unittest.TestCase):
     def test_every_exception_survives_a_process_boundary(self):
         # These carry the thing they are about as a leading positional and pass
         # only the message to BaseException, so the default reconstruction
-        # called __init__ with the message alone: TypeError for most, and for
-        # UnsuccessfulOrderException a copy that bound the message to
-        # `response` and lost the message. Nothing in this library crosses a
+        # would call __init__ with the message alone: TypeError for most, and
+        # for UnsuccessfulOrderException a copy that binds the message to
+        # `response` and loses the message. Nothing in this library crosses a
         # process boundary with an exception; this is for callers who do -- a
         # ProcessPoolExecutor over placements -- where the one saying an order
         # is live on the wrong account must not arrive as a TypeError about
@@ -1045,7 +1043,7 @@ class UtilsTest(unittest.TestCase):
             self.assertEqual(987, rebuilt.order_id)
             self.assertEqual('BBBB', rebuilt.account_hash)
             self.assertEqual('AAAA', rebuilt.expected_account_hash)
-            # The historical defect was not a LOST response but a WRONG one --
+            # The failure to catch is not a LOST response but a WRONG one --
             # the message bound into the response slot. assertIsNotNone cannot
             # see that; equality can.
             self.assertEqual(response, rebuilt.response)
@@ -1753,8 +1751,9 @@ class ExecutionTotalsTest(unittest.TestCase):
 class HostileClassTest(unittest.TestCase):
     '''A value whose class makes ``__class__`` raise is refused exactly as an
     ordinary instance of the same class is. ``isinstance`` asks ``__class__``
-    when the value's real type does not match, so a type check on a caller's
-    value let that exception through in place of the refusal.'''
+    when the value's real type does not match, so a plain type check on a
+    caller's value would let that exception through in place of the
+    refusal.'''
 
     class Plain:
         def __float__(self):

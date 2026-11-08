@@ -21,8 +21,8 @@ HANDED_OUT_PORTS = set()
 
 def free_callback_port():
     '''A loopback port nothing is listening on, for a login-flow test's
-    callback URL: a fixed one (6969) made any two runs of the suite on one
-    machine fail each other. The port is free when this returns and the flow
+    callback URL: a fixed one, 6969 say, makes any two runs of the suite on
+    one machine fail each other. The port is free when this returns and the flow
     binds it a moment later, so another process could take it between the
     two; a test that is not about the flow binding its port serves on
     bound_callback_socket() instead, which leaves no such gap. With a port of
@@ -241,8 +241,7 @@ class MockResponse(httpx2.Response):
                 self, **resp_args)
 
 
-# TODO: This was necessary back before AsyncMock was a thing, but is it still 
-#       necessary now?
+# TODO: Check whether unittest.mock.AsyncMock makes this class unnecessary.
 class AsyncMagicMock:
     """
     Simple mock that returns an AsyncMock instance for every attribute. Useful

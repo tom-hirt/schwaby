@@ -2,8 +2,7 @@
 
 setup.py is not imported by anything else in the suite, so a syntax error or a
 mistake in the dependency lists is invisible until someone runs a build or a
-`pip install`. That happened: an edit to this file left it unparseable while
-the whole suite stayed green.
+`pip install`.
 
 These assertions are about relationships between the lists rather than their
 contents, so adding a package does not require editing a test.
@@ -60,8 +59,9 @@ def display_path(path):
     os.path.relpath raises on Windows when the two paths are on different
     drives, and the control fixtures in this file live in a temp directory --
     D: on a GitHub runner, where the checkout is C:. Linux and macOS have a
-    single root, so this only ever failed on the platform the matrix runs
-    least often: pushes are Linux-only, and the full matrix runs on tags.
+    single root, so without this the failure would show only on the platform
+    the matrix runs least often: pushes are Linux-only, and the full matrix
+    runs on pull requests and tags.
     '''
     try:
         return os.path.relpath(path, REPO_ROOT)
@@ -101,7 +101,7 @@ def setup_kwargs():
 
 def package_name(requirement):
     '''"websockets>=14.0" -> "websockets". Applied to both sides of every
-    comparison below: normalising only one side made
+    comparison below: normalising only one side would make
     test_no_extra_is_in_install_requires pass for exactly the case it exists to
     catch, since a pinned duplicate in an extra would not match a bare name.'''
     for separator in ('>', '<', '=', '!', '~', '[', ';', ' '):
@@ -121,13 +121,9 @@ class SetupPyTest(unittest.TestCase):
 
     @no_duplicates
     def test_the_distribution_and_the_package_have_the_same_name(self):
-        # They used to differ: the distribution was `schwaby` and the package
-        # was `schwab`, the same directory `schwab-py` ships. That made the
-        # two impossible to install alongside each other -- whichever went in
-        # second overwrote the other's files -- and needed a runtime check on
-        # every import to say so.
-        #
-        # Naming them the same thing removed all of it. Asserted because
+        # A package called `schwab` is the same directory `schwab-py` ships,
+        # so the two could not be installed alongside each other -- whichever
+        # went in second would overwrite the other's files. Asserted because
         # reverting to a `schwab` package would reintroduce the collision
         # rather than restore compatibility, and would do it quietly.
         # Not `schwaby.__name__`, which is 'schwaby' by construction the
@@ -147,8 +143,10 @@ class SetupPyTest(unittest.TestCase):
     def test_install_requires_is_the_declared_set(self):
         # Anything here lands on every machine running this library, so it
         # should be a deliberate decision rather than a merge artifact. The
-        # login packages moved back in 3.0.0 after the extras split saved
-        # twelve packages for nobody and cost three silent failure modes.
+        # login packages are hard dependencies because anything that
+        # authenticates can reach the login flow: easy_client re-runs it once
+        # a token passes max_token_age, so an extra holding them would be one
+        # everyone has to install.
         #
         # cryptography is here because the callback server runs with
         # ssl_context='adhoc' and werkzeug builds that certificate with it.
@@ -162,10 +160,9 @@ class SetupPyTest(unittest.TestCase):
 
     @no_duplicates
     def test_dev_is_the_only_extra(self):
-        # No `login` or `codegen` shim. They were kept empty through 3.0.0's
-        # development so an old pin would not warn, then removed: measured,
-        # that defended four hours of PyPI history, and pip treats an unknown
-        # extra as a warning rather than an error.
+        # No `login` or `codegen` shim: pip treats an unknown extra as a
+        # warning rather than an error, so an old pin naming one still
+        # installs.
         self.assertEqual(['dev'], sorted(self.kwargs['extras_require']))
 
     @no_duplicates
@@ -242,10 +239,10 @@ class SetupPyTest(unittest.TestCase):
 class ShippedFilesTest(unittest.TestCase):
     """What ends up in the wheel.
 
-    `find_packages()` with no arguments matched `tests` as well as `schwab`, so
-    every release through 2.6.0 shipped a top-level `tests` package into users'
-    site-packages -- colliding file-for-file with anything else that ships one,
-    and answering `import tests` from outside a project root.
+    `find_packages()` with no arguments matches `tests` as well as the
+    package, so a wheel built that way ships a top-level `tests` package into
+    users' site-packages -- colliding file-for-file with anything else that
+    ships one, and answering `import tests` from outside a project root.
     """
 
     EXPECTED_PACKAGES = ['schwaby', 'schwaby.client', 'schwaby.contrib',
@@ -268,23 +265,22 @@ class ShippedFilesTest(unittest.TestCase):
 class LinkTest(unittest.TestCase):
     """Every URL a reader can follow, from shipped code and from the docs.
 
-    Links rot in two ways and both have happened here.
+    Links rot in two ways.
 
-    A whole host dies. `auth.py` raised a ValueError pointing at
-    `schwab-py.readthedocs.io` --- the *original* project's docs, so a user who
-    got a callback URL wrong was sent to read about a different codebase.
-    `orders/generic.py` pointed at `developer.schwabmeritrade.com`, from the TD
-    Ameritrade era, which does not resolve. `getting-started.rst` sent a new
-    reader to `beta-developer.schwab.com` to register their app --- the first
-    click in the whole onboarding flow, at a hostname that does not resolve.
+    The host is wrong or dead. A link to `schwab-py.readthedocs.io` is the
+    *original* project's docs, so a reader following it reads about a
+    different codebase. Hosts from the TD Ameritrade era, such as
+    `developer.schwabmeritrade.com`, and `beta-developer.schwab.com` do not
+    resolve. A dead link to register an app breaks the first click in the
+    whole onboarding flow.
 
     A denylist of hosts already known would be a record, not a check: it
     cannot catch the next one, which may be anywhere a reader's link can come
     from, `docs/` above all. So this is an allowlist, over every such file.
 
-    Or the host survives and the target moves. Five of our own links are
-    `github.com/.../blob/main/<path>` deep links, one of them an anchor into a
-    section title. Renaming the file or retitling the section leaves the host
+    Or the host survives and the target moves. Some of our own links are
+    `github.com/.../blob/main/<path>` deep links, and some carry an anchor into
+    a section title. Renaming the file or retitling the section leaves the host
     unchanged, so a host check stays green while the link 404s or lands
     mid-page. Those are resolved against the working tree instead.
     """
@@ -321,10 +317,9 @@ class LinkTest(unittest.TestCase):
 
     OURS = 'https://github.com/tom-hirt/schwaby/blob/main/'
 
-    # `\s*` after the slashes is load-bearing. RST wraps long links, and
-    # `getting-started.rst` had `<https://\nvirtualenv.pypa.io/...>` -- so a
-    # host anchored straight to `//` never saw it. The tell was that
-    # virtualenv.pypa.io was in the allowlist and no scanned file produced it.
+    # `\s*` after the slashes is load-bearing. RST wraps long links, as in
+    # `<https://\nvirtualenv.pypa.io/...>`, and a host anchored straight to
+    # `//` never sees one.
     URL = re.compile(r'https?://\s*([^/\s\'"`)>,]+)')
     OUR_LINK = re.compile(
             r'https://github\.com/tom-hirt/schwaby/blob/main/'
@@ -332,9 +327,8 @@ class LinkTest(unittest.TestCase):
 
     # `'…schwaby/' + 'blob/main/…'` is one URL to a reader and two string
     # literals to a regex. Both ValueError links in this library are written
-    # that way, so the deep-link check silently covered neither -- which a
-    # red-proof caught only because pointing one at a missing file changed
-    # nothing. Joining adjacent literals first can merge two unrelated strings
+    # that way, so without joining, the deep-link check would silently cover
+    # neither. Joining adjacent literals first can merge two unrelated strings
     # into something URL-shaped, but that direction fails loudly; the other one
     # is a guard that quietly does nothing.
     ADJACENT_LITERALS = re.compile(r'[\'"]\s*\+?\s*[\'"]')
@@ -434,8 +428,8 @@ class LinkTest(unittest.TestCase):
         GitHub deletes the punctuation instead. So the heading
         "Browser Warnings About Invalid/Self-Signed Certificates" is
         ...invalid-self-signed... on Read the Docs and ...invalidself-signed...
-        on GitHub. One slugifier for both renderers reported a live anchor as
-        missing, which is how this was found.
+        on GitHub. One slugifier for both renderers would report a live anchor
+        as missing.
         """
         out = set()
         for title in cls.rst_titles(path):
@@ -486,7 +480,8 @@ class LinkTest(unittest.TestCase):
     @no_duplicates
     def test_the_host_check_catches_a_foreign_host(self):
         # Through the same collection code, not a re-implementation of the
-        # predicate. All three hosts really were in this tree.
+        # predicate. The disallowed hosts are another project's docs and two
+        # that do not resolve.
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, 'shipped.py')
             with open(path, 'w') as f:
@@ -497,8 +492,7 @@ class LinkTest(unittest.TestCase):
 
             wrapped = os.path.join(tmp, 'wrapped.rst')
             with open(wrapped, 'w') as f:
-                # The shape that slipped past: RST breaking a long link
-                # immediately after the slashes.
+                # RST breaking a long link immediately after the slashes.
                 f.write('`the console <https://\n'
                         'beta-developer.schwab.com/dashboard>`__\n')
 
@@ -612,10 +606,10 @@ class LinkTest(unittest.TestCase):
 class DocsConfigTest(unittest.TestCase):
     """`docs/conf.py`'s project name, which titles every rendered page.
 
-    It said `schwab-py` from the rename until 3.0.0 -- so every page title,
-    browser tab and sidebar named the original project while the text on the
-    page said to install `schwaby`. Nothing catches a name in a config file:
-    the docs build does not care, and the link checks look at URLs.
+    A wrong name here puts it on every page title, browser tab and sidebar
+    while the text on the page says to install `schwaby`. Nothing else
+    catches a name in a config file: the docs build does not care, and the
+    link checks look at URLs.
     """
 
     @no_duplicates
@@ -629,7 +623,7 @@ class DocsConfigTest(unittest.TestCase):
 
     @no_duplicates
     def test_the_author_credit_is_deliberately_not_checked(self):
-        # `author` and `copyright` still name Alex Golec, which is correct and
+        # `author` and `copyright` name Alex Golec, which is correct and
         # must not be swept along by the assertion above. Stated as a test so
         # that changing it is a deliberate act rather than a tidy-up.
         namespace = {'__file__': os.path.join(REPO_ROOT, 'docs', 'conf.py')}
@@ -643,7 +637,7 @@ class DocsConfigTest(unittest.TestCase):
     @no_duplicates
     def test_an_unresolved_cross_reference_fails_the_build(self):
         # Without nitpicky an unresolved reference renders as plain text and
-        # sphinx says nothing, which is how 71 accumulated. CI builds with -W,
+        # sphinx says nothing. CI builds with -W,
         # so this setting is what turns each into a failure; nothing else in
         # the suite reads it.
         namespace = {'__file__': os.path.join(REPO_ROOT, 'docs', 'conf.py')}
@@ -696,22 +690,19 @@ class ScreenerVocabularyTest(unittest.TestCase):
     `Client.Movers.Index` and the prefix list in the screener section of
     `docs/streaming.rst` are the same set of identifiers -- Schwab uses them
     for the REST `symbol_id` and as the first component of a streaming
-    subscription key. They drifted: the enum said `$SPX` and the prose said
-    `$SPX.X`, inherited from the pre-Schwab API, for a long time with nothing
-    to notice.
+    subscription key. Nothing else keeps them in step, and a drift between
+    them is worse than a typo. `$SPX.X`, the spelling from the pre-Schwab API,
+    is the example: over REST it is an HTTP 400, which is at least loud. On
+    the stream Schwab replies `code: 0, "SUBS command succeeded"` and then
+    sends nothing, forever -- measured 2026-09-08 -- so a reader following
+    prose that said `$SPX.X` would get a success acknowledgement and silence,
+    with no error anywhere to explain it.
 
-    That mattered more than a typo. Over REST `$SPX.X` is an HTTP 400, which
-    is at least loud. On the stream Schwab replies `code: 0, "SUBS command
-    succeeded"` and then sends nothing, forever -- measured 2026-09-08 -- so a
-    reader following the prose got a success acknowledgement and silence, with
-    no error anywhere to explain it.
-
-    **The tokens are compared exactly, against the bullet list alone.** The
-    first version of this test asked `value in section` and passed with the
-    bug reinstated, because `'$SPX' in '$SPX.X'` is true and because the
-    section also contains a paragraph naming the wrong spelling on purpose. A
-    substring test against prose that discusses its own counter-example cannot
-    fail.
+    **The tokens are compared exactly, against the bullet list alone.** A
+    test asking `value in section` passes with `$SPX.X` in the list, because
+    `'$SPX' in '$SPX.X'` is true and because the section also contains a
+    paragraph naming the wrong spelling on purpose. A substring test against
+    prose that discusses its own counter-example cannot fail.
     """
 
     def prefixes(self):
@@ -752,7 +743,7 @@ class ScreenerVocabularyTest(unittest.TestCase):
 
     @no_duplicates
     def test_the_comparison_is_exact_not_substring(self):
-        # The positive control this test needed and did not have. `$SPX.X`
+        # The positive control. `$SPX.X`
         # contains `$SPX`, so a membership test against the raw text passes
         # with the defect present. Prove the comparison rejects it.
         documented = self.prefixes()
@@ -768,11 +759,10 @@ class SplitLinkTest(unittest.TestCase):
     truncated URL, and that is most things: `LinkTest` below, a grep, a
     reviewer skimming a diff.
 
-    Five links across four pages had wrapped, and the halves left behind were
-    plausible enough to pass unnoticed --- `https://www.sec.gov/`,
-    `https://www.investopedia.com/articles/active-trading/032614/`,
-    `https://www.pandas.pydata.org/...api/`. `LinkTest` had been checking
-    those, reporting the host was fine, and never seeing the article.
+    The half left behind is plausible enough to pass unnoticed ---
+    `https://www.sec.gov/`, say, or
+    `https://www.investopedia.com/articles/active-trading/032614/` --- so
+    `LinkTest` reports the host fine and never sees the article.
 
     Catching it needs the raw text rather than the parsed document, because
     by the time sphinx has parsed it the defect is gone.
@@ -803,15 +793,14 @@ class SplitLinkTest(unittest.TestCase):
 class DocReferenceTest(unittest.TestCase):
     """Every name the documentation points at, resolved against the code.
 
-    `streaming.rst` told readers to call `Client.search_instruments()` and gave
-    a worked example using it. No such method exists -- it is `get_instruments`
-    -- so anyone copying the example got an AttributeError. The reference was
-    inherited and nothing noticed, because `sphinx -W` does not resolve a
-    `:meth:` target to a real attribute: an unresolvable one renders as plain
-    text and the build succeeds.
+    A worked example calling a method that does not exist --
+    `Client.search_instruments()`, say, for `get_instruments` -- hands anyone
+    copying it an AttributeError, and nothing else notices, because
+    `sphinx -W` does not resolve a `:meth:` target to a real attribute: an
+    unresolvable one renders as plain text and the build succeeds.
 
-    Two forms have to be handled, and only handling the first is how this was
-    missed the first time it was checked by hand:
+    Two forms have to be handled, and handling only the first misses the
+    second:
 
         :meth:`schwaby.client.Client.get_quote`
         :meth:`Client.get_quote() <schwaby.client.Client.get_quote>`
@@ -910,8 +899,8 @@ class DocReferenceTest(unittest.TestCase):
 
     @no_duplicates
     def test_the_check_reads_the_target_not_the_label(self):
-        # The form that hid `search_instruments`: the visible label is not the
-        # target, and a checker reading the label skips it as foreign.
+        # The visible label is not the target, and a checker reading the
+        # label skips it as foreign.
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, 'doc.rst')
             with open(path, 'w') as f:
@@ -934,11 +923,8 @@ class DocCoverageTest(unittest.TestCase):
     """Every public class and callable the package exports has an entry.
 
     The API index page is generated from the entries, so a name with none is
-    missing from the index as well as from the reference, and nothing said so.
-    That is how `StreamClient.handle_message` -- the call every streaming
-    program makes in its loop -- `OrderBuilder.build`, the child-order and
-    tax-lot setters, `Client.Quote.Fields` and all five streaming exceptions
-    came to have no entry, while the pages referred to several of them by name.
+    missing from the index as well as from the reference, and nothing else
+    says so.
 
     Three rules decide what counts, and each is a way a check like this goes
     wrong:
@@ -948,14 +934,14 @@ class DocCoverageTest(unittest.TestCase):
       `contrib.util` re-export, so an object is covered if it has an entry
       anywhere. A classmethod reached by `getattr` is a new bound method on
       every access, so the function is what gets compared; comparing the
-      method reported `OptionSymbol.parse_symbol` as missing while its entry
-      sat on the page.
+      method would report `OptionSymbol.parse_symbol` as missing while its
+      entry sits on the page.
     * Where it is defined, not wherever it is inherited, or every field enum
       would need its own `relabel_message`. An override of a documented method
       is covered by the method it overrides.
     * The walk starts from the exported modules, not the defining ones.
       `Client` is defined in `schwaby.client.synchronous` and exported as
-      `schwaby.client.Client`; a walk keyed on `__module__` skipped both
+      `schwaby.client.Client`; a walk keyed on `__module__` would skip both
       clients entirely.
 
     Class-level data, enum members and namespace classes that only hold other
@@ -1027,7 +1013,8 @@ class DocCoverageTest(unittest.TestCase):
             'numbers the debug log lines for sends and receives',
         # Listed member by member rather than as a class, because
         # set_enforce_enums is also defined there and is not internal:
-        # exempting the class hid it, while the docs told readers to call it.
+        # exempting the class would hide it, while the docs tell readers to
+        # call it.
         'schwaby.utils.EnumEnforcer':
             'base class of the enum checking',
         'schwaby.utils.EnumEnforcer.convert_enum':
@@ -1073,8 +1060,7 @@ class DocCoverageTest(unittest.TestCase):
     @staticmethod
     def is_ours(obj):
         # With the separator: `startswith('schwaby')` alone also matches a
-        # sibling package called schwabytools, the shape the red-proof entry
-        # `client/sibling-package-prefix` records.
+        # sibling package called schwabytools.
         home = getattr(obj, '__module__', '') or ''
         return home == 'schwaby' or home.startswith('schwaby.')
 
@@ -1124,8 +1110,8 @@ class DocCoverageTest(unittest.TestCase):
             if not namespace:
                 required.append((path, klass))
             # Private bases are walked too: a public method defined on one is
-            # public on every class that inherits it. Skipping them hid
-            # all_fields on all fourteen field enums.
+            # public on every class that inherits it. Skipping them would
+            # hide all_fields on every field enum.
             for base in klass.__mro__:
                 if not cls.is_ours(base):
                     continue
@@ -1179,9 +1165,9 @@ class DocCoverageTest(unittest.TestCase):
 
         def internal(path, obj):
             # Exactly, by the path it was reached through or by where it is
-            # defined -- never by prefix. A prefix let an internal class
-            # take its public members with it, and which member got hidden
-            # depended on the order of the walk.
+            # defined -- never by prefix. A prefix would let an internal
+            # class take its public members with it, and which member got
+            # hidden would depend on the order of the walk.
             return path in cls.INTERNAL or cls.defined_as(obj) in cls.INTERNAL
 
         return sorted(p for p, o in cls.public_api()
@@ -1225,11 +1211,11 @@ class DocCoverageTest(unittest.TestCase):
                '.parse_symbol\n',
                '.. autoexception:: schwaby.streaming.UnexpectedResponseCode\n',
                # Defined on an internal base class, which must not take it
-               # along: exempting that class hid it while the docs said to
-               # call it.
+               # along: exempting that class would hide it while the docs
+               # say to call it.
                '.. automethod:: schwaby.client.Client.set_enforce_enums',
                # Defined on a private base, _BaseFieldEnum, and public on
-               # every field enum; skipping private bases hid it.
+               # every field enum; skipping private bases would hide it.
                '.. automethod:: schwaby.streaming::StreamClient'
                '.LevelOneEquityFields.all_fields')
         texts = self.doc_texts()
@@ -1325,7 +1311,8 @@ class ApiIndexExtensionTest(unittest.TestCase):
     heading missing, or a link to an anchor on the wrong page. Every check
     reads the index's own entries -- the internal links wrapping a literal --
     because autodoc's signature lines on the same page contain the same
-    names, and a check against the whole page passed with the index broken.
+    names, and a check against the whole page would pass with the index
+    broken.
     """
 
     @staticmethod
@@ -1433,8 +1420,9 @@ class ApiIndexExtensionTest(unittest.TestCase):
 
             def build():
                 # Only pages whose text changed are written. Rewriting all of
-                # them touched the index page too, so Sphinx re-read it anyway
-                # and the test passed with the fix removed. A changed page is
+                # them would touch the index page too, so Sphinx would re-read
+                # it anyway and the test would pass with the extension's
+                # forced re-read removed. A changed page is
                 # dated forward, so this does not rest on the clock ticking
                 # between the two builds.
                 for name, rst in pages.items():
@@ -1481,9 +1469,7 @@ class DocBoldLiteralTest(unittest.TestCase):
 
     reStructuredText does not nest inline markup, so a literal written inside
     a bold span is not a literal: the page shows its backticks. Sphinx builds
-    it without a warning, and it shipped that way on three lines, two in
-    CONTRIBUTING and one on the getting-started page, until the built HTML was
-    searched by hand. The house style closes the bold around the literal
+    it without a warning. The house style closes the bold around the literal
     instead.
 
     Each source is parsed with docutils rather than matched with a regular
@@ -1524,8 +1510,8 @@ class DocBoldLiteralTest(unittest.TestCase):
         pages = [p for p in DocReferenceTest.doc_files() if p.endswith('.rst')]
         pages.append(os.path.join(REPO_ROOT, 'CONTRIBUTING.rst'))
         self.assertGreaterEqual(len(pages), 11)
-        # By name: the count alone held without CONTRIBUTING, so dropping it
-        # from the scan changed nothing the test could see.
+        # By name: the count alone holds without CONTRIBUTING, so dropping it
+        # from the scan would change nothing the test could see.
         self.assertIn(os.path.join(REPO_ROOT, 'CONTRIBUTING.rst'), pages,
                       'CONTRIBUTING.rst is not among the pages checked')
 
@@ -1569,9 +1555,9 @@ class DocErrorHandlerRecipeTest(unittest.TestCase):
     """The error-handler recipe on the streaming page, run as written.
 
     ``service`` is whatever Schwab sent, and a handler is the last place a
-    failure can be seen. With ``%r`` a value nested deeply enough raised
+    failure can be seen. With ``%r`` a value nested deeply enough raises
     inside the handler, which the client logs and otherwise swallows, so the
-    alert the recipe exists to send was lost.
+    alert the recipe exists to send would be lost.
     """
 
     @staticmethod
@@ -1647,12 +1633,10 @@ class DocRefreshRecipeTest(unittest.TestCase):
 class DocExampleTest(unittest.TestCase):
     """Keyword arguments in documentation examples, against real signatures.
 
-    `client.rst` showed placing an order with
-    `easy_client(..., webdriver_func=make_webdriver)` and a selenium import.
-    There is no `webdriver_func` parameter and selenium is not a dependency and
-    appears nowhere in the library -- it is left over from the TD Ameritrade
-    era, when the login flow drove a real browser. A reader following that
-    example got a TypeError before reaching the part they came for.
+    An example passing a keyword the callable does not take --
+    `easy_client(..., webdriver_func=make_webdriver)`, say, a parameter from
+    the TD Ameritrade era, when the login flow drove a real browser -- gives a
+    reader following it a TypeError before they reach the part they came for.
 
     `DocReferenceTest` cannot see this: the reference role `:func:`easy_client``
     resolves perfectly well. What is wrong is the call written underneath it.
@@ -1661,8 +1645,8 @@ class DocExampleTest(unittest.TestCase):
 
     Deliberately narrow. It resolves a call only when the name is one the
     documentation imported from `schwaby`, and it skips a callable that takes
-    `**kwargs`. It is not a type checker; it catches the argument that used to
-    exist and does not any more, which is the one that rots.
+    `**kwargs`. It is not a type checker; it catches an argument the callable
+    does not accept, which is how an example rots when a signature changes.
     """
 
     CODE_BLOCK = re.compile(r'^([ \t]*)\.\.\s+code-block::\s*python\s*$')
@@ -1685,10 +1669,7 @@ class DocExampleTest(unittest.TestCase):
                 contents = f.read()
             if path.endswith('.py'):
                 # A file under examples/ is one big block. It is checked the
-                # same way as a doc snippet because it rots the same way and
-                # had nothing watching it: the one example here passed
-                # `account_id=` to StreamClient for years after that parameter
-                # stopped meaning anything.
+                # same way as a doc snippet because it rots the same way.
                 blocks.append((display_path(path), 1, contents))
                 continue
             extract = (cls.fenced_blocks if path.endswith('.md')
@@ -1703,10 +1684,10 @@ class DocExampleTest(unittest.TestCase):
     def fenced_blocks(cls, contents):
         """Yields (line, source) for every ```python fence in a markdown file.
 
-        `doc_files()` has always included README.md and nothing has ever looked
-        inside it: the extractor understood the reStructuredText directive
-        only, so seven blocks in the file PyPI renders as the project's front
-        page were silently contributing nothing to any of these checks.
+        `doc_files()` includes README.md, and an extractor that understood
+        the reStructuredText directive only would leave every block in the
+        file PyPI renders as the project's front page silently contributing
+        nothing to any of these checks.
         """
         for m in cls.FENCE.finditer(contents):
             yield contents[:m.start()].count('\n') + 1, m.group(1)
@@ -1717,13 +1698,11 @@ class DocExampleTest(unittest.TestCase):
 
         A directive's body is every line indented further than the directive
         itself, blank lines included; it ends at the first non-blank line that
-        is not. Written that way rather than as one regex because the regex
-        this replaces ran to the first *unindented* line, so a block nested
-        inside an admonition swallowed the paragraph after it -- which dedents
-        to a shallower margin than the code and makes the whole thing an
-        `unexpected indent` SyntaxError. `bad_keywords_in` then skipped it,
-        silently. Three of the forty-four blocks it found were being dropped
-        that way and seven more were never extracted at all.
+        is not. Written that way rather than as one regex running to the first
+        *unindented* line, which would let a block nested inside an admonition
+        swallow the paragraph after it -- which dedents to a shallower margin
+        than the code and makes the whole thing an `unexpected indent`
+        SyntaxError, which `bad_keywords_in` then skips, silently.
         """
         lines = contents.split('\n')
         i = 0
@@ -1866,14 +1845,12 @@ class DocExampleTest(unittest.TestCase):
         Building an order touches nothing outside the process, so the calls
         can simply be run -- and running them is the only way to catch a
         positional argument of the wrong type. `equity_buy_market('AAPL',
-        '10')` raises now, and every existing check here would have let a
-        documentation example doing that go on shipping.
+        '10')` raises, and no other check here would stop a documentation
+        example doing that.
 
-        No release number here on purpose. `RELEASING.md` step 3 exists
-        because prose naming a version goes stale silently and the release may
-        land under a different number than the one written -- and its greps
-        cover `README.md`, `docs/` and `schwaby/`, not `tests/`, so nothing
-        here would have caught it.
+        No release number here on purpose: prose naming a version goes stale
+        silently, and the release may land under a different number than the
+        one written.
 
         Only calls whose arguments are all literals are run. A call written
         with names or an ellipsis is prose about the shape rather than
@@ -1964,11 +1941,9 @@ class DocExampleTest(unittest.TestCase):
     def test_no_sentence_is_left_dangling_by_a_removed_date(self):
         """`As of` is only ever followed by a date, so it must not end a line.
 
-        Release step 4 strips dates from shipped documentation, and it greps
-        for dates -- not for what removing one leaves behind. `Duration`'s
-        docstring read "for every asset type. As of\n Schwab accepts only",
-        and shipped that way through 4.1.0: the check that made the edit could
-        not see its own wreckage.
+        Removing a date from prose can leave its `As of` behind -- "for every
+        asset type. As of\n Schwab accepts only" -- and a check that looks for
+        dates cannot see what removing one leaves.
 
         Deliberately narrow. Lower-case `since` and `on` end wrapped lines all
         over this tree and are fine; `As of` is not, because nothing but a date
@@ -1999,8 +1974,7 @@ class DocExampleTest(unittest.TestCase):
     def test_no_collected_test_returns_a_value(self):
         """A helper named `test_*` is collected, called, and passes.
 
-        It tests nothing, reports green, and raises the count -- which is how
-        `test_files()` slipped in as a static helper on this very class. The
+        It tests nothing, reports green, and raises the count. The
         `filterwarnings` rule in `setup.cfg` turns unittest's warning about it
         into a failure, but that warning only exists from CPython 3.11, and CI
         runs 3.10 as well: on that leg the trap is still silent.
@@ -2017,8 +1991,8 @@ class DocExampleTest(unittest.TestCase):
                 # Module-level `def test_*` too: pytest collects those from any
                 # `*test*.py`, and the `filterwarnings` rule in setup.cfg keys
                 # on unittest's message, which pytest's own
-                # PytestReturnNotNoneWarning does not match. The trap this
-                # closes for methods was still open one scope up.
+                # PytestReturnNotNoneWarning does not match. Without this the
+                # trap closed for methods would stay open one scope up.
                 if isinstance(node, ast.Module):
                     owner, body = '<module>', node.body
                 elif isinstance(node, ast.ClassDef):
@@ -2035,9 +2009,9 @@ class DocExampleTest(unittest.TestCase):
                     # Only this function's own body. `ast.walk` descends
                     # into nested `def`s, and a test defining a local helper
                     # that returns something -- a `side_effect`, typically --
-                    # is not what this is about. `test_running_on_collab_
-                    # environment` is exactly that shape and was the first
-                    # thing this flagged.
+                    # is not what this is about.
+                    # `test_running_on_collab_environment` is exactly that
+                    # shape.
                     if any(isinstance(inner, ast.Return)
                            and inner.value is not None
                            for inner in cls_own_body(item)):
@@ -2049,20 +2023,19 @@ class DocExampleTest(unittest.TestCase):
         # A walk that found nothing satisfies the assertion above exactly as
         # well as a clean tree does, and this guard exists for silent test
         # loss -- so a silently empty scan is the one outcome that must not
-        # read as green. Verified by pointing the root at a missing directory:
-        # without this, both guards stayed passing.
+        # read as green. Without this, pointing the root at a missing
+        # directory leaves both guards passing.
         self.assertGreater(len(seen), 500)
 
     @no_duplicates
     def test_no_test_module_defines_a_class_name_twice(self):
         """A shadowed test class takes its tests with it, silently.
 
-        `tests/orders/generic_test.py` had two classes called
-        `OrderBuilderExamplesTest`. The second shadowed the first, so two of
-        its tests never ran -- and one of them asserted a contract the library
-        had already stopped honouring, so it would have failed had anything
-        executed it. `no_duplicates` cannot catch this: it keys on
-        `__qualname__`, and duplicate classes have the same one.
+        When a module defines two classes of the same name, the second
+        shadows the first, so the first's tests never run and nothing reports
+        it -- including a test that would fail if it ran. `no_duplicates`
+        cannot catch this: it keys on `__qualname__`, and duplicate classes
+        have the same one.
 
         Read from the source rather than from the imported module, because by
         import time the first definition is already gone.
@@ -2089,14 +2062,14 @@ class DocExampleTest(unittest.TestCase):
         """A login-flow test's callback URL takes its port from a socket it
         holds, or from free_callback_port(), never a number written down.
 
-        A fixed port (6969, then 8182) made any two runs of the suite on one
-        machine fail each other: measured, every one of six paired runs lost
-        test_create_token_file or test_a_connect_timeout_is_treated_as_not_\
-listening_yet, and none of ten once each test took a free port. It also
-        kept every login-flow test on one xdist worker; without that, and on
-        the fixed port, five runs of six workers each failed four to six of
-        them, and none of twenty on free ports. A fixed port coming back would
-        fail most runs again, but only some, so this looks.
+        A fixed port makes any two runs of the suite on one machine fail each
+        other, and makes login-flow tests on different xdist workers collide.
+        Measured: on a fixed port every one of six paired runs lost a
+        login-flow test, against none of ten on free ports; and with the
+        login-flow tests spread across workers, five runs of six workers on a
+        fixed port each failed four to six of them, against none of twenty on
+        free ports. A fixed port would fail most runs but not all, so it could
+        pass CI by chance; this looks for one in the source instead.
         """
         import re
         fixed = re.compile(r'^https?://(127\.0\.0\.1|localhost):\d')
@@ -2152,8 +2125,8 @@ listening_yet, and none of ten once each test took a free port. It also
     @no_duplicates
     def test_a_class_calling_the_flow_by_an_alias_runs_it(self):
         # A class whose only call is through an alias. tests/auth_test.py
-        # imports the flow as one, and its class was found only through its
-        # other calls.
+        # imports the flow as one, and a class calling it only that way must
+        # still be found.
         source = (
             'from schwaby.auth import client_from_login_flow as _flow\n'
             'from schwaby.auth import client_from_login_flow as run\n'
@@ -2197,12 +2170,11 @@ listening_yet, and none of ten once each test took a free port. It also
         """No block may be skipped for being unparseable.
 
         `bad_keywords_in` swallows a SyntaxError and moves on, which is right
-        for a genuine fragment and wrong for a block the extractor mangled.
-        Three of these were being dropped that way -- a code block nested
-        inside an admonition ran on into the paragraph after it, which dedents
-        to a shallower margin than the code and makes the whole thing an
-        `unexpected indent`. Nothing counted them, so the check reported a
-        clean run over a smaller set than it claimed.
+        for a genuine fragment and wrong for a block the extractor mangled --
+        a code block nested inside an admonition that runs on into the
+        paragraph after it, say, which dedents to a shallower margin than the
+        code and makes the whole thing an `unexpected indent`. Without this,
+        the check would report a clean run over a smaller set than it claims.
         """
         blocks = self.code_blocks_in(
                 DocReferenceTest.doc_files() + self.example_files())
@@ -2225,10 +2197,10 @@ listening_yet, and none of ten once each test took a free port. It also
         """Every module a documented example imports has to exist.
 
         `bad_keywords_in` cannot answer this. It resolves a call only when the
-        name was imported from `schwaby`, so a block still importing `schwab`
-        is skipped rather than failed -- which is how 3.0.3 shipped three
-        examples whose wrong import concealed a wrong argument, and it is
-        exactly what a package rename leaves behind. This one imports what the
+        name was imported from `schwaby`, so a block importing `schwab` is
+        skipped rather than failed, and its wrong import conceals any wrong
+        argument -- exactly what a package rename leaves behind. This one
+        imports what the
         documentation says to import and fails if it is not there.
         """
         blocks = self.code_blocks_in(
@@ -2304,7 +2276,7 @@ listening_yet, and none of ten once each test took a free port. It also
 
     @no_duplicates
     def test_the_check_catches_the_argument_that_was_removed(self):
-        # webdriver_func, verbatim from the example this was written for.
+        # webdriver_func, a parameter easy_client does not take.
         code = ('from schwaby.auth import easy_client\n'
                 'c = easy_client(\n'
                 "        token_path='/path/to/token.json',\n"
@@ -2318,8 +2290,8 @@ listening_yet, and none of ten once each test took a free port. It also
 
     @no_duplicates
     def test_a_correct_call_is_not_flagged(self):
-        # The same call, as it is actually written now. Without this the test
-        # above passes for a checker that flags everything.
+        # The same call, correctly written. Without this the test above
+        # passes for a checker that flags everything.
         code = ('from schwaby.auth import easy_client\n'
                 'c = easy_client(\n'
                 "        api_key='api-key',\n"
@@ -2376,8 +2348,7 @@ class LongDescriptionTest(unittest.TestCase):
         # highlighter wraps it rather than splitting it, which is why
         # `easy_client` is here despite appearing only inside code. Anything
         # with a space in it goes against the raw file instead; see
-        # `test_the_install_command_is_in_the_readme`, where an assertion
-        # written against this HTML went green for exactly this reason.
+        # `test_the_install_command_is_in_the_readme`.
         for required in ('schwaby', 'schwab-py', 'easy_client'):
             self.assertIn(required, html)
 
@@ -2396,33 +2367,33 @@ class LongDescriptionTest(unittest.TestCase):
         self.assertIn('pip install schwaby', text)
         self.assertNotIn('pip install schwab-py', text)
 
-        # The README used to tell readers to uninstall `schwab-py` first,
-        # because both projects shipped a package called `schwab` and
-        # installing one over the other destroyed the install. The package is
-        # now `schwaby` too, so they coexist and that instruction is wrong ---
-        # it would strand anyone who still imports `schwab`.
+        # The package is `schwaby`, so this project and `schwab-py` install
+        # side by side, and telling readers to uninstall `schwab-py` first
+        # would be wrong -- it would strand anyone who still imports
+        # `schwab`.
         #
-        # Against the source for the same reason as the assertions above, and
-        # this one learned it the hard way: written against the rendered HTML
-        # it went GREEN under mutation, because the highlighter splits
-        # `pip uninstall -y schwab-py` with `<span>`s and the substring is not
-        # there to find. The README naming `schwab-py` at all is checked in
-        # `test_the_readme_renders_to_a_real_page`; what is checked here is
-        # that the old instruction has not come back.
+        # Against the source for the same reason as the assertions above:
+        # the highlighter splits `pip uninstall -y schwab-py` with `<span>`s,
+        # so against the rendered HTML the substring is never there to find
+        # and the assertion cannot fail. The README naming `schwab-py` at all
+        # is checked in `test_the_readme_renders_to_a_real_page`; what is
+        # checked here is that no instruction to uninstall `schwab-py`
+        # appears.
         self.assertNotIn('uninstall schwab-py', text)
         self.assertNotIn('uninstall -y schwab-py', text)
 
     @no_duplicates
     def test_setup_py_names_an_encoding_when_it_reads_a_file(self):
         # test_setup_py_ships_what_was_rendered catches this only where the
-        # locale is not UTF-8, which on Linux it is -- so that test passed here
-        # for a year and failed on every Windows runner, and Windows only runs
-        # on tags. This one is locale-independent: it reads the source.
+        # locale is not UTF-8, which on Linux it is -- so without an encoding
+        # that test would pass here and fail only on Windows runners, which
+        # run on pull requests and tags, not on pushes. This one
+        # is locale-independent: it reads the source.
         #
         # Without an encoding Python uses the locale's preferred one, so a
-        # build on Windows decoded the README as a codepage and put replacement
-        # characters where the em dashes are. A wheel built on Linux is fine
-        # and one built on Windows is quietly corrupt.
+        # build on Windows decodes the README as a codepage and puts
+        # replacement characters where the em dashes are. A wheel built on
+        # Linux is fine and one built on Windows is quietly corrupt.
         with in_repo_root():
             with open('setup.py', encoding='utf-8') as f:
                 source = f.read()
@@ -2466,8 +2437,8 @@ class LongDescriptionTest(unittest.TestCase):
         # how it was reached. `Path.read_text(encoding, errors)` and
         # `Path.write_text(data, encoding, errors)` are shorter still.
         #
-        # Reporting a call as missing an encoding it did pass is the false
-        # failure this test already had once, in the regex it replaced.
+        # Reporting a call as missing an encoding it did pass would be a
+        # false failure.
         BUILTIN_POSITION = {'open': 4}
         METHOD_POSITION = {'open': 3, 'read_text': 1, 'write_text': 2}
 

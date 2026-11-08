@@ -14,10 +14,9 @@ with open('schwaby/version.py', 'r', encoding='utf-8') as f:
     version = version[1:-1]
 
 setuptools.setup(
-    # Distribution and package are both `schwaby`. They used to differ --
-    # the package was `schwab`, the same directory `schwab-py` ships -- which
-    # made the two impossible to install alongside each other and required a
-    # runtime collision check. Naming them the same thing removes both.
+    # Distribution and package are both `schwaby`. A package named `schwab`
+    # would be the same directory `schwab-py` ships, which would make the two
+    # impossible to install alongside each other.
     name='schwaby',
     version=version,
     # Authorship stays with the original author of the code this began from.
@@ -37,11 +36,11 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     url='https://github.com/tom-hirt/schwaby',
-    # include= rather than a bare find_packages(), which also matched `tests`
-    # and shipped a top-level `tests` module into every user's site-packages.
-    # Anything else installing a top-level `tests` then collides with it
-    # file-for-file, and `import tests` from outside a project root resolves
-    # here. Published that way through 2.6.0.
+    # include= rather than a bare find_packages(), which would also match
+    # `tests` and ship a top-level `tests` module into every user's
+    # site-packages. Anything else installing a top-level `tests` would then
+    # collide with it file-for-file, and `import tests` from outside a project
+    # root would resolve here.
     packages=setuptools.find_packages(include=['schwaby', 'schwaby.*']),
     classifiers=[
         'Programming Language :: Python :: 3',
@@ -67,12 +66,13 @@ setuptools.setup(
         'websockets>=14.0',
 
         # The interactive login flow runs a callback server in a separate
-        # process. These were an optional `login` extra in 2.3.0 and are hard
-        # dependencies again as of 3.0.0: the split saved twelve packages for
-        # nobody who existed, and cost three silent failure modes -- pip freeze
-        # drops extras, a deploy check that reads requirement lines may not
-        # evaluate one carrying extras, and the machinery needed its own
-        # error path and tests.
+        # process. These are hard dependencies rather than an optional extra.
+        # An extra would save about a dozen packages for almost nobody:
+        # easy_client re-runs the login flow once a stored token is too old,
+        # so even a program with a token file needs them. It would also cost
+        # two silent failure modes -- pip freeze drops extras, and a deploy
+        # check that reads requirement lines may not evaluate one carrying
+        # extras -- plus an error path and tests of its own.
         'flask',
         'multiprocess',
         'psutil',
@@ -86,20 +86,17 @@ setuptools.setup(
         'cryptography',
     ],
     extras_require={
-        # `dev` is the only extra, and there is deliberately no `login` or
-        # `codegen` shim beside it. They were kept empty for a release so an
-        # old pin would not warn, which turned out to defend four hours of PyPI
-        # history: `schwaby[login]` was only ever installable from 2.6.0, and
-        # `pip` treats an unknown extra as a warning and installs anyway.
-        # A literal list since 3.0.0. It used to be composed from the other
-        # extras, because the suite starts flask servers through multiprocess
-        # and a package listed in an extra but not in dev produced a green
-        # local run against a stale virtualenv and a red CI. Those packages are
-        # in install_requires now, so dev gets them either way.
+        # `dev` is the only extra, and there is deliberately no empty `login`
+        # or `codegen` shim beside it. A pin naming an unknown extra gets a
+        # warning from `pip`, which installs anyway, so a shim would only
+        # silence that warning.
         #
-        # autopep8 is here rather than in `codegen`, which is where it used to
-        # live: `make fix` runs it, and that is a maintainer's tool, not a
-        # feature of the library.
+        # dev does not list flask or multiprocess, which the suite needs to
+        # start its callback servers, because install_requires already
+        # installs them; if either leaves install_requires, add it here.
+        #
+        # autopep8 is here because `make fix` runs it, and that is a
+        # maintainer's tool, not a feature of the library.
         'dev': [
             'autopep8',
             # `build` sits beside `twine` on purpose: CONTRIBUTING tells a

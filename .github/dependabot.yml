@@ -1,9 +1,9 @@
 version: 2
 
 updates:
-  # The actions used by CI drifted five major versions behind before anyone
-  # noticed, and only surfaced as a deprecation warning buried in a job
-  # annotation. Nothing in the repository was watching them, so this does.
+  # Without this nothing in the repository watches the actions CI uses, and
+  # one falling major versions behind surfaces only as a deprecation warning
+  # buried in a job annotation.
   #
   # Monthly rather than weekly: these move slowly and a pull request nobody
   # reads is worse than no pull request.
@@ -19,4 +19,4 @@ updates:
 # trades, its own requirements are floors rather than pins, and a bot opening
 # pull requests against authlib or httpx would either be ignored or merged
 # without the live verification those changes actually need. Upgrading them is
-# a decision, not a chore -- see RELEASING.md.
+# a decision, not a chore.

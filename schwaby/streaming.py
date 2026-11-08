@@ -96,7 +96,7 @@ class _BaseFieldEnum(Enum):
                 # carrying both `1` and `'1'` has two spellings of one id,
                 # and the second relabel overwrites the first. That needs a
                 # custom decoder emitting both forms in one item; the
-                # alternative was dropping such a message entirely.
+                # alternative would be dropping such a message entirely.
                 #
                 # `isdigit` is the discriminator because Schwab's field ids
                 # are numeric strings and the other keys in a content item
@@ -160,9 +160,9 @@ _KNOWN_CHANNELS = frozenset(('response', 'data', 'notify'))
 #: would assert a pairing nobody has observed, where the cost of the leniency
 #: is accepting a documented success.
 #:
-#: A tuple rather than a set. `in` on a tuple compares with ==, as the `!= 0`
-#: it replaces did, so a code of an unhashable type -- the venue's to choose --
-#: is judged rather than raising TypeError.
+#: A tuple rather than a set. `in` on a tuple compares with ==, so a code of
+#: an unhashable type -- the venue's to choose -- is judged rather than raising
+#: TypeError.
 _SUCCESS_CODES = (0, 26, 27, 28, 29)
 
 
@@ -201,7 +201,7 @@ def _safe_str(value):
     """`str` of a value whose type name is already being printed.
 
     `_safe_value` reprs, which is right where the value stands alone and
-    wrong beside an explicit `type(x).__name__` -- that read
+    wrong beside an explicit `type(x).__name__` -- that would read
     `Cause: TypeError: TypeError("...")`, degrading the line this module
     calls the complete record.
     """
@@ -260,8 +260,8 @@ def _safe_name(value):
 
     `str()` of a wide integer raises past `sys.get_int_max_str_digits()`, and
     a top-level frame key is whatever the decoder produced --
-    `StreamJsonDecoder` is a public extension point, which is the argument
-    that made `relabel_message` handle a non-string key.
+    `StreamJsonDecoder` is a public extension point, which is also why
+    `relabel_message` handles a non-string key.
     """
     try:
         text = str(value)
@@ -594,7 +594,7 @@ class ResponseTimeoutError(SchwabError):
 
 # Returned by _read_and_route for a frame it delivered to a waiting request.
 # A plain None cannot serve: a top-level JSON null is a frame a server can
-# send, and treating it as "already routed" dropped it silently.
+# send, and treating it as "already routed" would drop it silently.
 ROUTED = object()
 
 
@@ -623,12 +623,12 @@ def _is_sequence(obj):
     Indexable, not merely iterable. Routing reads ``frame['response'][0]`` and
     validation reads it again, and handlers are given the frame afterwards, so
     a single-pass iterable cannot serve however tolerant the iteration is: a
-    decoder returning generators made every response frame fall into the "no
-    usable request id" branch and every subscribe time out. Tuples work, which
-    is the realistic custom-decoder case; generators never could.
+    decoder returning generators would make every response frame fall into
+    the "no usable request id" branch and every subscribe time out. Tuples
+    work, which is the realistic custom-decoder case; generators cannot.
 
     Strings and bytes are indexable and are not arrays; a mapping is iterable
-    and yields its keys, which is how ``{'notify': {...}}`` would have reached
+    and yields its keys, so ``{'notify': {...}}`` would otherwise reach
     handlers as a message per key.
     '''
     return (hasattr(obj, '__getitem__')
@@ -1071,7 +1071,7 @@ class StreamClient(EnumEnforcer):
         # An id we have never issued is a different matter. That is not
         # lateness, it is the server and this client disagreeing about what was
         # asked, and the request being waited on has no better prospect than
-        # the one which just arrived. Let that fail below, as it always has.
+        # the one which just arrived. Let that fail below.
         # Read defensively. Everything downstream of here parses through
         # _iter_responses, which logs a malformed element and skips it -- but
         # that guard is unreachable if reading the id raises first. A frame
@@ -1127,17 +1127,18 @@ class StreamClient(EnumEnforcer):
 
         # Everything not claimed above is logged and, if it is a rejection,
         # queued for report. The protocol treats element 0 as the answer to the
-        # outstanding request, and _validate_response reads only that one, so a
-        # frame carrying a second response has always handed it to the waiter
-        # unexamined.
+        # outstanding request, and _validate_response reads only that one, so
+        # any further response in the frame reaches the waiter unexamined.
         #
         # Logged here, but NOT reported here. This runs holding the read
         # lock, on the request path holding the request lock too, and inside
         # the response deadline -- so calling a user handler here would let a
         # slow one turn a subscription that SUCCEEDED into a
         # ResponseTimeoutError, and a handler that re-subscribed would block on
-        # a lock its own caller holds. The report is queued and delivered from
-        # handle_message, which holds neither lock and runs under no deadline.
+        # a lock its own caller holds. The report is queued and delivered by
+        # whichever coroutine read the frame once it holds neither lock and
+        # runs under no deadline: at the top of handle_message's loop, or at
+        # the end of _request_response.
         self._log_extra_responses(frame, first_unclaimed)
 
         return ROUTED
@@ -1885,8 +1886,8 @@ class StreamClient(EnumEnforcer):
     async def _report_error(self, exception, *, service=None, message=None):
         '''Delivers ``exception`` to every registered error handler.
 
-        Alongside the logging rather than instead of it, so nothing regresses
-        for a caller who registers nothing.
+        Alongside the logging rather than instead of it, so a caller who
+        registers nothing still has the log line.
 
         Awaited rather than scheduled. A coroutine error handler therefore
         finishes before the call that reported the failure returns, which is
@@ -2358,7 +2359,7 @@ class StreamClient(EnumEnforcer):
         # yet handled, including the late rejections the orphan path reports
         # and data frames handlers would be given. Clearing only the reports
         # would let the standalone framing leak across sessions while the
-        # batched one did not.
+        # batched one does not.
         self._pending_reports.clear()
         self._overflow_items.clear()
         self._absorbed = 0
@@ -4107,9 +4108,8 @@ class StreamClient(EnumEnforcer):
         '''
         Subscribe to news headlines for the given symbols.
 
-        Schwab does not document this service. It was found by asking the
-        venue, and could change or stop without notice. See
-        :ref:`news_headline`.
+        Schwab does not document this service, so it could change or stop
+        without notice. See :ref:`news_headline`.
 
         :param symbols: Symbols to receive headlines for.
         '''

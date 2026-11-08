@@ -42,8 +42,8 @@ def pytest_xdist_auto_num_workers(config):
     return min(cores, cap) if cap is not None else cores
 
 
-# A fixed callback port made two runs of the suite on one machine fail each
-# other, and nothing in one run can see it coming back. The source scan in
+# A fixed callback port makes two runs of the suite on one machine fail each
+# other, and nothing within one run can see that. The source scan in
 # packaging_test finds a port written into a URL; this finds one however it
 # was written, by checking the port each callback server is started for.
 # Checked where the flow builds its server process, which every way of

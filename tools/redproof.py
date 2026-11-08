@@ -17,13 +17,13 @@ it looks like protection. So revert the fix and watch the test fail. Done by
 hand, that goes wrong in ways that still produce a red, just not from the
 assertion being claimed:
 
- * a mutation applied to a call site both branches reach, so it proved only
-   that *some* branch was covered;
- * a restore inside the same second with an identical-length edit, so CPython
-   reused stale bytecode and a correct file appeared to fail;
- * a test whose input never took the branch under test, so the guard it was
-   written for never ran and the opposite mutation left it green;
- * a test rewritten by string index, silently deleting two others.
+ * a mutation applied to a call site both branches reach proves only that
+   *some* branch is covered;
+ * a restore inside the same second with an identical-length edit lets
+   CPython reuse stale bytecode, so a correct file appears to fail;
+ * a test whose input never takes the branch under test never runs the
+   guard it was written for, so the opposite mutation leaves it green;
+ * a test rewritten by string index can silently delete others.
 
 A correct red and a red for the wrong reason are indistinguishable unless
 something forces you to read the message. That is all this does. Each entry in
@@ -59,9 +59,9 @@ cannot be collected; 2 when --name matches nothing, or the arguments are
 wrong.
 
 Every run judges every selected entry. Verdicts are not kept from one run to
-the next: the whole set takes about a minute and a half on 20 cores, and
-keeping them, keyed on everything a run read, kept a verdict after something
-it depended on had changed, in more than one way.
+the next: the whole set takes about a minute and a half on 20 cores, and a
+kept verdict, even one keyed on everything a run read, can outlive a change
+to something it depended on.
 
 SHARDS. `--shard K/N` judges one slice of N, so N machines can share one
 run: the selected entries (after --name) are divided by a hash of each name,
@@ -146,7 +146,7 @@ SECRET_PATH = re.compile(
 
 # The process groups this process started and has not reaped. Changed only
 # on the main thread, where stop() also runs, so it takes no lock: one held
-# there when a signal landed deadlocked the handler against its own thread.
+# there when a signal lands would deadlock the handler against its own thread.
 _live = set()
 _stopping = threading.Event()
 # Set in a worker: tells the parent each group it starts and reaps, so the
@@ -290,8 +290,8 @@ def failure_sections(output):
     traceback, less the explanation assertion rewriting adds. Not the source
     lines pytest echoes, not node ids, not a test's captured output, not a
     rewritten assert's quoted expression: any of those can contain an
-    entry's `expect` whatever actually failed, which made a failure on the
-    wrong assertion read as PROVEN. `E` lines outside any section count,
+    entry's `expect` whatever actually failed, which would make a failure on
+    the wrong assertion read as PROVEN. `E` lines outside any section count,
     untitled.'''
     sections = [['', []]]
     current = sections[0]
@@ -314,8 +314,8 @@ def without_explanation(lines):
     '''A failure's E lines without the explanation pytest's assertion
     rewriting adds: the `assert <expression>` line and the more-indented
     lines under it. That explanation quotes the failing expression from the
-    source, so an expect written as a literal in some other assert matched
-    whatever that assert's failure was. A plain `assert` with no message
+    source, so an expect written as a literal in some other assert would
+    match whatever that assert's failure was. A plain `assert` with no message
     therefore says nothing an entry can match; its message, when it has one,
     is the line before.'''
     kept = []
@@ -337,7 +337,8 @@ def without_explanation(lines):
 def failed_on(case, output):
     '''Whether a failure says the entry's expect, in the subtest it names.
     A subtest's label is a qualifier, never the match: it is text the test
-    chose, so matching it proved an entry whose test had no assertion left.'''
+    chose, so matching it would prove an entry whose test has no assertion
+    left.'''
     return any(case.expect in said
                and (not case.subtest or case.subtest in title)
                for title, said in failure_sections(output))
@@ -441,8 +442,8 @@ def secret_untracked(files, tracked):
 def copy_tree(files, src, dest):
     for f in files:
         os.makedirs(os.path.dirname(os.path.join(dest, f)), exist_ok=True)
-        # With its mode: a copy lost the executable bit, and a test that
-        # checks a hook script is executable failed in every one.
+        # With its mode: without it a copy loses the executable bit, and a
+        # test that checks a hook script is executable fails in every one.
         shutil.copy(os.path.join(src, f), os.path.join(dest, f))
 
 
@@ -517,7 +518,7 @@ def run_tests(workdir, copy, nodes, audit_script, record,
     env['REDPROOF_AUDIT'] = record
     # --tb=short: pytest's long form prints each frame's arguments through
     # repr, and a test object whose repr or type name raises (several here
-    # exist to) then crashed pytest itself, with an INTERNALERROR and no
+    # exist to) then crashes pytest itself, with an INTERNALERROR and no
     # failure reported. The short form prints the same E lines.
     # -B, not PYTHONDONTWRITEBYTECODE: -I ignores every PYTHON* variable.
     argv = [sys.executable, '-I', '-B', audit_script, '-q', '--tb=short',
@@ -623,7 +624,7 @@ class Run:
 
     def workdir(self):
         # mkdtemp, not a counter: each worker process has its own copy of a
-        # counter, and two of them made the same directory.
+        # counter, and two of them would make the same directory.
         return tempfile.mkdtemp(prefix='run', dir=self.tmp)
 
     def note_memory(self, result):

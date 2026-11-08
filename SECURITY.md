@@ -36,21 +36,20 @@ other than as the caller asked. Concretely:
 - secrets reaching logs, exception messages or tracebacks unredacted
 - **an order built or sent with values the caller did not specify**
 
-That last one carries the weight, and it is not theoretical. Every example below
-shipped, passed its tests, and was found later:
+That last one carries the weight. Silent failures here look like this:
 
-| Release | What it did |
-|---|---|
-| 1.6.0 | Limit prices passed as floats were truncated to a **cent low** |
-| 1.7.0 | Response redaction never ran — the function was imported and then shadowed by a no-op of the same name |
-| 1.9.0 | Bug-report logs did not redact Schwab's account identifiers |
-| 2.1.0 | `OptionSymbol.build()` mis-encoded 590 strikes, naming **a different contract** on the order-placement path |
-| 3.0.0 | The venue enum was written to a field that does not select a venue, so an order asking for a specific exchange was routed elsewhere with nothing to say so |
+- a limit price passed as a float and truncated to a **cent low**
+- a redaction function shadowed by a no-op of the same name, so it never runs
+- bug-report logs that leave Schwab's account identifiers in place
+- an option strike mis-encoded so the symbol names **a different contract**
+- an order asking for a specific exchange routed elsewhere, because the venue
+  was written to a field that does not select one
 
-Note the shape they share. None raised, none failed a test, and none produced an
-error anybody could see. **A silent wrong value is the most serious class of bug
-this library has**, and a report that one exists is worth sending even when you
-cannot say how an attacker would trigger it deliberately.
+Note the shape they share. None of them raises or produces an error anybody
+could see, and each can pass a suite that runs every line. **A silent wrong
+value is the most serious class of bug this library has**, and a report that
+one exists is worth sending even when you cannot say how an attacker would
+trigger it deliberately.
 
 ## What is not in scope
 

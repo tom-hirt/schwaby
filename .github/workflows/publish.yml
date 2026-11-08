@@ -127,8 +127,8 @@ jobs:
       - run: python -m build
 
       # twine check verifies the long_description renders at all. Note it is a
-      # much weaker gate for markdown than it was for rst: measured, it rejects
-      # only an empty or whitespace-only document, where rst also rejected
+      # much weaker gate for markdown than for rst: measured, it rejects only
+      # an empty or whitespace-only document, where for rst it also rejects
       # malformed markup. The real check is the suite's
       # test_the_readme_renders_to_a_real_page, which asserts the rendered HTML
       # is substantial and contains what a PyPI page has to carry. Both run.
