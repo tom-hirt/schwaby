@@ -167,6 +167,17 @@ class BlindKillTest(unittest.TestCase):
         self.assertEqual([], found)
 
 
+class HooksTest(unittest.TestCase):
+    '''The hooks as files, which needs no pyflakes to read.'''
+
+    def test_both_hooks_run_the_check(self):
+        for hook in ('pre-commit', 'pre-merge-commit'):
+            with open(os.path.join(HOOKS, hook)) as f:
+                self.assertIn('tools/light_check.py', f.read(), hook)
+            self.assertTrue(os.access(os.path.join(HOOKS, hook), os.X_OK),
+                            '%s is not executable' % hook)
+
+
 # The check refuses every commit without pyflakes, so each of these would
 # fail on that alone. [dev] installs it, and a check that it does keeps
 # this skip from hiding anything where the suite is meant to run.
@@ -509,6 +520,7 @@ class LightCheckTest(unittest.TestCase):
         self.git('rm', '-q', 'tests/a_test.py')
         self.stage('mod.py', 'import os\n\n\ndef f():\n    return 2\n')
         code, out = self.check()
+        self.assertEqual(0, code, out)
         self.assertNotIn('python -m pytest tests/a_test.py', out,
                          'a test module the commit deletes was named to run')
 
@@ -616,13 +628,6 @@ class LightCheckTest(unittest.TestCase):
         self.assertEqual(0, code, 'the working tree was checked instead of '
                          'the index: ' + out)
 
-    def test_both_hooks_run_the_check(self):
-        for hook in ('pre-commit', 'pre-merge-commit'):
-            with open(os.path.join(HOOKS, hook)) as f:
-                self.assertIn('tools/light_check.py', f.read(), hook)
-            self.assertTrue(os.access(os.path.join(HOOKS, hook), os.X_OK),
-                            '%s is not executable' % hook)
-
     def hook_checkout(self):
         # The hooks as git runs them, from a checkout's tools/.
         os.makedirs(os.path.join(self.repo, 'tools', 'hooks'))
@@ -640,8 +645,8 @@ class LightCheckTest(unittest.TestCase):
         # Its interpreter notes each time it is the one that ran, and finds
         # this test's pyflakes: a hook that missed it would find another
         # python3, which may have pyflakes too and pass the same way.
-        # Imported here, so an environment without pyflakes fails the tests
-        # that need it rather than collecting none of the suite.
+        # Imported here, not at the top, so an environment without pyflakes
+        # still collects the rest of the suite.
         import pyflakes
         EnvBuilder(symlinks=os.name != 'nt').create(where)
         site = sysconfig.get_path(

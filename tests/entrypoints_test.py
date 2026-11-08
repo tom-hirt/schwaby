@@ -38,9 +38,10 @@ class EntrypointTest(unittest.TestCase):
         'hooks/pre-merge-commit': 'light_check_test.py::LightCheckTest::'
         'test_a_commit_or_merge_through_the_hooks_is_refused_and_named',
     }
-    # The tools that run on POSIX only, whose tests skip on Windows. Every
-    # other test above runs everywhere. A skip is seen by its decorator, on
-    # the method or its class; one taken inside the test is not.
+    # The tools that run on POSIX only, whose tests skip on Windows. Beyond
+    # these and the ones below, every test above runs everywhere. A skip is
+    # seen by its decorator, on the method or its class; one taken inside
+    # the test is not.
     POSIX_ONLY = {'redproof.py', 'repeat.py'}
     # The ones whose test runs the light check, which refuses every commit
     # without pyflakes: that test skips where [dev] is not installed.
