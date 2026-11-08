@@ -17,10 +17,12 @@ jobs:
         # does. That is hard to justify for every commit.
         #
         # Linux on every push, all three platforms on pull requests, on tags,
-        # and on a manual run. The cross-platform risk in this library is
-        # concentrated in the token file writer, which renames files and sets
-        # permissions; that is worth proving before a merge or a release, not
-        # before every commit.
+        # on a push to a release branch, and on a manual run. The
+        # cross-platform risk in this library is concentrated in the token
+        # file writer, which renames files and sets permissions; that is worth
+        # proving before a merge or a release, not before every commit. A
+        # release branch holds only the release's own commits, so each push
+        # to one is a commit that may be tagged.
         #
         # workflow_dispatch is in the full-matrix list deliberately. Without it
         # the on-demand run would be Linux-only, so the one button available
@@ -30,7 +32,8 @@ jobs:
           ${{
             (github.event_name == 'pull_request'
              || github.event_name == 'workflow_dispatch'
-             || startsWith(github.ref, 'refs/tags/'))
+             || startsWith(github.ref, 'refs/tags/')
+             || startsWith(github.ref, 'refs/heads/release/'))
             && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]')
             || fromJSON('["ubuntu-latest"]')
           }}

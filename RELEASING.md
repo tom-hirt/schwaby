@@ -149,10 +149,26 @@ runs.
 
 ## Cutting a release
 
-1. `CHANGELOG.md` — a new section, written for someone deciding whether to
+A release is made on a release branch of its own, `release/vX.Y.Z`, from a
+fixed base commit on `main`. The cut, the release gate, the release red-proof
+and the tag all happen there, and only fixes the release needs are added;
+then the branch merges back into `main`, and only after that is the release
+created and published.
+
+1. **The release branch**, from the base the release is of:
+
+   ```shell
+   git fetch origin
+   git rev-parse origin/main          # the base: name it in the sign-off
+   git switch -c release/vX.Y.Z origin/main
+   ```
+
+   Everything from here to the tag happens on this branch.
+
+2. `CHANGELOG.md` — a new section, written for someone deciding whether to
    upgrade.
 
-2. `schwaby/version.py` — bump. **Major if anything public is removed or
+3. `schwaby/version.py` — bump. **Major if anything public is removed or
    renamed**, minor for added surface or changed behaviour, patch for fixes
    alone.
 
@@ -161,7 +177,7 @@ runs.
    accident. A changelog banner does not reach someone who never opens one, so
    the version number has to carry it.
 
-3. **Anything naming a version**, which goes stale silently:
+4. **Anything naming a version**, which goes stale silently:
 
    ```shell
    grep -rn 'schwaby@v\|schwaby==' README.md docs/ schwaby/ tests/
@@ -185,7 +201,7 @@ runs.
    hits: read each one and keep only those describing something that already
    shipped and stays true. Say what changed, not which release changed it.
 
-4. **No dates in shipped documentation.**
+5. **No dates in shipped documentation.**
 
    ```shell
    grep -rnE '\b20[0-9]{2}-[0-9]{2}-[0-9]{2}\b' README.md docs/*.rst schwaby/
@@ -200,7 +216,7 @@ runs.
 
    Dates belong in `CHANGELOG.md`, which is a dated record by construction.
 
-5. **For a documentation-only release, prove it rather than asserting it.**
+6. **For a documentation-only release, prove it rather than asserting it.**
 
    ```shell
    python - <<'EOF'
@@ -244,9 +260,17 @@ runs.
    Anyone pinning a release should be able to re-run the check rather than
    trust the claim.
 
-6. The release gate, on **3.11, 3.12 and 3.14**, one pass on each — 3.14 is
-   the newest Python supported, and `asyncio` semantics differ below 3.12 as
-   well as above it:
+7. **The cut:** the changelog section and the version bump in one commit,
+   `release: vX.Y.Z — headline`, pushed to the release branch:
+
+   ```shell
+   git commit -m 'release: vX.Y.Z — headline' CHANGELOG.md schwaby/version.py
+   git push -u origin release/vX.Y.Z
+   ```
+
+8. The release gate, on the release branch's head, on **3.11, 3.12 and
+   3.14**, one pass on each — 3.14 is the newest Python supported, and
+   `asyncio` semantics differ below 3.12 as well as above it:
 
    ```shell
    pytest tests/ -q -n auto
@@ -266,6 +290,9 @@ runs.
    `python -m build` earns its place: `setup.py` is not imported by the suite, so
    an edit leaving it unparseable is invisible to `pytest`.
 
+   CI runs the whole matrix, every Python on all three platforms, on each
+   push to a release branch; read that run for the same commit.
+
    Then the release red-proof, at the commit you will tag:
 
    ```shell
@@ -283,14 +310,36 @@ runs.
    waits at the publish workflow's `pypi` environment until someone approves
    it there.
 
-7. Commit, then `git tag -a vX.Y.Z`. Write the message from a file — backticks in
-   `git tag -m` are executed as command substitution, which silently swallows
-   words from the message.
+   **A fix the release needs goes onto the release branch, and nothing
+   else does.** Re-prove only the fix's own scope on the new head: the
+   sentinels it touches and the red-proof entries whose reads it changes,
+   and, if it changes anything under `schwaby/`, the release gate once more.
+   The new head is the commit that is signed off and tagged. Work on `main`
+   goes on meanwhile and is not taken in: the base stays fixed.
 
-8. `git push origin main && git push origin vX.Y.Z`
+9. **The tag, on the proven head of the release branch:** `git tag -a vX.Y.Z`
+   on the commit the release gate and the release red-proof passed. Write the
+   message from a file — backticks in `git tag -m` are executed as command
+   substitution, which silently swallows words from the message.
 
-9. Create the release, only once `main` on GitHub holds the commit GitHub's
-   tag names:
+10. **Push the tag, then merge the release branch back into `main`** the way
+    any branch merges:
+
+    ```shell
+    git push origin release/vX.Y.Z vX.Y.Z
+    git switch main && git pull --ff-only origin main
+    git merge release/vX.Y.Z    # a fast-forward if main has not moved
+    git push origin main
+    ```
+
+    If `main` moved since the base, this is a merge commit, made through the
+    hooks like any other, and the gate runs once more on the merged tree
+    before the push: two branches that each pass can still fail together. The
+    tag stays where it is, on the release branch's head, which `main` now
+    holds. Delete the release branch once `main` has it.
+
+11. Create the release, only once `main` on GitHub holds the commit GitHub's
+   tag names, which it does once step 10 has merged the release branch back:
 
    ```shell
    git fetch origin
@@ -300,12 +349,13 @@ runs.
    ```
 
    GitHub's tag, not the local one: the release is made from GitHub's, and
-   step 10 says why the two can differ. A tag made without `-a` has no
-   `^{}` line and is refused here; re-make it as step 7 does.
+   step 12 says why the two can differ. A tag made without `-a` has no
+   `^{}` line and is refused here; re-make it as step 9 does.
 
-   A tag can name a commit `main` does not hold: one cut on a branch, or
-   pushed apart from `main`. The publish workflow refuses such a commit too,
-   but only once the release exists; this check stops it first.
+   A tag can name a commit `main` does not hold: a release branch not yet
+   merged back, or a tag pushed apart from either. The publish workflow
+   refuses such a commit too, but only once the release exists; this check
+   stops it first.
 
    **Creating the release is what publishes to PyPI.**
    `.github/workflows/publish.yml` runs on a published release, re-runs the suite
@@ -330,7 +380,7 @@ runs.
    tags carry a workflow without these checks, and every version they name
    is already on PyPI, which refuses a re-upload.
 
-10. **If you move a tag, say so — a normal `git fetch` will not follow it.**
+12. **If you move a tag, say so — a normal `git fetch` will not follow it.**
 
    Deleting and re-creating a pushed tag is sometimes right, for instance to
    fold a late documentation change into a release before it is published. But
@@ -350,7 +400,7 @@ runs.
    Tell anyone downstream when a tag moves. A stale ref plus a confident tool is
    worse than a wrong answer, because a wrong answer invites a second look.
 
-11. **Re-check any claim about the release against the tag, after tagging.**
+13. **Re-check any claim about the release against the tag, after tagging.**
 
    The range available while preparing a release is `vPREV..HEAD`, which excludes
    the commit that bumps `version.py` — so the convenient measurement is
