@@ -360,7 +360,7 @@ class LinkTest(unittest.TestCase):
             root = os.path.join(REPO_ROOT, directory)
             # os.walk on a path that does not exist yields nothing and raises
             # nothing, so a directory that is renamed or removed silently
-            # shrinks what this check covers. `bin/` went that way in 3.0.0.
+            # shrinks what this check covers.
             assert os.path.isdir(root), 'walk root is gone: %s' % directory
             for dirpath, _, filenames in os.walk(root):
                 if '__pycache__' in dirpath or '_build' in dirpath:
@@ -372,9 +372,7 @@ class LinkTest(unittest.TestCase):
             if name.endswith(('.rst', '.md')):
                 found.append(os.path.join(REPO_ROOT, name))
         # setup.py carries the Documentation URL PyPI shows in its sidebar,
-        # which is as reader-facing as anything in the docs and was outside
-        # this walk until a red-proof pointed it at a nonexistent page and
-        # nothing failed.
+        # which is as reader-facing as anything in the docs.
         found.append(os.path.join(REPO_ROOT, 'setup.py'))
         return found
 
@@ -2334,17 +2332,17 @@ listening_yet, and none of ten once each test took a free port. It also
 class LongDescriptionTest(unittest.TestCase):
     """The README as PyPI will render it.
 
-    Until 3.0.0 the README was reStructuredText, and `twine check --strict` was
-    a real gate on it: rst rejects malformed markup, which is how a title
-    underline one character short -- enough to publish a release with a blank
-    description -- was caught before it shipped.
+    On reStructuredText, `twine check --strict` is a real gate: rst rejects
+    malformed markup, such as a title underline one character short, which is
+    enough to publish a release with a blank description.
 
-    Markdown is far more permissive. Measured against `readme_renderer`, it
-    rejects an empty document and a whitespace-only one and accepts everything
-    else, including unclosed HTML tags and broken link syntax. So `twine check`
-    alone cannot catch a description that renders as nothing useful, and this asserts
-    the property directly instead: the description renders, it is substantial,
-    and it contains what the page has to carry.
+    The README is Markdown, which is far more permissive. Measured against
+    `readme_renderer`, it rejects an empty document and a whitespace-only one
+    and accepts everything else, including unclosed HTML tags and broken link
+    syntax. So `twine
+    check` alone cannot catch a description that renders as nothing useful,
+    and this asserts the property directly instead: the description renders,
+    it is substantial, and it contains what the page has to carry.
     """
 
     @staticmethod

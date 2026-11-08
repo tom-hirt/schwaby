@@ -489,8 +489,8 @@ class ClientFromLoginFlowTest(unittest.TestCase):
     def test_server_which_never_answers_times_out(
             self, mock_get, mock_webbrowser_get, async_session, sync_session,
             client):
-        # A server which comes up but never answers used to spin here forever,
-        # with nothing on screen to say why.
+        # A server which comes up but never answers must not spin here
+        # forever, with nothing on screen to say why.
         import httpx2 as _httpx2
         mock_get.side_effect = _httpx2.ConnectError('never listening')
 
@@ -1753,10 +1753,10 @@ class StoredTokenShapeTest(unittest.TestCase):
 
     @no_duplicates
     def test_a_null_token_type_or_refresh_token_counts_as_absent(self):
-        # A nullable field in a token store. Such a token used to work until
-        # it lapsed and then be reported terminal, until the shape check
-        # refused it; and a null token_type made every call on a live token
-        # raise AttributeError.
+        # A nullable field in a token store. Without the shape check, such a
+        # token would work until it lapsed and then be reported terminal,
+        # and a null token_type would make every call on a live token raise
+        # AttributeError.
         import time
         live = dict(self.GOOD, token_type=None, refresh_token=None,
                     expires_at=int(time.time()) + 1800)
@@ -2025,8 +2025,8 @@ class LoginExchangeErrorTest(unittest.TestCase):
     def test_a_refused_exchange_carries_the_endpoints_status(self):
         cases = ((429, None, 'http_429'),
                  (401, None, 'http_401'),
-                 # Raised here, not left to authlib, which would put no
-                 # status on it.
+                 # Raised by this library's token hook, not left to
+                 # authlib, which would put no status on it.
                  (400, {'error': 'invalid_grant'}, 'invalid_grant'),
                  (429, {'error': 'slow_down'}, 'slow_down'),
                  # Above 429, so a range is not mistaken for 429.
@@ -2475,8 +2475,8 @@ class TokenFileAgeTest(unittest.TestCase):
 
     @no_duplicates
     def test_a_file_that_is_not_a_json_object_is_refused(self):
-        # A string holding the key's name passed the old membership test and
-        # then failed indexing a string, with nothing about the file.
+        # A string holding the key's name would pass a membership test and
+        # then fail indexing a string, with nothing about the file.
         for text in ('[1, 2]', 'null', '7', '"creation_timestamp"',
                      '["creation_timestamp"]'):
             with self.subTest(text=text):

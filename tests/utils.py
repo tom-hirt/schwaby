@@ -110,9 +110,8 @@ def bound_datagram_socket():
     return s
 
 
-# Resolved from this file rather than the working directory. Every test that
-# loads it used to require pytest to be run from the repo root, and running
-# from anywhere else failed 164 tests on a FileNotFoundError in setUp.
+# Resolved from this file rather than the working directory, so the tests
+# that load it run from anywhere, not only from the repo root.
 TESTDATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'testdata')
 
 class AnyStringWith(str):
@@ -279,8 +278,8 @@ class AsyncMagicMock:
 def has_diff(old, new):
     '''False when old and new are the same JSON. When they differ it raises
     AssertionError carrying the diff, so the difference is in the failure
-    itself rather than in the test's captured output, under a failure that
-    says only "True is not false". Every caller asserts it False.'''
+    itself, not only in the test's captured output with a bare "True is not
+    false". Every caller asserts it False.'''
     old_out = json.dumps(old, indent=4, sort_keys=True).splitlines()
     new_out = json.dumps(new, indent=4, sort_keys=True).splitlines()
     diff = list(difflib.ndiff(old_out, new_out))

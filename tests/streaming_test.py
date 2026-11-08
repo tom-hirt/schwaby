@@ -7137,10 +7137,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         service, exc, msg = errors[0]
         self.assertIs(boom, exc)
 
-        # Unpacking this as (_, exc, _) would have passed while the service and
-        # the message were both None -- which they were, until the callback
-        # started carrying them. "Mark this subscription unhealthy" is a stated
-        # reason to register a handler, and it needs to know which one.
+        # Unpacking this as (_, exc, _) would pass even if the service and
+        # the message were both None. "Mark this subscription unhealthy" is a
+        # stated reason to register a handler, and it needs to know which
+        # one.
         self.assertEqual('LEVELONE_EQUITIES', service)
         self.assertEqual('LEVELONE_EQUITIES', msg['service'])
 
@@ -7297,9 +7297,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         # to completion regardless.
         #
         # The cancel lands once the handler is running, which is the only
-        # moment the guard is in play. It used to land after 50ms, which on a
-        # loaded machine could be before logout reached the report at all:
-        # the cancellation then came from somewhere else and the test passed
+        # moment the guard is in play. A cancel after a fixed delay could, on
+        # a loaded machine, land before logout reached the report at all: the
+        # cancellation would come from somewhere else and the test would pass
         # without exercising the guard.
         reporting = asyncio.Event()
 
@@ -8985,8 +8985,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     async def test_an_unusable_message_is_not_mistaken_for_a_close_failure(
             self, ws_connect):
         # docs/streaming.rst designates (service=None, message=None) as the
-        # logout-close signature, and a consumer branches on exactly that. A
-        # null channel used to produce the same pair.
+        # logout-close signature, and a caller branches on exactly that. A
+        # null channel must not produce the same pair.
         socket = await self.login_and_get_socket(ws_connect)
 
         errors = []
@@ -9494,10 +9494,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         # not one of them.
         #
         # Not `{'command': 'nothing here'}`, a frame carrying neither
-        # channel: the channel guard reports that, for a different reason,
-        # so this test would pass for the wrong one. An empty `data` list
-        # tests what this is for without overlapping that guard, which has
-        # its own tests.
+        # channel: the channel guard absorbs and counts that, so this test
+        # would be measuring that guard rather than the empty-channel case.
+        # An empty `data` list tests what this is for without overlapping
+        # that guard, which has its own tests.
         self.assertEqual(2, len(errors))
         for exc in errors:
             self.assertIsInstance(exc, schwaby.streaming.UnusableMessage)

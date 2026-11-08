@@ -827,11 +827,11 @@ CASES = [
          '::test_setup_py_names_an_encoding_when_it_reads_a_file',
          'without an encoding'),
 
-    # `_assert_finite` used to ask "can float() parse it" and return quietly
-    # when the answer was no. Wrong in both directions: None answered no and
-    # got through (the offset setters have no comparison after the call, so
-    # they built an order with the field silently missing), and b'1' answered
-    # yes and got through as bytes, which json.dumps refuses.
+    # `_assert_finite` asks "is this a number", not "can float() parse it",
+    # which is wrong in both directions: None answers no and would get
+    # through (the offset setters have no comparison after the call, so they
+    # would build an order with the field silently missing), and b'1' answers
+    # yes and would get through as bytes, which json.dumps refuses.
     Case('orders/non-number-order-field',
          'schwaby/orders/generic.py',
          "        if not isinstance(price, numbers.Real):",
@@ -1825,8 +1825,8 @@ CASES = [
          '::test_a_working_order_is_not_terminal',
          'unexpectedly found in'),
 
-    # An ACCT_ACTIVITY type nobody has captured is still delivered; what is new
-    # is that it no longer passes silently. The override must call the report.
+    # An ACCT_ACTIVITY type nobody has captured is still delivered, and it is
+    # reported rather than passing silently. The override must call the report.
     Case('streaming/unobserved-message-type-is-reported',
          'schwaby/streaming.py',
          "                    _report_unknown_message_type(name)",
@@ -1893,8 +1893,9 @@ CASES = [
 
     # Exactly the captured set. A token copied from a parser's fallback list
     # rather than a frame would put a type Schwab does not send into the
-    # set, so the set is pinned. Mutated to an upper-case spelling, which is
-    # not what the capture shows.
+    # set, so the set is pinned. Mutated to the upper-case spelling, the
+    # realistic wrong value: parsers' fallback lists use it, and Schwab
+    # sends the mixed case docs/streaming.rst records.
     Case('streaming/message-type-vocabulary-is-the-captured-set',
          'schwaby/streaming.py',
          "        'OrderMonitorCreated', 'OrderMonitorCompleted',",
@@ -2652,8 +2653,9 @@ CASES = [
          'False is not true'),
 
     # Each refusal the hook raises carries the response's status, one case
-    # per branch. The JSON-bodied one used to be left to authlib, which puts
-    # no status on it, so leaving it to authlib is a case of its own.
+    # per branch. The JSON-bodied one is raised here rather than left to
+    # authlib, which puts no status on it, so leaving it to authlib is a case
+    # of its own.
     Case('auth/a-bodyless-refusal-carries-its-status',
          'schwaby/auth.py',
          "        refusal._token_endpoint_status = response.status_code\n"
@@ -2916,9 +2918,9 @@ CASES = [
          'tests/streaming_test.py::StreamClientTest::test_an_absorbed_cause_whose_type_cannot_be_named_is_reported',
          'boom'),
 
-    # The scale goes through the same validation. It once reached `int()`
-    # directly, so a float scale truncated and a bool scale decoded as 1 --
-    # both of which change the answer by a factor of ten or more.
+    # The scale goes through the same validation. Reaching `int()` directly,
+    # a float scale would truncate and a bool scale decode as 1 -- both of
+    # which change the answer by a factor of ten or more.
     Case('contrib/decimal-scale-is-validated-like-a-member',
          'schwaby/contrib/util.py',
          "    scale = _unsigned(0 if scale_member is None else scale_member,\n"
@@ -6775,9 +6777,8 @@ SUITE_CASES = [
 CASES += SUITE_CASES
 
 
-# Report-delivery guards whose tests used to measure durations. Each test
-# now waits on a state or an order, and each entry breaks the guard to prove
-# the rewritten test still sees it.
+# Report-delivery guards. Each test waits on a state or an order, never a
+# duration, and each entry breaks the guard to prove the test sees it.
 TIMING_CASES = [
     Case('streaming/logout-report-lets-a-cancel-through',
          'schwaby/streaming.py',
@@ -7306,9 +7307,9 @@ CASES.append(
          'the shard line misstates the slice or the whole'))
 
 CASES.append(
-    # The lock pins versions; a library file edited at the same version kept
-    # every verdict measured against the original until each file was held
-    # to its RECORD.
+    # The lock pins versions, and a library file edited at the same version
+    # must not keep a verdict measured against the original, so each file is
+    # held to its RECORD.
     Case('harness/an-edited-installed-file-keeps-nothing',
          'tools/redproof.py',
          '            if digest != f.hash.value:\n',

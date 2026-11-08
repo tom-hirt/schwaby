@@ -481,9 +481,9 @@ class TokenEndpointStatusTest(unittest.TestCase):
 
     @no_duplicates
     def test_a_refusal_with_a_json_body_carries_its_status(self):
-        # Raised here rather than left to authlib, which puts no status on
-        # its error, so an implementation reading it from there would leave
-        # this None.
+        # Raised by this library's token hook rather than left to authlib,
+        # which puts no status on its error, so an implementation reading it
+        # from there would leave this None.
         for asynchronous in (False, True):
             for status in (400, 429):
                 with self.subTest(status=status, asynchronous=asynchronous):
@@ -826,9 +826,9 @@ class UtilsTest(unittest.TestCase):
 
     @no_duplicates
     def test_no_location_header_raises_rather_than_returning_none(self):
-        # Neither returns None, which is also what plenty of harmless things
-        # return, so `if order_id:` would skip an order Schwab had very likely
-        # placed.
+        # Both raise rather than return None. None is also what plenty of
+        # harmless things return, so `if order_id:` would skip an order
+        # Schwab had very likely placed.
         response = MockResponse({}, 200, headers={})
 
         with self.assertRaises(MissingLocationHeaderError) as cm:
@@ -1099,9 +1099,10 @@ class UtilsTest(unittest.TestCase):
 
     @no_duplicates
     def test_the_mismatch_says_the_order_exists(self):
-        # The old message was "order request account hash != Utils.account_hash",
-        # and the docstring called it a wiring problem "rather than the order".
-        # Both read as a configuration complaint. An order had been placed.
+        # A message such as "order request account hash !=
+        # Utils.account_hash", or calling it a wiring problem "rather than
+        # the order", would read as a configuration complaint. An order has
+        # been placed, so the message says so.
         response = MockResponse({}, 200, headers={
             'Location':
             'https://api.schwabapi.com/trader/v1/accounts/badhash/orders/123'})

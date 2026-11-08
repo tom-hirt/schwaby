@@ -182,7 +182,8 @@ class OptionSymbolTest(unittest.TestCase):
 
     def test_every_cent_granular_strike_encodes_exactly(self):
         # The sweep the single cases above are drawn from: every cent from
-        # $0.01 to $1000.00. 590 of these were wrong before the fix.
+        # $0.01 to $1000.00. Truncating the float, 590 of these would come
+        # out wrong.
         import decimal
         wrong = []
         for cents in range(1, 100001):
@@ -681,7 +682,7 @@ class OptionSymbolInputTest(unittest.TestCase):
 
     @no_duplicates
     def test_a_datetime_expiration_is_narrowed_to_its_date(self):
-        # Accepted, documented, and previously untested. The time of day is
+        # Accepted and documented. The time of day is
         # dropped rather than refused, and the symbol must come out the same
         # as it does for the equivalent date.
         moment = datetime.datetime(2024, 5, 10, 15, 47, 3)
@@ -729,7 +730,8 @@ class OptionSymbolLayoutTest(unittest.TestCase):
 
     @no_duplicates
     def test_a_symbol_that_is_not_the_fixed_layout_is_refused(self):
-        # Each of the first three used to parse, as a different contract.
+        # Each of the first three would parse, read loosely, as a different
+        # contract.
         for symbol in ('SOXL 261120P00125000',     # root padded short: 2061
                        'SOXL  261120P0012500',     # 7-digit strike: 12.5
                        'SOXL  261120P001250000',   # 9-digit strike: 1250

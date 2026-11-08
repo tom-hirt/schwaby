@@ -608,10 +608,10 @@ class DecodeDecimalTest(unittest.TestCase):
         # hangs the thread, which a per-item try/except cannot rescue -- one
         # bad field would take a stream down rather than one message.
         #
-        # `contrib/decimal-scale-is-bounded` red-proofs this. An earlier
-        # version relied on `scaleb`'s own operand limit rather than an
-        # explicit bound, and that could not be red-proofed at all: mutating
-        # it did not fail the test, it hung the run until killed.
+        # `contrib/decimal-scale-is-bounded` red-proofs this. The bound is
+        # explicit rather than left to `scaleb`'s own operand limit, which
+        # could not be red-proofed: mutating it would hang the run rather
+        # than fail the test.
         with self.assertRaises(UnusableDecimalScale):
             decode_decimal({'lo': '1', 'signScale': 10 ** 9})
 
@@ -635,12 +635,11 @@ class DecodeDecimalTest(unittest.TestCase):
         # ordinary thing to do when formatting money -- got 1234.57 for a
         # price of 1234.5678, silently, from a function whose whole purpose is
         # that its result feeds back into set_price.
-        # Both branches. An earlier fix built the value from a string and
-        # then negated it -- and `Decimal.__neg__` is itself a context-aware
-        # operation, so it was exact for positive values and rounded negative
-        # ones. Every test then in the file used an even signScale, so nothing
-        # could see it: the fix stopped at the first branch and so did the
-        # fixture.
+        # Both branches. Building the value from a string and then negating
+        # it would not do: `Decimal.__neg__` is itself a context-aware
+        # operation, so it would be exact for positive values and round
+        # negative ones. A fixture with only even signScales would never see
+        # that, so this one has both.
         cases = ((12, '1234.5678'), (13, '-1234.5678'))
         original = decimal.getcontext().prec
         try:
@@ -861,10 +860,11 @@ class DecodeDecimalTest(unittest.TestCase):
         #
         # The first pair is one digit past each width: thirty for a lone
         # `lo`, which may carry the whole 96-bit mantissa, and eleven for a
-        # `mid`. An eleven-digit `lo` is an ordinary value. That pair is refused by the range check, not
-        # the length check -- the length check decides nothing short of
-        # `int()`'s own limit, which only the wider pairs reach -- and the
-        # scale is refused by its 0..64 bound before either.
+        # `mid`. An eleven-digit `lo` is an ordinary value. That pair is
+        # refused by the range check, not the length check -- the length
+        # check decides nothing short of `int()`'s own limit, which only the
+        # wider pairs reach -- and the scale is refused by its 0..64 bound
+        # before either.
         for lo_width, member_width in ((30, 11), (4301, 4301),
                                        (100000, 100000)):
             with self.subTest(nonzero_width=lo_width):
@@ -897,7 +897,7 @@ class DecodeDecimalTest(unittest.TestCase):
     def test_a_renamed_key_is_refused_in_either_direction(self):
         # An unknown key beside a *missing* component is ambiguous: the
         # unknown key may be that component under a new name. Both directions
-        # were once decoded, and they are not symmetric in cost.
+        # are refused, and they are not symmetric in cost.
         #
         # A renamed mantissa read as zero. A renamed *scale* was far worse:
         # with no signScale the absent-scale rule applies, so a $7.35 limit

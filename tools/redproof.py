@@ -1233,11 +1233,9 @@ TASK_LIMIT = RUN_LIMIT + REAP_LIMIT + 300
 def parallel(fn, items, size, failed):
     '''fn over items in `size` worker processes, yielding each result as
     it arrives, and failed(item, why) for an item whose worker died, raised
-    or overran TASK_LIMIT. Processes, not threads: measured while the harness
-    still classified every run's reads, twenty threads queued on the
-    interpreter lock spent about fourteen seconds an entry waiting where
-    pytest took half of one. That work is gone since; processes still keep
-    each task's state its own.
+    or overran TASK_LIMIT. Processes, not threads: threads queue on the
+    interpreter lock for the harness's own work, and processes keep each
+    task's state its own.
 
     A pool of its own, not multiprocessing's or concurrent.futures': a Pool
     waits forever on a dead worker and hangs in terminate() after an idle

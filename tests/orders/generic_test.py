@@ -1411,12 +1411,12 @@ class OrderBuilderExamplesTest(unittest.TestCase):
 
 
 class PricesAreStringsTest(unittest.TestCase):
-    '''Prices are strings or `Decimal`, never floats, and are not converted
-    here. Converting a float means choosing a rounding on the caller's behalf
-    for a value denominated in money -- and truncating its binary value sends
-    roughly one in twenty cent-granular prices a tick low, silently. The
-    caller knows whether their price should round up, down or to the nearest
-    tick, and this cannot.'''
+    '''Prices are strings or `Decimal`, never floats: a float is refused
+    rather than converted. Converting a float means choosing a rounding on
+    the caller's behalf for a value denominated in money -- and truncating
+    its binary value sends roughly one in twenty cent-granular prices a tick
+    low, silently. The caller knows whether their price should round up, down
+    or to the nearest tick, and this cannot.'''
 
     def setUp(self):
         self.order_builder = OrderBuilder()
@@ -1444,7 +1444,7 @@ class PricesAreStringsTest(unittest.TestCase):
     @no_duplicates
     def test_a_string_price_is_stored_exactly_as_given(self):
         # The whole point: what the caller wrote is what Schwab receives. 8.2
-        # is the value the old binary truncation turned into '8.19'.
+        # is the value truncating its binary float would turn into '8.19'.
         for value in ('8.20', '8.2', '0.1869', '199.99', '0.00'):
             builder = OrderBuilder()
             builder.set_price(value)
@@ -1734,22 +1734,22 @@ class NonFinitePriceTest(unittest.TestCase):
 class NonNumericOrderFieldTest(unittest.TestCase):
     '''The numeric order fields, given something that is not a number.
 
-    `_assert_finite` used to answer "can float() parse it" and return quietly
-    when the answer was no. That is the wrong question in both directions, and
-    the two directions failed differently:
+    `_assert_finite` asks "is this a number", not "can float() parse it",
+    which is the wrong question in both directions, and the two directions
+    fail differently:
 
-    Things that are not numbers answer no. `set_quantity(None)` then reached
-    `quantity <= 0` and raised a bare TypeError naming neither the field nor
-    the value. The two offset setters have no comparison after the call at all,
-    so they *accepted* it -- and `_build_object` drops a None, so
-    `set_stop_price_offset(None)` built an order with no offset on it and said
-    nothing. A trailing stop with no offset is a different order from the one
-    that was asked for, placed without an error.
+    Things that are not numbers answer no. `set_quantity(None)` would then
+    reach `quantity <= 0` and raise a bare TypeError naming neither the field
+    nor the value. The two offset setters have no comparison after the call at
+    all, so they would *accept* it -- and `_build_object` drops a None, so
+    `set_stop_price_offset(None)` would build an order with no offset on it
+    and say nothing. A trailing stop with no offset is a different order from
+    the one that was asked for, placed without an error.
 
     And things that are not numbers answer yes. `float(b'1')` is 1.0, so a
-    bytes passed and was stored as bytes; `json.dumps` refuses those, so the
-    order was not wrong so much as unsendable, discovered at the point of
-    sending it.
+    bytes would pass and be stored as bytes; `json.dumps` refuses those, so
+    the order would not be wrong so much as unsendable, discovered at the
+    point of sending it.
     '''
 
     SETTERS = ('set_quantity', 'set_stop_price_offset', 'set_price_offset',
@@ -1757,9 +1757,9 @@ class NonNumericOrderFieldTest(unittest.TestCase):
 
     # Each of these is here for a reason a smaller list would miss:
     #
-    #  * None and [] answer "no" to `float()` -- the original hole.
-    #  * b'1' answers *yes*: float(b'1') is 1.0, so it passed and was stored
-    #    as bytes, which json.dumps then refuses.
+    #  * None and [] answer "no" to `float()`.
+    #  * b'1' answers *yes*: float(b'1') is 1.0, so it would pass and be
+    #    stored as bytes, which json.dumps then refuses.
     #  * object() answers no to both, so a fix keyed on either question alone
     #    still has to handle it.
     #  * Fraction is a `numbers.Real`, so a guard written as
