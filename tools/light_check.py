@@ -19,7 +19,8 @@ commit will contain:
  * `git diff --cached --check`: no whitespace errors or conflict markers;
  * no staged file signals a process it cannot have started: none looks up
    its parent's pid (Python's os call, the shell's variable, ps's parent
-   column, psutil's method) or sends a signal to pid -1, which reaches
+   column, the PPid line of /proc's status, psutil's methods) or sends a
+   signal to pid -1, in Python, in a shell line or as an argv, which reaches
    every process the user owns. A parent found that way is whoever adopted
    an orphan, often the session manager, whose children are the whole
    desktop. A kill names a pid or a process group its caller started and
@@ -159,13 +160,20 @@ BLIND_KILL = re.compile('|'.join([
     r'\$\{?' + _PARENT.upper() + r'\b',
     # ps asked for the parent column, on the same line.
     r'\bps\b.*\b' + _PARENT + r'\b',
-    # psutil's Process method.
-    r'\.' + _PARENT + r'\(\)',
+    # The status file's line for it.
+    r'\bPP' + _PARENT[2:] + r':',
+    # psutil's Process methods.
+    r'\.(?:' + _PARENT + r'|parent)\(\)',
     # Python's kill of pid -1.
     r'\bkill' + r'\(\s*-1\s*,',
     # The shell's kill of pid -1, after at least one option or `--`:
     # `kill -1 PID` is a hangup sent to PID, not a kill of -1.
-    r'\bkill' + r'(?:\s+-[sn]\s+\S+|\s+-\S+)+\s+-1(?=[\s;&|)]|$)',
+    # It may sit in a quoted string or be followed by a redirection.
+    r'\bkill' + r'(?:\s+-[sn]\s+\S+|\s+-\S+)+\s+-1(?![\w$-])',
+    # The same as an argv, each word quoted: the command, at least one
+    # option, and -1 last.
+    r'[\'"]kill' + r'[\'"]\s*,\s*'
+    r'(?:[\'"]-[^\'"]*[\'"]\s*,\s*)+[\'"]-1[\'"]\s*,?\s*[\])]',
 ]).encode('ascii'), re.MULTILINE)
 
 

@@ -20,7 +20,7 @@ HOOKS = os.path.join(ROOT, 'tools', 'hooks')
 
 #: The pieces of a blind kill, kept apart so that no tracked file carries
 #: one whole; the tree scan below would find it if one did.
-PARENT, KILL = 'pp' + 'id', 'k' + 'ill'
+PARENT, KILL, UP = 'pp' + 'id', 'k' + 'ill', 'par' + 'ent'
 
 #: A word for the tests to forbid, made up and spelled in pieces so that no
 #: tracked file carries it whole; the tree scan below would find it if one
@@ -262,12 +262,20 @@ class LightCheckTest(unittest.TestCase):
         # Each on the third line, so the line named is the one carrying it.
         cases = [('mod.py', 'os.get%s()' % PARENT),
                  ('mod.py', 'psutil.Process().%s()' % PARENT),
+                 ('mod.py', 'psutil.Process().%s()' % UP),
+                 ('mod.py', "open('/proc/1/status')  # PP%s:" % PARENT[2:]),
                  ('mod.py', 'os.%s(-1, signal.SIGKILL)' % KILL),
+                 ('mod.py', "subprocess.run('%s -9 -1', shell=True)" % KILL),
+                 ('mod.py', 'os.system("%s -9 -1")' % KILL),
+                 ('mod.py', "subprocess.run(['%s', '-9', '-1'])" % KILL),
+                 ('mod.py', 'subprocess.run(["%s", "--", "-1"])' % KILL),
                  ('run.sh', 'echo $%s' % PARENT.upper()),
                  ('run.sh', 'echo ${%s}' % PARENT.upper()),
                  ('run.sh', 'ps -o %s= -p "$pid"' % PARENT),
                  ('run.sh', '%s -9 -1' % KILL),
                  ('run.sh', '%s -s KILL -1 2>/dev/null' % KILL),
+                 ('run.sh', '%s -9 -1>/dev/null' % KILL),
+                 ('run.sh', 'echo `%s -9 -1`' % KILL),
                  ('run.sh', '%s -- -1' % KILL)]
         for name, line in cases:
             with self.subTest(line=line):
@@ -278,12 +286,15 @@ class LightCheckTest(unittest.TestCase):
                 self.assertIn("%s:3: looks up its parent's pid" % name, out)
                 self.git('reset', '-q', '--hard')
         # Positive control: a hangup sent to one pid, a kill of a group
-        # the caller started, and a parent pid read for a pid it recorded
-        # are let through.
-        self.stage('run.sh', '%s -1 "$pid"\n%s -9 -"$pgid"\n'
-                   % (KILL, KILL))
-        self.stage('mod.py', 'import os\n\n%s, pgid = 1, 2\n'
-                   'os.%s(-pgid, 9)\n' % (PARENT, KILL))
+        # the caller started, one whose number only starts with 1, and a
+        # parent pid read for a pid it recorded are let through.
+        self.stage('run.sh', '%s -1 "$pid"\n%s -9 -"$pgid"\n%s -9 -12\n'
+                   % (KILL, KILL, KILL))
+        self.stage('mod.py', 'import os\nimport subprocess\n\n'
+                   '%s, pgid = 1, 2\nos.%s(-pgid, 9)\nos.%s(-12, 9)\n'
+                   "subprocess.run(['%s', '-1', str(pgid)])\n"
+                   "subprocess.run(['%s', '-9', '-12'])\n"
+                   % (PARENT, KILL, KILL, KILL, KILL))
         code, out = self.check()
         self.assertEqual(0, code, out)
 

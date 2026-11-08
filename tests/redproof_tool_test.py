@@ -673,8 +673,11 @@ def task(item):
         return ('done', item, alive)
     if item == 'kills-idle':
         time.sleep(0.5)
-        for pid in siblings():
+        found = siblings()
+        for pid in found:
             os.kill(pid, signal.SIGKILL)
+        # Whether it killed any: a search that finds none proves nothing.
+        return ('done', item, bool(found))
     if item == 'raises':
         raise SystemExit(143)
     if item == 'big':
@@ -872,9 +875,9 @@ print('dies-after', sorted(got), flush=True)
                          "worker process stopped (exit 143)')]",
                          lines.get('stopped'), 'the work after a stopped '
                          'worker did not go on')
-        self.assertEqual("[('done', 'kills-idle'), ('done', 'x')]",
+        self.assertEqual("[('done', 'kills-idle', True), ('done', 'x')]",
                          lines.get('kills-idle'), 'an idle worker\'s death '
-                         'lost work')
+                         'lost work, or no idle worker was killed')
         self.assertEqual("[('done', 'a'), ('failed', 'raises', 'the harness "
                          "failed: SystemExit: 143')]", lines.get('raises'),
                          'a task that raised ended its worker\'s work')

@@ -65,12 +65,13 @@ its content, a word on your clone's own forbidden list
 configuration so the repository never carries it. Nor may a staged file look
 up its parent's pid or signal pid -1: an orphan's parent is whoever adopted
 it, often the session manager, so a kill aimed that way can end the desktop.
-Signal only a pid or a process group you started and recorded. A commit that
-changes a file under ``tests/`` is also told which red-proof entries test or
-mutate it; the release red-proof runs them (``RELEASING.md`` says more). Every commit is told
-which test modules read a file it changes, from ``tools/reads.json``, and
-``python -I -B tools/reads.py --touching main`` names the whole branch's:
-run those before the branch merges. When a test's imports or the files it
+The whole file is read, so a line that only mentions such a lookup is refused
+too. Signal only a pid or a process group you started and recorded. A commit
+that changes a file under ``tests/`` is also told which red-proof entries test
+or mutate it; the release red-proof runs them (``RELEASING.md`` says more).
+Every commit is told which test modules read a file it changes, from
+``tools/reads.json``, and ``python -I -B tools/reads.py --touching main`` names
+the whole branch's: run those before the branch merges. When a test's imports or the files it
 names change, ``python -I -B tools/reads.py`` rewrites the map, and a test
 that every change reaches fails until it does.
 The full suite is not part of it; that runs below, and on every pull request.
