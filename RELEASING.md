@@ -244,8 +244,9 @@ runs.
    Anyone pinning a release should be able to re-run the check rather than
    trust the claim.
 
-6. Verify, on **3.11, 3.12 and 3.14** — 3.14 is the newest Python supported,
-   and `asyncio` semantics differ below 3.12 as well as above it:
+6. The release gate, on **3.11, 3.12 and 3.14**, one pass on each — 3.14 is
+   the newest Python supported, and `asyncio` semantics differ below 3.12 as
+   well as above it:
 
    ```shell
    pytest tests/ -q -n auto
@@ -265,15 +266,15 @@ runs.
    `python -m build` earns its place: `setup.py` is not imported by the suite, so
    an edit leaving it unparseable is invisible to `pytest`.
 
-   Then the red-proof, at the commit you will tag:
+   Then the release red-proof, at the commit you will tag:
 
    ```shell
    python -I -B tools/redproof.py
    ```
 
    It runs every entry: no verdict is kept from one run to the next. Every
-   entry must be PROVEN, SUPERSEDED or REMOVED, and no run may write to a
-   tracked file or go unchecked for one.
+   entry must be RED, GREEN (declared), RED (declared GREEN) or REMOVED, and
+   no run may write to a tracked file or go unchecked for one.
 
    **Nothing is tagged until the release is signed off.** The maintainer, or
    whoever they have delegated release approval to, approves it having seen the results above for the exact commit that will be tagged. A result from

@@ -1,6 +1,6 @@
 '''The red-proof harness's own decisions: what a mutation does, which failure
 counts, which writes to tracked files are caught, how many runs fit, and what
-its worker processes do when one dies. A harness that calls a guard PROVEN
+its worker processes do when one dies. A harness that calls a guard RED
 when it is not reports it working after it broke, and nothing else would
 ever notice.'''
 
@@ -160,12 +160,12 @@ class JudgeTest(unittest.TestCase):
 
     def test_expect_must_be_in_what_the_failure_says(self):
         verdict, detail = self.judge(self.ECHOED)
-        self.assertEqual('RED?', verdict,
-                         'a failure on another assertion was PROVEN because '
+        self.assertEqual('RED(?)', verdict,
+                         'a failure on another assertion was RED because '
                          'the expect text was in the echoed source')
         said = self.ECHOED.replace("'identical' not found in",
                                    "'expected' not found in")
-        self.assertEqual('PROVEN', self.judge(said)[0])
+        self.assertEqual('RED', self.judge(said)[0])
 
     SAME = "E       AssertionError: '7521' unexpectedly found in 'xxx'"
 
@@ -180,27 +180,27 @@ class JudgeTest(unittest.TestCase):
             self.section("T.test_x (helper='_safe_name', offset=1)", self.SAME),
             self.section("T.test_x (helper='_safe_str', offset=1)", self.SAME),
             '=== short test summary info ===', '1 failed'])
-        self.assertEqual('PROVEN', self.judge(
+        self.assertEqual('RED', self.judge(
             both, expect='unexpectedly found in',
             subtest="helper='_safe_str'")[0])
         other = '\n'.join([
             self.section("T.test_x (helper='_safe_name', offset=1)", self.SAME),
             '=== short test summary info ===', '1 failed'])
-        self.assertEqual('RED?', self.judge(
+        self.assertEqual('RED(?)', self.judge(
             other, expect='unexpectedly found in',
             subtest="helper='_safe_str'")[0],
-            'a failure in another subtest was PROVEN')
+            'a failure in another subtest was RED')
 
     def test_a_subtest_label_is_never_the_match(self):
         # The test's own subtest keyword, and a failure that is a crash, not
-        # the assertion: matching the label would call this PROVEN with every
+        # the assertion: matching the label would call this RED with every
         # assertion deleted.
         crashed = '\n'.join([
             self.section('T.test_x (protocol=0)',
                          'E   RecursionError: maximum recursion depth exceeded'),
             "SUBFAILED(protocol=0) tests/redact_test.py::T::test_x",
             '1 failed'])
-        self.assertEqual('RED?', self.judge(crashed, expect='protocol=')[0],
+        self.assertEqual('RED(?)', self.judge(crashed, expect='protocol=')[0],
                          'an entry matched on a label the test chose')
 
     def test_a_rewritten_asserts_quoted_expression_is_not_what_failed(self):
@@ -213,7 +213,7 @@ class JudgeTest(unittest.TestCase):
                          'E         ',
                          "E         + expected)"),
             '1 failed'])
-        self.assertEqual('RED?', self.judge(bare)[0],
+        self.assertEqual('RED(?)', self.judge(bare)[0],
                          "an assert's quoted expression was taken for what "
                          'failed')
         # The positive control: an assert's own message still counts, and
@@ -222,18 +222,18 @@ class JudgeTest(unittest.TestCase):
             self.section('test_real', 'E       AssertionError: expected',
                          'E       assert 3 == 4'),
             '1 failed'])
-        self.assertEqual('PROVEN', self.judge(with_message)[0])
+        self.assertEqual('RED', self.judge(with_message)[0])
         other = '\n'.join([
             self.section('test_other', 'E       AssertionError: the count',
                          "E       assert (0 == 1 and 'expected' != '')"),
             '1 failed'])
-        self.assertEqual('RED?', self.judge(other)[0])
+        self.assertEqual('RED(?)', self.judge(other)[0])
 
     def test_a_subtest_failure_message_counts(self):
         out = '\n'.join([self.section('T.test_x (i=1)',
                                        'E   AssertionError: expected 3'),
                           '1 failed'])
-        self.assertEqual('PROVEN', self.judge(out)[0])
+        self.assertEqual('RED', self.judge(out)[0])
 
     def test_captured_output_and_the_summary_are_not_what_failed(self):
         # A captured log line and the short summary both echo text a test can
@@ -247,13 +247,14 @@ class JudgeTest(unittest.TestCase):
             '=== short test summary info ===',
             'FAILED tests/x_test.py::T::test_x - AssertionError: expected',
             '1 failed'])
-        self.assertEqual('RED?', self.judge(out)[0],
+        self.assertEqual('RED(?)', self.judge(out)[0],
                          'captured output was taken for what failed')
 
     def test_a_baseline_that_fails_is_not_judged(self):
         verdict, detail = self.judge(self.ECHOED,
                                         baseline=result(1, 'FAILED'))
-        self.assertEqual('SPEC', verdict, 'an entry was judged on a test that '
+        self.assertEqual('BASELINE FAIL', verdict, 'an entry was judged on a '
+                         'test that '
                          'fails unmutated')
         self.assertIn('does not pass before the mutation', detail)
 
@@ -262,12 +263,21 @@ class JudgeTest(unittest.TestCase):
         # verdict, because a run that did not finish proves nothing.
         verdict, detail = self.judge('E   AssertionError: expected',
                                         code=None)
-        self.assertEqual('RED?', verdict, 'a timed-out run was judged')
+        self.assertEqual('RED(?)', verdict, 'a timed-out run was judged')
 
     def test_a_pass_is_green_unless_superseded(self):
         self.assertEqual('GREEN', self.judge('1 passed', code=0)[0])
-        self.assertEqual('SUPERSEDED', self.judge(
+        self.assertEqual('GREEN (declared)', self.judge(
             '1 passed', code=0, superseded='covered elsewhere')[0])
+
+    def test_a_declared_green_entry_that_is_caught_says_so(self):
+        verdict, detail = self.judge(self.ECHOED.replace(
+            "'identical' not found in", "'expected' not found in"),
+            superseded='covered elsewhere')
+        self.assertEqual('RED (declared GREEN)', verdict,
+                         'a declared GREEN entry that was caught read as '
+                         'plain RED')
+        self.assertIn('covered elsewhere', detail)
 
     def test_a_run_that_could_not_be_checked_is_reported(self):
         run = FakeRun(self.CONTENT, result(1, 'E   expected'),
@@ -280,7 +290,7 @@ class JudgeTest(unittest.TestCase):
     def test_a_tracked_write_is_reported_against_the_entry(self):
         run = FakeRun(self.CONTENT, result(1, 'E   expected'),
                       changed=['schwaby/x.py'])
-        self.assertEqual('PROVEN', redproof.judge(run, case(), self.PASSED)[0])
+        self.assertEqual('RED', redproof.judge(run, case(), self.PASSED)[0])
         self.assertEqual({'x/y': ['schwaby/x.py']}, run.tracked_writes,
                          'a tracked write went unreported')
 
@@ -531,7 +541,7 @@ class ReportTest(unittest.TestCase):
         import io
         run = types.SimpleNamespace(tracked_writes={}, unchecked={})
         selected = [case()]
-        verdicts = {'x/y': ('PROVEN', '', 0.1)}
+        verdicts = {'x/y': ('RED', '', 0.1)}
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(0, redproof.report(run, selected, verdicts, 0))
         run.unchecked['x/y'] = 'it left no record of its writes'
@@ -542,6 +552,22 @@ class ReportTest(unittest.TestCase):
         self.assertIn('x/y could not be checked for tracked writes: it left '
                       'no record of its writes', out.getvalue(),
                       'an unchecked run was not named')
+
+    def test_each_verdict_is_accounted_for_or_not(self):
+        import contextlib
+        import io
+        run = types.SimpleNamespace(tracked_writes={}, unchecked={})
+        for verdict, code in (('RED', 0), ('GREEN (declared)', 0),
+                              ('RED (declared GREEN)', 0), ('REMOVED', 0),
+                              ('GREEN', 1), ('RED(?)', 1), ('SKIP', 1),
+                              ('BASELINE FAIL', 1), ('ERROR', 1)):
+            with self.subTest(verdict=verdict):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    got = redproof.report(run, [case()],
+                                          {'x/y': (verdict, '', 0.1)}, 0)
+                self.assertEqual(code, got, '%s was %s' % (
+                    verdict, 'not accounted for' if code == 0 else
+                    'accounted for'))
 
     def test_what_a_worker_found_reaches_the_run(self):
         worker = types.SimpleNamespace(
@@ -1086,7 +1112,7 @@ print('dies-after', sorted(got), flush=True)
                 'baselines': {tuple(redproof.tests_of(entry)): None},
                 }):
             result = redproof._entry_task(entry.name)
-        self.assertEqual('SPEC', result[1])
+        self.assertEqual('SKIP', result[1])
         self.assertEqual('', result[4], 'an entry that never ran printed '
                          'another run\'s time split')
 
@@ -1114,16 +1140,16 @@ class ShardTest(unittest.TestCase):
         return [cases.Case('area/entry-%d' % i, 'schwaby/x.py', 'a', 'b',
                            'tests/x_test.py', 'e') for i in range(200)]
 
-    def test_the_slices_of_a_run_cover_every_entry_once(self):
+    def test_the_shards_of_a_run_cover_every_entry_once(self):
         everything = self.cases()
         for n in (1, 2, 3, 7):
             seen = []
             for k in range(1, n + 1):
                 seen += [c.name for c in redproof.select(everything, [], (k, n))]
             self.assertEqual(sorted(c.name for c in everything), sorted(seen),
-                             'the slices of %d missed or repeated an entry' % n)
+                             'the shards of %d missed or repeated an entry' % n)
 
-    def test_an_entry_keeps_its_slice_whatever_else_is_selected(self):
+    def test_an_entry_keeps_its_shard_whatever_else_is_selected(self):
         everything = self.cases()
         for name in [c.name for c in everything]:
             # --name matches by substring, so entry-1 also selects entry-1x:
@@ -1133,22 +1159,22 @@ class ShardTest(unittest.TestCase):
             self.assertEqual(
                 name in [c.name for c in among],
                 name in [c.name for c in narrow],
-                'which slice %s is in depends on the others' % name)
+                'which shard %s is in depends on the others' % name)
 
-    def test_the_shard_line_names_the_slice_and_the_whole(self):
+    def test_the_shard_line_names_the_shard_and_the_whole(self):
         everything = self.cases()
         mine = redproof.select(everything, [], (2, 3))
         self.assertEqual(
             'redproof: shard 2/3: %d of 200 entries' % len(mine),
             redproof.shard_line((2, 3), len(mine), len(everything)),
-            'the shard line misstates the slice or the whole')
+            'the shard line misstates the shard or the whole')
 
-    def test_an_empty_slice_is_not_a_failed_name(self):
-        # One entry, three slices: two of them hold nothing.
+    def test_an_empty_shard_is_not_a_failed_name(self):
+        # One entry, three shards: two of them hold nothing.
         one = self.cases()[:1]
         found = [redproof.select(one, ['area/entry-0'], (k, 3))
                  for k in (1, 2, 3)]
-        self.assertNotIn(None, found, 'an empty slice was reported as a name '
+        self.assertNotIn(None, found, 'an empty shard was reported as a name '
                          'matching nothing')
         self.assertEqual([0, 0, 1], sorted(len(f) for f in found))
         self.assertIsNone(redproof.select(one, ['nothing-like-it'], (1, 3)))

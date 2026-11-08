@@ -4,7 +4,7 @@ to arrive on the assertion you named.
     .venv/bin/python -I -B tools/redproof.py                 # every entry
     .venv/bin/python -I -B tools/redproof.py --name auth/    # names containing it
     .venv/bin/python -I -B tools/redproof.py --jobs 4        # entries at once
-    .venv/bin/python -I -B tools/redproof.py --shard 2/3     # one slice of three
+    .venv/bin/python -I -B tools/redproof.py --shard 2/3     # shard 2 of three
     .venv/bin/python -I -B tools/redproof.py --touching main # the changed set
 
 --touching chooses the entries a branch reaches since it left that base:
@@ -31,43 +31,52 @@ tools/redproof_cases.py names the mutation, the test that must fail, and a
 substring that must appear in the failure.
 
 VERDICTS
-    PROVEN      the test passed unmutated, failed mutated, and the output
+    RED         the test passed unmutated, failed mutated, and the output
                 carries `expect`: the check works.
     GREEN       the test passed with the code broken. Two readings, needing
                 different fixes: the test is asleep, or what was mutated is no
                 longer load-bearing because something later covers it. If the
                 second, mark the entry `superseded=` with the reason rather
-                than deleting it.
-    SUPERSEDED  GREEN, on an entry marked superseded: a real answer.
+                than deleting it, which declares it GREEN.
+    GREEN (declared)
+                GREEN, on an entry declared GREEN by `superseded=`: a real
+                answer.
+    RED (declared GREEN)
+                RED, on an entry declared GREEN: it is caught after all, so
+                the declaration no longer holds and can go.
     REMOVED     the code the entry mutates was deleted, and the entry says so.
-    RED?        it failed, but not on `expect`, or ran out of time, or was
+    RED(?)      it failed, but not on `expect`, or ran out of time, or was
                 killed: proves nothing.
     ERROR       the harness itself failed while judging it: a defect in the
                 harness, named against the entry, and the run goes on.
-    SPEC        the entry cannot be judged: its text is missing or ambiguous,
-                the mutation is a no-op, the mutant does not parse where the
-                original does, or the test fails unmutated, which includes a
-                baseline whose worker died before it finished.
+    SKIP        the entry cannot be applied: the file it mutates is gone, its
+                text is missing or ambiguous, the mutation is a no-op, or the
+                mutant does not parse where the original does. Fix or
+                retarget the entry.
+    BASELINE FAIL
+                the test fails unmutated, which includes a baseline whose
+                worker died before it finished: nothing can be judged until
+                it passes.
 
 POSIX only: each run is a process group of its own, waited for with
 os.wait4 and killed with os.killpg.
 
-Exit status 0 only when every selected entry is PROVEN, SUPERSEDED or
-REMOVED, and no run wrote to a tracked file or went unchecked for one; 1
-otherwise, and when the copy does not import its own schwaby or the suite
-cannot be collected; 2 when --name matches nothing, or the arguments are
-wrong.
+Exit status 0 only when every selected entry is RED, GREEN (declared),
+RED (declared GREEN) or REMOVED, and no run wrote to a tracked file or went
+unchecked for one; 1 otherwise, and when the copy does not import its own
+schwaby or the suite cannot be collected; 2 when --name matches nothing, or
+the arguments are wrong.
 
 Every run judges every selected entry. Verdicts are not kept from one run to
 the next: the whole set takes about a minute and a half on 20 cores, and a
 kept verdict, even one keyed on everything a run read, can outlive a change
 to something it depended on.
 
-SHARDS. `--shard K/N` judges one slice of N, so N machines can share one
+SHARDS. `--shard K/N` judges one shard of N, so N machines can share one
 run: the selected entries (after --name) are divided by a hash of each name,
-and the entries in slice K run. Every entry is in exactly one slice, so the
-slices of one run never overlap and never miss one, and an entry stays in its
-slice from run to run. An empty slice is not an error: it has nothing to run
+and the entries in shard K run. Every entry is in exactly one shard, so the
+shards of one run never overlap and never miss one, and an entry stays in its
+shard from run to run. An empty shard is not an error: it has nothing to run
 and exits 0.
 
 THE WORKING TREE IS NEVER TOUCHED. The run snapshots the repository's own files
@@ -126,7 +135,7 @@ AUDIT = 'tools/redproof_audit.py'
 
 #: The lowest a run may leave available, in bytes
 FLOOR = 2 << 30
-#: The bound on one test run, in seconds, before it is RED? by name
+#: The bound on one test run, in seconds, before it is RED(?) by name
 RUN_LIMIT = 600
 #: The bound on a run's leftover processes going, once it has exited
 REAP_LIMIT = 30
@@ -291,7 +300,7 @@ def failure_sections(output):
     lines pytest echoes, not node ids, not a test's captured output, not a
     rewritten assert's quoted expression: any of those can contain an
     entry's `expect` whatever actually failed, which would make a failure on
-    the wrong assertion read as PROVEN. `E` lines outside any section count,
+    the wrong assertion read as RED. `E` lines outside any section count,
     untitled.'''
     sections = [['', []]]
     current = sections[0]
@@ -708,14 +717,14 @@ def judge(run, case, baseline):
     '''(verdict, detail).'''
     original = run.snapshot.content.get(case.path)
     if original is None:
-        return 'SPEC', ('%s does not exist. If the code was deleted on '
+        return 'SKIP', ('%s does not exist. If the code was deleted on '
                         'purpose, mark the entry removed= with the reason.'
                         % case.path)
     mutated, why = mutate(case, original)
     if mutated is None:
-        return 'SPEC', why
+        return 'SKIP', why
     if baseline.code != 0:
-        return 'SPEC', 'test does not pass before the mutation%s' % (
+        return 'BASELINE FAIL', 'test does not pass before the mutation%s' % (
             ' (%s)' % baseline.killed if baseline.killed else '')
     result, changed, unchecked = run.run(tests_of(case), (case.path, mutated))
     if changed:
@@ -723,10 +732,10 @@ def judge(run, case, baseline):
     if unchecked:
         run.unchecked[case.name] = unchecked
     if result.code is None:
-        return 'RED?', result.killed
+        return 'RED(?)', result.killed
     if result.code == 0:
         if case.superseded:
-            return 'SUPERSEDED', case.superseded
+            return 'GREEN (declared)', case.superseded
         return 'GREEN', ('the mutation changed nothing the test could see. '
                          'Either the test is asleep, or what was mutated is '
                          'no longer load-bearing; if the second, mark the '
@@ -734,10 +743,14 @@ def judge(run, case, baseline):
     if not failed_on(case, result.output):
         said = [line for _, text in failure_sections(result.output)
                 for line in text.splitlines() if line.strip()]
-        return 'RED?', ('failed, but not on %r%s: got %s' % (
+        return 'RED(?)', ('failed, but not on %r%s: got %s' % (
             case.expect, ' in subtest %r' % case.subtest if case.subtest
             else '', said[0].strip() if said else '?'))
-    return 'PROVEN', ''
+    if case.superseded:
+        return 'RED (declared GREEN)', (
+            'caught after all, so its superseded= no longer holds: %s'
+            % case.superseded)
+    return 'RED', ''
 
 
 def main(argv):
@@ -749,7 +762,7 @@ def main(argv):
                         help='entries at once (default: every usable core '
                         'with REDPROOF_JOBS_ALL=1, two otherwise)')
     parser.add_argument('--shard', type=shard_arg, metavar='K/N',
-                        help='judge only slice K of N (K from 1)')
+                        help='judge only shard K of N (K from 1)')
     parser.add_argument('--touching', metavar='BASE',
                         help='only the entries whose run reads a test file '
                         'changed since the branch left BASE')
@@ -778,17 +791,17 @@ def shard_arg(text):
 
 
 def in_shard(name, shard):
-    '''Whether the entry named `name` is in slice (K, N). By the name alone,
+    '''Whether the entry named `name` is in shard (K, N). By the name alone,
     so the answer does not depend on which entries are selected.'''
     k, n = shard
     return int(sha(name.encode('utf-8')), 16) % n == k - 1
 
 
-def shard_line(shard, in_slice, total):
+def shard_line(shard, count, total):
     '''The line that says how a run was divided between machines: this
-    slice's selected entries and the whole selection's, before slicing.'''
+    shard's selected entries and the whole selection's, before sharding.'''
     return 'redproof: shard %d/%d: %d of %d entries' % (
-        shard[0], shard[1], in_slice, total)
+        shard[0], shard[1], count, total)
 
 
 def select(cases, names, shard):
@@ -997,7 +1010,8 @@ def judge_all(run, args, started):
 
 def report(run, selected, verdicts, started):
     '''Prints the run's summary and returns its exit status.'''
-    accounted = ('PROVEN', 'SUPERSEDED', 'REMOVED')
+    accounted = ('RED', 'GREEN (declared)', 'RED (declared GREEN)',
+                 'REMOVED')
     bad = [c.name for c in selected if verdicts[c.name][0] not in accounted]
     for name, files in sorted(run.tracked_writes.items()):
         print('redproof: %s wrote to tracked files: %s' % (

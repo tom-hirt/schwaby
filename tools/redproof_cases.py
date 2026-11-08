@@ -6425,7 +6425,7 @@ That is the whole install.''',
 
 
 # The harness's own guards. A guard here that stops working reports a broken
-# check as PROVEN with nothing to show it. Many below mutate kept-verdict
+# check as RED with nothing to show it. Many below mutate kept-verdict
 # machinery that no longer exists, and are kept as removed.
 HARNESS_CASES = [
     # What a child process reads is recorded nowhere.
@@ -7006,26 +7006,26 @@ REPEAT_CASES = [
 CASES += REPEAT_CASES
 
 
-# --shard divides one run between machines. A slice that depends on which
+# --shard divides one run between machines. A shard that depends on which
 # entries are selected, or on anything but the name, misses some entries and
 # runs others twice, and the union of the shards still reads as complete.
 SHARD_CASES = [
-    Case('harness/slices-cover-every-entry-once',
+    Case('harness/shards-cover-every-entry-once',
          'tools/redproof.py',
          "    return int(sha(name.encode('utf-8')), 16) % n == k - 1",
          "    return int(sha(name.encode('utf-8')), 16) % n <= k - 1",
          'tests/redproof_tool_test.py::ShardTest'
-         '::test_the_slices_of_a_run_cover_every_entry_once',
+         '::test_the_shards_of_a_run_cover_every_entry_once',
          'missed or repeated an entry'),
-    Case('harness/a-slice-is-chosen-by-name-alone',
+    Case('harness/a-shard-is-chosen-by-name-alone',
          'tools/redproof.py',
          '        selected = [c for c in selected if in_shard(c.name, shard)]',
          '        selected = [c for i, c in enumerate(selected)\n'
          '                    if i % shard[1] == shard[0] - 1]',
          'tests/redproof_tool_test.py::ShardTest'
-         '::test_an_entry_keeps_its_slice_whatever_else_is_selected',
+         '::test_an_entry_keeps_its_shard_whatever_else_is_selected',
          'depends on the others'),
-    Case('harness/an-empty-slice-is-not-a-missing-name',
+    Case('harness/an-empty-shard-is-not-a-missing-name',
          'tools/redproof.py',
          '    if not selected:\n        return None\n'
          '    if shard:\n'
@@ -7034,7 +7034,7 @@ SHARD_CASES = [
          '        selected = [c for c in selected if in_shard(c.name, shard)]\n'
          '    if not selected:\n        return None\n',
          'tests/redproof_tool_test.py::ShardTest'
-         '::test_an_empty_slice_is_not_a_failed_name',
+         '::test_an_empty_shard_is_not_a_failed_name',
          'reported as a name matching nothing'),
 ]
 
@@ -7088,7 +7088,7 @@ CASES += PIN_CASES
 # breaks one guard, or one of its fixes.
 HARNESS_JUDGING_CASES = [
     # If the expect text appears in the test source pytest echoes, a failure on
-    # another assertion would read as PROVEN.
+    # another assertion would read as RED.
     Case('harness/expect-is-matched-against-what-failed',
          'tools/redproof.py',
          "        elif line.startswith('E '):\n"
@@ -7174,7 +7174,7 @@ HARNESS_JUDGING_CASES = [
          'fails unmutated'),
     Case('harness/a-run-with-no-status-proves-nothing',
          'tools/redproof.py',
-         "    if result.code is None:\n        return 'RED?', result.killed\n",
+         "    if result.code is None:\n        return 'RED(?)', result.killed\n",
          '',
          'tests/redproof_tool_test.py::JudgeTest'
          '::test_a_run_with_no_exit_status_proves_nothing',
@@ -7209,7 +7209,7 @@ HARNESS_JUDGING_CASES_2 = [
          '               and True\n',
          'tests/redproof_tool_test.py::JudgeTest'
          '::test_a_subtest_qualifier_picks_the_failing_subtest',
-         'a failure in another subtest was PROVEN'),
+         'a failure in another subtest was RED'),
     # The branch every ordinary tombstone goes through.
     Case('harness/a-tombstone-retires-a-saved-record',
          'tools/redproof.py',
@@ -7315,14 +7315,14 @@ CASES.append(
 
 CASES.append(
     # A run divided between machines is read off this line, so its two
-    # counts must be the slice's and the whole's, in that order.
-    Case('harness/the-shard-line-states-slice-and-whole',
+    # counts must be the shard's and the whole's, in that order.
+    Case('harness/the-shard-line-states-shard-and-whole',
          'tools/redproof.py',
-         '        shard[0], shard[1], in_slice, total)',
-         '        shard[0], shard[1], total, in_slice)',
+         '        shard[0], shard[1], count, total)',
+         '        shard[0], shard[1], total, count)',
          'tests/redproof_tool_test.py::ShardTest'
-         '::test_the_shard_line_names_the_slice_and_the_whole',
-         'the shard line misstates the slice or the whole'))
+         '::test_the_shard_line_names_the_shard_and_the_whole',
+         'the shard line misstates the shard or the whole'))
 
 CASES.append(
     # The lock pins versions, and a library file edited at the same version

@@ -4,9 +4,9 @@ is about to be committed.
     python tools/light_check.py            # the staged changes against HEAD
 
 Run by tools/hooks/pre-commit and tools/hooks/pre-merge-commit; `git config
-core.hooksPath tools/hooks` turns them on in a clone. The full suite and the
-red-proof are the heavy checks, run at a release rather than on every
-commit.
+core.hooksPath tools/hooks` turns them on in a clone. The gate (every test,
+once) and the red-proof are the heavy checks, run at a release rather than
+on every commit.
 
 It checks the index, not the working tree, because the index is what the
 commit will contain:
@@ -36,9 +36,9 @@ commit will contain:
    never carries the words it keeps out.
    The whole file, not only its added lines, and any case.
 
-It names the test modules the commit reaches, from the index's
-tools/reads.json: those whose reads include a file it changes. They are the
-tests to run before the change merges.
+It names the touched sentinels, from the index's tools/reads.json: the test
+modules whose reads include a file the commit changes. They are the tests to
+run before the change merges.
 
 When the commit changes a file under tests/, it names the red-proof entries
 it reaches too, by tools/redproof.py's own rule: the release red-proof runs them, and
@@ -303,7 +303,7 @@ def _load(path):
 
 
 def reached_tests():
-    '''The test modules this commit reaches: those whose reads, by the
+    '''The touched sentinels: the test modules whose reads, by the
     index's tools/reads.json, include a file it changes, and a new test
     module. They are the tests to run before the change merges.
     Nothing, with a note, when the index has no map or one that is not a
@@ -360,14 +360,17 @@ def main():
     try:
         tests = reached_tests()
     except (Exception, SystemExit) as e:
-        print('light check: could not name the tests this commit reaches '
+        print('light check: could not name the touched sentinels '
               '(%s: %s); tools/reads.json is the map' % (type(e).__name__, e))
         tests = []
     if tests:
-        print('light check: %d test module%s read a file this commit changes; '
-              'run them before the change merges: python -m pytest %s' % (
-                  len(tests), '' if len(tests) == 1 else 's',
-                  ' '.join(tests)))
+        print('light check: %s; run %s before the change merges: '
+              'python -m pytest %s' % (
+                  '1 touched sentinel (a test module that reads a file this '
+                  'commit changes)' if len(tests) == 1 else
+                  '%d touched sentinels (test modules that read a file this '
+                  'commit changes)' % len(tests),
+                  'it' if len(tests) == 1 else 'them', ' '.join(tests)))
     try:
         names, helpers = changed_entries()
     except (Exception, SystemExit) as e:

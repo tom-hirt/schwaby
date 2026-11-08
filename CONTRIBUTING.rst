@@ -75,13 +75,14 @@ lookup is refused too, and so is a ``ps`` walk down from a pid you recorded:
 keep the pids you start instead. Signal only a pid or a process group you
 started and recorded. A commit that changes a file under ``tests/`` is also
 told which red-proof entries test or mutate it; the release red-proof runs
-them (``RELEASING.md`` says more). Every commit is told which test modules
-read a file it changes, from ``tools/reads.json``, and
-``python -I -B tools/reads.py --touching main`` names the whole branch's:
-run those before the branch merges. When a test's imports or the files it
-names change, ``python -I -B tools/reads.py`` rewrites the map, and a test
-that every change reaches fails until it does.
-The full suite is not part of it; that runs below, and on every pull request.
+them (``RELEASING.md`` says more). Every commit is told its touched
+sentinels, the test modules that read a file it changes, from
+``tools/reads.json``, and ``python -I -B tools/reads.py --touching main``
+names the whole branch's: run those before the branch merges. When a test's
+imports or the files it names change, ``python -I -B tools/reads.py``
+rewrites the map, and a test that every change reaches fails until it does.
+The gate, every test once, is not part of it; that runs below, and on every
+pull request.
 
 Then check the environment before you change anything, so a later failure is
 yours:
@@ -104,7 +105,7 @@ so a green run here is a green run there:
 
 .. code-block:: shell
 
-  pytest tests/ -q -n auto                  # the suite
+  pytest tests/ -q -n auto                  # the gate: every test, once
   python -m sphinx -W docs/ /tmp/docs-build # docs, warnings are errors
   python -m build                           # the artifacts
   python -m twine check --strict dist/*     # what PyPI will accept
@@ -118,7 +119,7 @@ Two of those are easy to get wrong locally:
   suite, so an edit that leaves it unparseable is invisible to ``pytest``. The
   build is what proves the package still assembles.
 
-CI runs the suite on CPython 3.10 through 3.14. Pushes to a branch run Linux
+CI runs the gate on CPython 3.10 through 3.14. Pushes to a branch run Linux
 only; pull requests and tags run Windows and macOS as well.
 
 --------------------------

@@ -6,7 +6,9 @@
 A test that fails one run in forty is a defect, not bad luck: something in it
 or under it depends on timing or on what else the machine is doing. This is
 how such a failure is measured, and how a fix for one is shown to work: the
-same count before and after, on the same tests, under the same load.
+same count before and after, on the same tests, under the same load. A
+measurement like this is a proof: one-off evidence for one diagnosis, never
+a gate or a check a change has to pass.
 
 Each run is a fresh `python -m pytest` in one process, from the repository
 root, with the interpreter this runs under. The runs are one after another,

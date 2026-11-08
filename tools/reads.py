@@ -18,7 +18,7 @@ A test module reads:
    later is read too.
 
 That is its direct surface: what it imports or names itself, not what
-those import in turn, which the full suite at a release covers. `closure()`
+those import in turn, which the gate at a release covers. `closure()`
 follows the imports, for a check that wants the whole reach.
 
 An entry ending in / is a directory, one holding *, ? or [ a pattern, and
@@ -29,9 +29,9 @@ DECLARED, with its reason. Naming a file a test does not read costs a test
 run; missing one of its direct reads is the failure this exists to prevent,
 so it errs towards naming.
 
-The light check names the test modules a commit's changes reach from this
-map, --touching names a branch's, and tools/redproof.py --touching chooses
-red-proof entries from it too.
+The light check names a commit's touched sentinels, the test modules its
+changes reach, from this map; --touching names a branch's, and
+tools/redproof.py --touching chooses red-proof entries from it too.
 '''
 
 import ast

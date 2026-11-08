@@ -506,9 +506,9 @@ class LightCheckTest(unittest.TestCase):
         self.stage('mod.py', 'import os\n\n\ndef f():\n    return 2\n')
         code, out = self.check()
         self.assertEqual(0, code, out)
-        self.assertIn('1 test module read a file this commit changes; run '
-                      'them before the change merges: python -m pytest '
-                      'tests/a_test.py\n', out,
+        self.assertIn('1 touched sentinel (a test module that reads a file '
+                      'this commit changes); run it before the change '
+                      'merges: python -m pytest tests/a_test.py\n', out,
                       'the tests a commit reaches were not named: ' + out)
         self.assertNotIn('tests/b_test.py', out)
 
