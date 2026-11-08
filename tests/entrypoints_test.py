@@ -44,7 +44,8 @@ class EntrypointTest(unittest.TestCase):
     # the test is not.
     POSIX_ONLY = {'redproof.py', 'repeat.py'}
     # The ones whose test runs the light check, which refuses every commit
-    # without pyflakes: that test skips where [dev] is not installed.
+    # without pyflakes: that test skips where [dev] is not installed,
+    # except in CI, which sets CI.
     NEED_PYFLAKES = {'light_check.py', 'hooks/pre-commit',
                      'hooks/pre-merge-commit'}
 
@@ -81,6 +82,7 @@ class EntrypointTest(unittest.TestCase):
                        or getattr(method, '__unittest_skip__', False))
             expected = ((os.name == 'nt' and name in self.POSIX_ONLY)
                         or (importlib.util.find_spec('pyflakes') is None
+                            and not os.environ.get('CI')
                             and name in self.NEED_PYFLAKES))
             self.assertEqual(expected, skipped,
                              '%s: %s %s here' % (
