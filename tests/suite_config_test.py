@@ -68,10 +68,11 @@ class AutoWorkersTest(unittest.TestCase):
 
 
 # Installed but not loaded still fails: only a venv without [dev], which
-# installs the plugin, skips, and never in CI, which sets CI.
+# installs the plugin, skips, and never in CI, which sets CI=true.
 @unittest.skipIf(importlib.util.find_spec('pytest_timeout') is None
-                 and not os.environ.get('CI'),
-                 'pytest-timeout not installed in this venv; [dev] installs it')
+                 and os.environ.get('CI') != 'true',
+                 'pytest-timeout not installed in this venv; '
+                 '[dev] installs it')
 def test_every_test_runs_under_a_time_limit(pytestconfig):
     # Asked of the running pytest rather than read from setup.cfg: the limit
     # exists only if the plugin that reads it is loaded.
