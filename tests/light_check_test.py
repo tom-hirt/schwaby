@@ -18,19 +18,27 @@ CHECK = os.path.join(ROOT, 'tools', 'light_check.py')
 HOOKS = os.path.join(ROOT, 'tools', 'hooks')
 
 
+#: The pieces of a blind kill, kept apart so that no tracked file carries
+#: one whole; the tree scan below would find it if one did.
+PARENT, KILL = 'pp' + 'id', 'k' + 'ill'
+
 #: A word for the tests to forbid, made up and spelled in pieces so that no
 #: tracked file carries it whole; the tree scan below would find it if one
 #: did.
 PROBE = 'qz' + 'xprobe'
 
 
-def forbidden():
-    # This clone's own list, read by the check's own function, so the two
-    # cannot disagree about the words.
+def light_check():
     spec = importlib.util.spec_from_file_location('light_check', CHECK)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.forbidden_words()
+    return module
+
+
+def forbidden():
+    # This clone's own list, read by the check's own function, so the two
+    # cannot disagree about the words.
+    return light_check().forbidden_words()
 
 
 # What a walk of a copy skips: what is not the repository's own.
@@ -139,6 +147,26 @@ class ForbiddenWordsTest(unittest.TestCase):
                       'the walk outside a checkout missed a file')
 
 
+class BlindKillTest(unittest.TestCase):
+
+    def test_no_file_in_the_tree_signals_what_it_did_not_start(self):
+        # By the check's own pattern, so the two cannot disagree.
+        pattern = light_check().BLIND_KILL
+        found, seen = [], 0
+        for rel in the_tree(ROOT):
+            path = os.path.join(ROOT, rel)
+            if os.path.islink(path) or not os.path.isfile(path):
+                continue
+            seen += 1
+            with open(path, 'rb') as f:
+                content = f.read()
+            found += [(rel, content.count(b'\n', 0, m.start()) + 1)
+                      for m in pattern.finditer(content)]
+        # Positive control: the walk reached the files it is for.
+        self.assertGreater(seen, 50, 'the walk read almost nothing')
+        self.assertEqual([], found)
+
+
 class LightCheckTest(unittest.TestCase):
 
     def setUp(self):
@@ -227,6 +255,35 @@ class LightCheckTest(unittest.TestCase):
                 self.git('reset', '-q', '--hard')
         # Positive control: the same files without the word are let through.
         self.stage('notes.md', 'a job\n')
+        code, out = self.check()
+        self.assertEqual(0, code, out)
+
+    def test_a_blind_kill_is_refused_and_named(self):
+        # Each on the third line, so the line named is the one carrying it.
+        cases = [('mod.py', 'os.get%s()' % PARENT),
+                 ('mod.py', 'psutil.Process().%s()' % PARENT),
+                 ('mod.py', 'os.%s(-1, signal.SIGKILL)' % KILL),
+                 ('run.sh', 'echo $%s' % PARENT.upper()),
+                 ('run.sh', 'echo ${%s}' % PARENT.upper()),
+                 ('run.sh', 'ps -o %s= -p "$pid"' % PARENT),
+                 ('run.sh', '%s -9 -1' % KILL),
+                 ('run.sh', '%s -s KILL -1 2>/dev/null' % KILL),
+                 ('run.sh', '%s -- -1' % KILL)]
+        for name, line in cases:
+            with self.subTest(line=line):
+                self.stage(name, 'import os\n\n%s\n' % line)
+                code, out = self.check()
+                self.assertEqual(1, code, 'a blind kill was let through: '
+                                 + out)
+                self.assertIn("%s:3: looks up its parent's pid" % name, out)
+                self.git('reset', '-q', '--hard')
+        # Positive control: a hangup sent to one pid, a kill of a group
+        # the caller started, and a parent pid read for a pid it recorded
+        # are let through.
+        self.stage('run.sh', '%s -1 "$pid"\n%s -9 -"$pgid"\n'
+                   % (KILL, KILL))
+        self.stage('mod.py', 'import os\n\n%s, pgid = 1, 2\n'
+                   'os.%s(-pgid, 9)\n' % (PARENT, KILL))
         code, out = self.check()
         self.assertEqual(0, code, out)
 

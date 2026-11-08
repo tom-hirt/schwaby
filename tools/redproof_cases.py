@@ -6942,6 +6942,15 @@ LIGHT_CHECK_CASES += [
          'tests/light_check_test.py::LightCheckTest'
          '::test_a_symlink_is_not_checked_as_code',
          'a symlink was checked as code'),
+    # A parent's pid found by lookup, or pid -1, reaches processes the
+    # caller never started.
+    Case('light-check/a-blind-kill-is-refused',
+         'tools/light_check.py',
+         '        for line in blind_kills_in(path):',
+         '        for line in []:',
+         'tests/light_check_test.py::LightCheckTest'
+         '::test_a_blind_kill_is_refused_and_named',
+         'a blind kill was let through'),
 ]
 
 CASES += LIGHT_CHECK_CASES

@@ -17,6 +17,13 @@ commit will contain:
    fail every commit; requiring no new one catches the unused import or
    undefined name a change introduces;
  * `git diff --cached --check`: no whitespace errors or conflict markers;
+ * no staged file signals a process it cannot have started: none looks up
+   its parent's pid (Python's os call, the shell's variable, ps's parent
+   column, psutil's method) or sends a signal to pid -1, which reaches
+   every process the user owns. A parent found that way is whoever adopted
+   an orphan, often the session manager, whose children are the whole
+   desktop. A kill names a pid or a process group its caller started and
+   recorded. Each line is named, by the whole file;
  * no staged file, by its name or its content, carries a word on this
    clone's forbidden list, `git config --add lightcheck.forbidden WORD`.
    The list lives in the clone's own configuration, so the repository
@@ -143,6 +150,33 @@ def forbidden_in(path, words):
             if word in name or word.encode('utf-8') in content]
 
 
+# Built from pieces so that this file, which names them, does not carry them.
+_PARENT = 'pp' + 'id'
+BLIND_KILL = re.compile('|'.join([
+    # Python's os call for the parent's pid.
+    r'\bget' + _PARENT + r'\b',
+    # The shell's variable for it.
+    r'\$\{?' + _PARENT.upper() + r'\b',
+    # ps asked for the parent column, on the same line.
+    r'\bps\b.*\b' + _PARENT + r'\b',
+    # psutil's Process method.
+    r'\.' + _PARENT + r'\(\)',
+    # Python's kill of pid -1.
+    r'\bkill' + r'\(\s*-1\s*,',
+    # The shell's kill of pid -1, after at least one option or `--`:
+    # `kill -1 PID` is a hangup sent to PID, not a kill of -1.
+    r'\bkill' + r'(?:\s+-[sn]\s+\S+|\s+-\S+)+\s+-1(?=[\s;&|)]|$)',
+]).encode('ascii'), re.MULTILINE)
+
+
+def blind_kills_in(path):
+    '''The line numbers at which the staged file looks up its parent's pid
+    or signals pid -1.'''
+    content = blob(':0:' + path) or b''
+    return [content.count(b'\n', 0, m.start()) + 1
+            for m in BLIND_KILL.finditer(content)]
+
+
 def compile_error(source, path):
     '''The error CPython raises compiling source, or None. pyflakes only
     parses, and some code parses and still cannot be compiled: `await`
@@ -255,6 +289,11 @@ def main():
         for word in forbidden_in(path, words):
             print('light check: %s: carries %r, a word on the forbidden '
                   'list' % (path, word))
+            failed = True
+        for line in blind_kills_in(path):
+            print("light check: %s:%d: looks up its parent's pid or signals "
+                  'pid -1; signal only a pid or group it started and '
+                  'recorded' % (path, line))
             failed = True
     check = git('diff', '--cached', '--check', check=False)
     if check.returncode != 0:
