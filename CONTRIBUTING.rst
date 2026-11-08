@@ -67,9 +67,10 @@ up its parent's pid, or signal pid -1 or its own process group: an orphan's
 parent is whoever adopted it, often the session manager, so a kill aimed that
 way can end the desktop, and a script's own group can hold whatever started
 it, unless the script began a session of its own. Comparing the parent's
-pid with 1, the test of an orphan that exits, is let through, either way
-round in Python (``os.getppid() == 1``, ``!=``) and in a shell test
-(``[ "$PPID" -eq 1 ]``, ``-ne``, ``=``, ``!=``). The whole file is read, so a line that only mentions such a
+pid with 1, the test of an orphan that exits, is let through as the whole
+comparison: in Python with ``==`` or ``!=``, either way round, and in a
+shell test (``[ "$PPID" -eq 1 ]``, ``[[ ]]`` or ``test``, with ``-ne``,
+``=`` or ``!=``). The whole file is read, so a line that only mentions such a
 lookup is refused too, and so is a ``ps`` walk down from a pid you recorded:
 keep the pids you start instead. Signal only a pid or a process group you
 started and recorded. A commit that changes a file under ``tests/`` is also

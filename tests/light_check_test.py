@@ -299,7 +299,17 @@ class LightCheckTest(unittest.TestCase):
                  ('mod.py', 'os.system("%s -9 0")' % KILL),
                  ('mod.py', 'x = os.get%s() == 2' % PARENT),
                  ('mod.py', 'x = 2 == os.get%s()' % PARENT),
+                 ('mod.py', 'x = 11 == os.get%s()' % PARENT),
+                 ('mod.py', 'x = os.get%s() == 1.5' % PARENT),
+                 ('mod.py', 'x = os.get%s() == 1 + n' % PARENT),
+                 ('mod.py', 'x = os.get%s() == 1 or os.%s(os.get%s(), 9)'
+                  % (PARENT, KILL, PARENT)),
                  ('run.sh', '[ "$%s" -eq 2 ] && exit' % PARENT.upper()),
+                 ('run.sh', '%s -9 "$%s" = 1' % (KILL, PARENT.upper())),
+                 ('run.sh', 'echo $%s = 1' % PARENT.upper()),
+                 ('run.sh', '[[ $%s -eq 1+1 ]]' % PARENT.upper()),
+                 ('run.sh', '[ $%s -eq 1 ] || %s $%s'
+                  % (PARENT.upper(), KILL, PARENT.upper())),
                  ('run.sh', 'echo $%s' % PARENT.upper()),
                  ('run.sh', 'echo ${%s}' % PARENT.upper()),
                  ('run.sh', 'ps -o %s= -p "$pid"' % PARENT),

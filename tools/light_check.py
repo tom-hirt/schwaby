@@ -26,10 +26,10 @@ commit will contain:
    session of its own. A parent found that way is whoever adopted an
    orphan, often the session manager, whose children are the whole desktop.
    Comparing the parent's pid with 1, the test of an orphan that exits, is
-   let through, either way round in Python (`os.getppid() == 1`, `!=`) and
-   in a shell test (`[ "$PPID" -eq 1 ]`, `-ne`, `=`, `!=`). A kill names a
-   pid or a process group its caller started and recorded. Each line is
-   named, by the whole file;
+   let through as the whole comparison: in Python with == or !=, either way
+   round, and in a shell test (`[ "$PPID" -eq 1 ]`, `[[ ]]` or `test`, with
+   -ne, = or !=). A kill names a pid or a process group its caller started
+   and recorded. Each line is named, by the whole file;
  * no staged file, by its name or its content, carries a word on this
    clone's forbidden list, `git config --add lightcheck.forbidden WORD`.
    The list lives in the clone's own configuration, so the repository
@@ -170,14 +170,21 @@ _ARGV_OPTION = (r'(?:' + _Q + r'-[sn]' + _Q + r'\s*,\s*' + _Q + r'[^\'"]*'
                 + _Q + r'\s*,\s*|' + _Q + r'-[^\'"]*' + _Q + r'\s*,\s*)')
 _ARGV_END = _Q + r'\s*,?\s*[\])]'
 _GET_PARENT = r'(?:os\.)?get' + _PARENT + r'\(\)'
-_SHELL_PARENT = r'["\']?\$\{?' + _PARENT.upper() + r'\}?["\']?'
+# Where a Python comparison ends: nothing else is computed from it.
+_PY_END = r'(?=\s*(?:$|[):,;#]|\b(?:and|or|if|else)\b))'
+# A shell test of the variable: `[`, `[[` or `test`, then the variable,
+# then the comparison, then the end of the test.
+_SHELL_TEST = (r'(?:\[\[?|\btest)\s+["\']?\$\{?' + _PARENT.upper()
+               + r'\}?["\']?\s+(?:-eq|-ne|!?==?)\s+["\']?1(?![\w.$+*/-])'
+               r'["\']?(?=\s*(?:\]|;|&|\||\)|$))')
 BLIND_KILL = re.compile('|'.join([
     # First, so that it takes the text before the lookups below can: a
-    # comparison of the parent's pid with init's, which only asks whether
-    # this process was orphaned. Matches of it are not refusals.
-    r'(?P<orphan_test>1\s*[=!]=\s*' + _GET_PARENT + r'|' + _GET_PARENT
-    + r'\s*[=!]=\s*1\b|' + _SHELL_PARENT + r'\s+(?:-eq|-ne|!?==?)\s+'
-    r'["\']?1\b)',
+    # comparison of the parent's pid with init's, and with no other number,
+    # which only asks whether this process was orphaned. Matches of it are
+    # not refusals.
+    r'(?P<orphan_test>(?<![\w.])1\s*[=!]=\s*' + _GET_PARENT + _PY_END
+    + r'|' + _GET_PARENT + r'\s*[=!]=\s*1(?![\w.])' + _PY_END + r'|'
+    + _SHELL_TEST + r')',
     # Python's os call for the parent's pid.
     r'\bget' + _PARENT + r'\b',
     # The shell's variable for it.
