@@ -609,54 +609,66 @@ class SnapshotTest(unittest.TestCase):
             'an untracked secret-named file would be copied')
 
 
-def boot_ticks():
-    '''Now, on the clock /proc gives a process's start time in: clock ticks
-    since boot.'''
-    return int(time.clock_gettime(time.CLOCK_BOOTTIME)
-               * os.sysconf('SC_CLK_TCK'))
-
-
 def group_and_start(pid):
-    '''The process group of pid, and when it started, in boot ticks.'''
+    '''The process group of pid, and when it started, in clock ticks since
+    boot.'''
     with open('/proc/%d/stat' % pid) as f:
         fields = f.read().rsplit(')', 1)[1].split()
     return int(fields[2]), int(fields[19])
 
 
-def started_by(pgid, ended):
-    '''The pids in group pgid, zombies too, that started no later than
-    ended: what a scenario started before it ended. A pid it named can be
-    reused once that process is gone, and the new process starts later.'''
+def members(pgid, start):
+    '''The pids in group pgid, zombies too, while it is still the group
+    whose leader started at start; none once the leader's pid belongs to
+    another process. A group's number cannot be given to a new process while
+    any member lives, so with its leader gone the members left are its own.'''
+    try:
+        if group_and_start(pgid)[1] != start:
+            return []
+    except (OSError, ValueError, IndexError):
+        pass
     found = []
     for d in os.listdir('/proc'):
         if not d.isdigit():
             continue
         try:
-            group, start = group_and_start(int(d))
+            group, _ = group_and_start(int(d))
         except (OSError, ValueError, IndexError):
             continue
-        if group == pgid and start <= ended:
+        if group == pgid:
             found.append(int(d))
     return found
 
 
-def kill_started_by(pgid, ended):
-    '''SIGKILL what started_by finds, each through a pidfd opened before its
-    start is read again: if the pid changed hands in between, the pidfd is
-    the old process's, and the signal reaches no one.'''
-    for pid in started_by(pgid, ended):
+def kill_recorded_group(pgid, start):
+    '''SIGKILL the members of group pgid, while its leader is still the one
+    that started at start. Each is signalled through a pidfd opened before it
+    is checked again: if its pid changed hands in between, the pidfd is the
+    old process's, and the signal reaches no one.'''
+    for pid in members(pgid, start):
         try:
             fd = os.pidfd_open(pid)
         except OSError:
             continue
         try:
-            group, start = group_and_start(pid)
-            if group == pgid and start <= ended:
+            group, began = group_and_start(pid)
+            if group == pgid and (pid != pgid or began == start):
                 signal.pidfd_send_signal(fd, signal.SIGKILL)
         except (OSError, ValueError, IndexError):
             pass
         finally:
             os.close(fd)
+
+
+def alive(pid, start):
+    '''Whether the process that started at start is still running at pid,
+    not a zombie and not another process given its pid since.'''
+    try:
+        with open('/proc/%d/stat' % pid) as f:
+            fields = f.read().rsplit(')', 1)[1].split()
+        return fields[0] != 'Z' and int(fields[19]) == start
+    except (OSError, ValueError, IndexError):
+        return False
 
 
 @unittest.skipUnless(os.path.isdir('/proc'), 'the scenarios find processes '
@@ -679,6 +691,11 @@ def group(name):
     p = subprocess.Popen(['sleep', '120'], start_new_session=True,
                          stdout=subprocess.DEVNULL)
     rp._track(p.pid)
+    # When it started, before its pid: a pid can be given to another
+    # process once this one is gone, and the start tells them apart.
+    with open('/proc/%d/stat' % p.pid) as f:
+        start = f.read().rsplit(')', 1)[1].split()[19]
+    print(name + '@', start, flush=True)
     print(name, p.pid, flush=True)
     return p
 
@@ -863,15 +880,22 @@ print('dies-after', sorted(got), flush=True)
                 [sys.executable, '-I', script, os.path.join(
                     os.path.dirname(__file__), '..', 'tools', 'redproof.py')],
                 stdout=out, stderr=err, start_new_session=True)
+        # Read while the script is this process's unreaped child, so the
+        # pid is still its own.
+        self.started = group_and_start(proc.pid)[1]
+
         def kill_what_it_started():
             # Each test group runs in a session of its own, so killing the
             # script's group does not reach them; the script names each as it
-            # starts it.
+            # starts it, with when it started.
             with open(os.path.join(tmp, 'out')) as f:
-                for line in f.read().splitlines():
-                    name, _, rest = line.partition(' ')
-                    if name.endswith(('-group', 'orphan')) and rest.isdigit():
-                        kill_started_by(int(rest), self.ended)
+                said = dict(line.partition(' ')[::2]
+                            for line in f.read().splitlines())
+            for name, pid in said.items():
+                start = said.get(name + '@', '')
+                if (name.endswith(('-group', 'orphan')) and pid.isdigit()
+                        and start.isdigit()):
+                    kill_recorded_group(int(pid), int(start))
 
         try:
             proc.wait(timeout=40)
@@ -879,19 +903,15 @@ print('dies-after', sorted(got), flush=True)
             # Not yet waited for, so its pid is still its own.
             os.killpg(proc.pid, 9)
             proc.wait()
-            self.ended = boot_ticks()
             kill_what_it_started()
             self.stderr = ''
             self.fail('the pool waited on a dead or overdue worker')
-        # Everything the script started started by now; a process given one
-        # of its pids later did not.
-        self.ended = boot_ticks()
         # A worker the script never waited for is reaped by init once the
         # script exits, which takes a moment: allow it one.
         deadline = time.monotonic() + 2
-        while started_by(proc.pid, self.ended):
+        while members(proc.pid, self.started):
             if time.monotonic() > deadline:
-                kill_started_by(proc.pid, self.ended)
+                kill_recorded_group(proc.pid, self.started)
                 kill_what_it_started()
                 self.stderr = ''
                 self.fail('a worker outlived its pool')
@@ -916,8 +936,10 @@ print('dies-after', sorted(got), flush=True)
                      'late-group', 'own-group', 'reaped-group', 'slow-group',
                      'wedged2-group', 'late2-group'):
             if lines.get(name, '').strip().isdigit():
-                self.addCleanup(kill_started_by, int(lines[name]),
-                                self.ended)
+                start = lines.get(name + '@', '').strip()
+                if start.isdigit():
+                    self.addCleanup(kill_recorded_group, int(lines[name]),
+                                    int(start))
         # The positive control: workers that live return what they made.
         self.assertEqual("[('done', 'a'), ('done', 'b')]", lines.get('a'))
         self.assertEqual("[('done', 'slow', True), ('failed', 'dies', 'its "
@@ -977,12 +999,12 @@ print('dies-after', sorted(got), flush=True)
                      'wedged-group', 'late-group', 'own-group', 'late2-group'):
             self.assertIn(name, lines, self.say('the scenario never started '
                           '%s' % name))
-            pid = int(lines[name])
+            pid, start = int(lines[name]), int(lines[name + '@'])
             deadline = time.monotonic() + 10
-            while time.monotonic() < deadline and self.alive(pid):
+            while time.monotonic() < deadline and alive(pid, start):
                 time.sleep(0.1)
-            if self.alive(pid):
-                kill_started_by(pid, self.ended)
+            if alive(pid, start):
+                kill_recorded_group(pid, start)
                 self.fail('a dead worker\'s tests were left running (%s)'
                           % name)
         self.assertEqual(0, self.returncode, 'the scenario script failed: '
@@ -1007,38 +1029,47 @@ print('dies-after', sorted(got), flush=True)
         self.addCleanup(tmp.cleanup)
         return tmp.name
 
-    def test_a_kill_spares_a_process_that_started_after_the_scenario(self):
-        ended = boot_ticks()
-        # Until the clock moves on, a process started now would start in
-        # the same tick, not after it.
-        deadline = time.monotonic() + 5
-        while boot_ticks() <= ended:
-            self.assertLess(time.monotonic(), deadline,
-                            'the boot clock did not move')
-            time.sleep(0.01)
+    def test_a_kill_spares_a_group_whose_leader_is_another_process(self):
         later = subprocess.Popen(['sleep', '60'], start_new_session=True)
         self.addCleanup(later.wait)
         self.addCleanup(later.kill)
-        self.assertEqual([], started_by(later.pid, ended),
-                         'a process started after the scenario was found')
-        kill_started_by(later.pid, ended)
-        self.assertIsNone(later.poll(), 'a process started after the '
-                          'scenario was killed')
-        # Positive control: by a later bound it is the scenario's, and dies.
-        self.assertEqual([later.pid], started_by(later.pid, boot_ticks()))
-        kill_started_by(later.pid, boot_ticks())
+        start = group_and_start(later.pid)[1]
+        # Recorded as starting at another time: its pid now belongs to
+        # another process, as a reused one would.
+        self.assertEqual([], members(later.pid, start + 1),
+                         'a group led by another process was found')
+        kill_recorded_group(later.pid, start + 1)
+        # A SIGKILL that landed ends a sleeping process at once; half a
+        # second is only what a wrong pass would have to outlast.
+        with self.assertRaises(subprocess.TimeoutExpired,
+                               msg='a group led by another process was '
+                                   'killed'):
+            later.wait(timeout=0.5)
+        # Positive control: recorded as it started, it is killed.
+        self.assertEqual([later.pid], members(later.pid, start))
+        kill_recorded_group(later.pid, start)
         self.assertEqual(-signal.SIGKILL, later.wait(timeout=10),
-                         'a process the scenario started was not killed')
+                         'a group the scenario recorded was not killed')
 
-    def alive(self, pid):
-        # Only the process the scenario started, not one given its pid
-        # since.
-        try:
-            with open('/proc/%d/stat' % pid) as f:
-                fields = f.read().rsplit(')', 1)[1].split()
-            return fields[0] != 'Z' and int(fields[19]) <= self.ended
-        except (OSError, ValueError, IndexError):
-            return False
+    def test_a_group_whose_leader_is_gone_is_still_killed(self):
+        leader = subprocess.Popen(
+            ['sh', '-c', 'sleep 60 >/dev/null 2>&1 & echo $!'],
+            start_new_session=True, stdout=subprocess.PIPE, text=True)
+        start = group_and_start(leader.pid)[1]
+        self.addCleanup(kill_recorded_group, leader.pid, start)
+        child = int(leader.stdout.readline())
+        leader.stdout.close()
+        leader.wait()
+        child_start = group_and_start(child)[1]
+        self.assertEqual([child], members(leader.pid, start),
+                         'a group whose leader had gone was not found')
+        kill_recorded_group(leader.pid, start)
+        # Adopted when its leader went, so another process reaps it.
+        deadline = time.monotonic() + 10
+        while alive(child, child_start):
+            self.assertLess(time.monotonic(), deadline, 'a group whose '
+                            'leader had gone was not killed')
+            time.sleep(0.05)
 
     def test_an_entry_judged_without_running_has_no_split(self):
         # A worker is forked with whatever the parent's first baseline left
