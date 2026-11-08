@@ -631,6 +631,12 @@ def group(name):
     print(name, p.pid, flush=True)
     return p
 
+# This script's pid and session, taken before any worker exists. A worker
+# finds its siblings by them rather than by its own parent: orphaned, a
+# worker's parent is whatever subreaper adopted it, often the user's
+# session manager, whose children are the whole desktop.
+SCENARIO, SESSION = os.getpid(), os.getsid(0)
+
 def siblings():
     out = []
     for d in os.listdir('/proc'):
@@ -638,10 +644,12 @@ def siblings():
             continue
         try:
             with open('/proc/%s/stat' % d) as f:
-                ppid = int(f.read().rsplit(')', 1)[1].split()[1])
+                fields = f.read().rsplit(')', 1)[1].split()
+            ppid, session = int(fields[1]), int(fields[3])
         except (OSError, ValueError, IndexError):
             continue
-        if ppid == os.getppid() and int(d) != os.getpid():
+        if (ppid == SCENARIO and session == SESSION
+                and int(d) != os.getpid()):
             out.append(int(d))
     return out
 
