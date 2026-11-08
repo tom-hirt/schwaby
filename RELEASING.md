@@ -260,11 +260,13 @@ created and published.
    Anyone pinning a release should be able to re-run the check rather than
    trust the claim.
 
-7. **The cut:** the changelog section and the version bump in one commit,
+7. **The cut:** every edit of steps 2 to 6 (the changelog section, the
+   version bump, and any stale version prose step 4 found) in one commit,
    `release: vX.Y.Z — headline`, pushed to the release branch:
 
    ```shell
-   git commit -m 'release: vX.Y.Z — headline' CHANGELOG.md schwaby/version.py
+   git add -A && git status --short   # read it: only the release's edits
+   git commit -m 'release: vX.Y.Z — headline'
    git push -u origin release/vX.Y.Z
    ```
 
@@ -291,7 +293,9 @@ created and published.
    an edit leaving it unparseable is invisible to `pytest`.
 
    CI runs the whole matrix, every Python on all three platforms, on each
-   push to a release branch; read that run for the same commit.
+   push to a release branch. Read that run for the same commit, and wait for
+   it to pass: it is the only run on Windows and macOS before the release,
+   since the publish workflow tests on Linux alone.
 
    Then the release red-proof, at the commit you will tag:
 
@@ -311,10 +315,11 @@ created and published.
    it there.
 
    **A fix the release needs goes onto the release branch, and nothing
-   else does.** Re-prove only the fix's own scope on the new head: the
-   sentinels it touches and the red-proof entries whose reads it changes,
-   and, if it changes anything under `schwaby/`, the release gate once more.
-   The new head is the commit that is signed off and tagged. Work on `main`
+   else does.** Push it at once, so CI's full matrix runs on the new head.
+   Re-prove only the fix's own scope there: the sentinels it touches and the
+   red-proof entries whose reads it changes, and, if it changes anything
+   under `schwaby/`, the release gate once more. The new head, with its CI
+   run passed, is the commit that is signed off and tagged. Work on `main`
    goes on meanwhile and is not taken in: the base stays fixed.
 
 9. **The tag, on the proven head of the release branch:** `git tag -a vX.Y.Z`
@@ -322,11 +327,12 @@ created and published.
    message from a file — backticks in `git tag -m` are executed as command
    substitution, which silently swallows words from the message.
 
-10. **Push the tag, then merge the release branch back into `main`** the way
-    any branch merges:
+10. **Push the tag, then merge the release branch back into `main`,** in a
+    local merge, never a squash or a rebase, which would leave `main`
+    without the tagged commit and the release unable to publish:
 
     ```shell
-    git push origin release/vX.Y.Z vX.Y.Z
+    git push origin vX.Y.Z
     git switch main && git pull --ff-only origin main
     git merge release/vX.Y.Z    # a fast-forward if main has not moved
     git push origin main
@@ -334,79 +340,90 @@ created and published.
 
     If `main` moved since the base, this is a merge commit, made through the
     hooks like any other, and the gate runs once more on the merged tree
-    before the push: two branches that each pass can still fail together. The
-    tag stays where it is, on the release branch's head, which `main` now
-    holds. Delete the release branch once `main` has it.
+    before the push: two branches that each pass can still fail together. If
+    that gate fails, the fault is in the combination, not in the release:
+    the tag stays where it is, and the fix goes onto `main` as an ordinary
+    change before the merge is pushed. If the push is refused because `main`
+    moved again, pull, merge and run the gate again.
+
+    The tag stays on the release branch's head, which `main` now holds.
+    Delete the release branch only once that is so:
+
+    ```shell
+    git fetch origin
+    git merge-base --is-ancestor vX.Y.Z origin/main \
+        && git push origin --delete release/vX.Y.Z
+    ```
 
 11. Create the release, only once `main` on GitHub holds the commit GitHub's
-   tag names, which it does once step 10 has merged the release branch back:
+    tag names, which it does once step 10 has merged the release branch back:
 
-   ```shell
-   git fetch origin
-   tagged=$(git ls-remote origin 'refs/tags/vX.Y.Z^{}' | cut -f1)
-   test -n "$tagged" && git merge-base --is-ancestor "$tagged" origin/main \
-       && gh release create vX.Y.Z -R tom-hirt/schwaby --notes-file ...
-   ```
+    ```shell
+    git fetch origin
+    tagged=$(git ls-remote origin 'refs/tags/vX.Y.Z^{}' | cut -f1)
+    test -n "$tagged" && git merge-base --is-ancestor "$tagged" origin/main \
+        && gh release create vX.Y.Z -R tom-hirt/schwaby --notes-file ...
+    ```
 
-   GitHub's tag, not the local one: the release is made from GitHub's, and
-   step 12 says why the two can differ. A tag made without `-a` has no
-   `^{}` line and is refused here; re-make it as step 9 does.
+    GitHub's tag, not the local one: the release is made from GitHub's, and
+    step 12 says why the two can differ. A tag made without `-a` has no
+    `^{}` line and is refused here; re-make it as step 9 does.
 
-   A tag can name a commit `main` does not hold: a release branch not yet
-   merged back, or a tag pushed apart from either. The publish workflow
-   refuses such a commit too, but only once the release exists; this check
-   stops it first.
+    A tag can name a commit `main` does not hold: a release branch not yet
+    merged back, or a tag pushed apart from either. The publish workflow
+    refuses such a commit too, but only once the release exists; this check
+    stops it first.
 
-   **Creating the release is what publishes to PyPI.**
-   `.github/workflows/publish.yml` runs on a published release, re-runs the suite
-   on all five Pythons, checks `main` holds the commit, runs `twine check
-   --strict`, verifies the built version matches the tag, and uploads via
-   trusted publishing. Pushing a tag alone
-   publishes nothing, so a tag can be moved before the release is created. After
-   it, the version is permanent: PyPI refuses a re-upload even after a delete.
+    **Creating the release is what publishes to PyPI.**
+    `.github/workflows/publish.yml` runs on a published release, re-runs the suite
+    on all five Pythons, checks `main` holds the commit, runs `twine check
+    --strict`, verifies the built version matches the tag, and uploads via
+    trusted publishing. Pushing a tag alone
+    publishes nothing, so a tag can be moved before the release is created. After
+    it, the version is permanent: PyPI refuses a re-upload even after a delete.
 
-   If the publish fails, retry it without cutting another release, on the
-   release's tag itself:
+    If the publish fails, retry it without cutting another release, on the
+    release's tag itself:
 
-   ```shell
-   gh workflow run publish -R tom-hirt/schwaby --ref vX.Y.Z
-   ```
+    ```shell
+    gh workflow run publish -R tom-hirt/schwaby --ref vX.Y.Z
+    ```
 
-   The run then builds that tag's commit, with the tag's own copy of the
-   workflow, and runs every check a release does. Run from a branch, or on a
-   tag with no published release, it stops before building: the branch's tip
-   would be newer code under the same version. The `pypi` environment also
-   deploys only from a `v*` tag. That holds for tags from v5.3.0 on. Older
-   tags carry a workflow without these checks, and every version they name
-   is already on PyPI, which refuses a re-upload.
+    The run then builds that tag's commit, with the tag's own copy of the
+    workflow, and runs every check a release does. Run from a branch, or on a
+    tag with no published release, it stops before building: the branch's tip
+    would be newer code under the same version. The `pypi` environment also
+    deploys only from a `v*` tag. That holds for tags from v5.3.0 on. Older
+    tags carry a workflow without these checks, and every version they name
+    is already on PyPI, which refuses a re-upload.
 
 12. **If you move a tag, say so — a normal `git fetch` will not follow it.**
 
-   Deleting and re-creating a pushed tag is sometimes right, for instance to
-   fold a late documentation change into a release before it is published. But
-   git will not move a
-   tag ref a client already holds, and says nothing while declining to. So
-   anyone who fetched the old one keeps it silently, and the check most likely
-   to care — does this artifact match the tag I audited — is exactly the one
-   that gets a confident wrong answer.
+    Deleting and re-creating a pushed tag is sometimes right, for instance to
+    fold a late documentation change into a release before it is published. But
+    git will not move a
+    tag ref a client already holds, and says nothing while declining to. So
+    anyone who fetched the old one keeps it silently, and the check most likely
+    to care — does this artifact match the tag I audited — is exactly the one
+    that gets a confident wrong answer.
 
-   Anyone who audited the old tag will conclude, confidently and wrongly, that
-   the published wheel does not match its own git tag. The fetch that fixes it:
+    Anyone who audited the old tag will conclude, confidently and wrongly, that
+    the published wheel does not match its own git tag. The fetch that fixes it:
 
-   ```shell
-   git fetch origin --prune-tags --force --tags
-   ```
+    ```shell
+    git fetch origin --prune-tags --force --tags
+    ```
 
-   Tell anyone downstream when a tag moves. A stale ref plus a confident tool is
-   worse than a wrong answer, because a wrong answer invites a second look.
+    Tell anyone downstream when a tag moves. A stale ref plus a confident tool is
+    worse than a wrong answer, because a wrong answer invites a second look.
 
 13. **Re-check any claim about the release against the tag, after tagging.**
 
-   The range available while preparing a release is `vPREV..HEAD`, which excludes
-   the commit that bumps `version.py` — so the convenient measurement is
-   systematically the one that flatters the claim. "This release touches nothing
-   under the package", measured over `vPREV..HEAD`, is false over
-   `vPREV..vNEXT`, which includes `version.py`.
+    The range available while preparing a release is `vPREV..HEAD`, which excludes
+    the commit that bumps `version.py` — so the convenient measurement is
+    systematically the one that flatters the claim. "This release touches nothing
+    under the package", measured over `vPREV..HEAD`, is false over
+    `vPREV..vNEXT`, which includes `version.py`.
 
 ## The distribution name and the import name
 

@@ -120,7 +120,8 @@ Two of those are easy to get wrong locally:
   build is what proves the package still assembles.
 
 CI runs the gate on CPython 3.10 through 3.14. Pushes to a branch run Linux
-only; pull requests and tags run Windows and macOS as well.
+only; pull requests, tags and pushes to a release branch (``release/...``)
+run Windows and macOS as well.
 
 --------------------------
 A note about the testing
