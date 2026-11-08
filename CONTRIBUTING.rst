@@ -65,8 +65,9 @@ its content, a word on your clone's own forbidden list
 configuration so the repository never carries it. Nor may a staged file look
 up its parent's pid, or signal pid -1 or its own process group: an orphan's
 parent is whoever adopted it, often the session manager, so a kill aimed that
-way can end the desktop, and a script's own group holds the shell that ran
-it. Comparing the parent's pid with 1, to see whether init adopted you, is
+way can end the desktop, and a script's own group can hold whatever started
+it, unless the script began a session of its own. Python's
+``os.getppid() == 1`` (or ``!= 1``), the test of an orphan that exits, is
 let through. The whole file is read, so a line that only mentions such a
 lookup is refused too, and so is a ``ps`` walk down from a pid you recorded:
 keep the pids you start instead. Signal only a pid or a process group you

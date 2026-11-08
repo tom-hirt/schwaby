@@ -273,6 +273,13 @@ class LightCheckTest(unittest.TestCase):
                  ('mod.py', 'os.%spg(0, 9)' % KILL),
                  ('mod.py', 'os.%spg(os.getpgrp(), 9)' % KILL),
                  ('mod.py', 'os.%spg(os.getpgid(0), 9)' % KILL),
+                 ('mod.py', 'os.%spg(os.getpgid(os.getpid()), 9)' % KILL),
+                 ('mod.py', 'os.%s(-os.getpgrp(), 9)' % KILL),
+                 ('mod.py', 'os.%s(-os.getpid(), 9)' % KILL),
+                 ('mod.py', "subprocess.run(['%s', '-s', 'TERM', '0'])" % KILL),
+                 ('mod.py', "subprocess.run(['%s', '-s', 'KILL', '-1'])"
+                  % KILL),
+                 ('mod.py', "subprocess.run(['/bin/%s', '-9', '0'])" % KILL),
                  ('mod.py', "subprocess.run(['%s', '-9', '0'])" % KILL),
                  ('mod.py', 'os.system("%s -9 0")' % KILL),
                  ('mod.py', 'x = os.get%s() == 2' % PARENT),
@@ -285,6 +292,10 @@ class LightCheckTest(unittest.TestCase):
                  ('run.sh', 'echo `%s -9 -1`' % KILL),
                  ('run.sh', '%s 0' % KILL),
                  ('run.sh', '%s -TERM 0 2>/dev/null' % KILL),
+                 ('run.sh', '%s -KILL 0  # all of it' % KILL),
+                 ('run.sh', "trap '%s -- -$$' EXIT" % KILL),
+                 ('run.sh', '%s -9 -$$' % KILL),
+                 ('run.sh', 'p%s -g 0' % KILL),
                  ('run.sh', '%s -- -1' % KILL)]
         for name, line in cases:
             with self.subTest(line=line):
@@ -296,18 +307,24 @@ class LightCheckTest(unittest.TestCase):
                 self.git('reset', '-q', '--hard')
         # Positive control: a hangup sent to one pid, a kill of a group
         # the caller started, one whose number only starts with 1, a probe
-        # of whether a pid exists, a parent pid read for a pid it recorded,
-        # and an orphan's test of whether init adopted it are let through.
+        # of whether a pid exists, a list of the signals, a kill of itself
+        # alone, a parent pid read for a pid it recorded, an orphan's test
+        # of whether init adopted it, and another object's method of the
+        # same name are let through.
         self.stage('run.sh', '%s -1 "$pid"\n%s -9 -"$pgid"\n%s -9 -12\n'
-                   '%s -0 "$pid"\n%s -s 0 "$pid"\n'
-                   % (KILL, KILL, KILL, KILL, KILL))
+                   '%s -0 "$pid"\n%s -s 0 "$pid"\n%s -0 0\n%s -l 0\n'
+                   '%s -9 $$\np%s -g 12\n'
+                   % ((KILL,) * 9))
         self.stage('mod.py', 'import os\nimport subprocess\n\n'
                    '%s, pgid = 1, 2\nos.%s(-pgid, 9)\nos.%s(-12, 9)\n'
                    "subprocess.run(['%s', '-1', str(pgid)])\n"
                    "subprocess.run(['%s', '-9', '-12'])\n"
                    'os.%s(pgid, 0)\nos.%spg(os.getpgid(pgid), 9)\n'
                    'if os.get%s() == 1:\n    pass\n'
-                   % (PARENT, KILL, KILL, KILL, KILL, KILL, KILL, PARENT))
+                   'if os.get%s() != 1:\n    pass\n'
+                   'subprocess.%s(0, 1)\n'
+                   % (PARENT, KILL, KILL, KILL, KILL, KILL, KILL, PARENT,
+                      PARENT, KILL))
         code, out = self.check()
         self.assertEqual(0, code, out)
 

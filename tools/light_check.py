@@ -25,8 +25,8 @@ commit will contain:
    which holds the shell or test runner that started it unless it began a
    session of its own. A parent found that way is whoever adopted an
    orphan, often the session manager, whose children are the whole desktop.
-   Asking whether the parent is init, the test of an orphan that exits, is
-   let through. A kill names a pid or a process group its caller started
+   Python's `os.getppid() == 1` (or `!= 1`), the test of an orphan that
+   exits, is let through. A kill names a pid or a process group its caller started
    and recorded. Each line is named, by the whole file;
  * no staged file, by its name or its content, carries a word on this
    clone's forbidden list, `git config --add lightcheck.forbidden WORD`.
@@ -155,7 +155,18 @@ def forbidden_in(path, words):
 
 
 # Built from pieces so that this file, which names them, does not carry them.
-_PARENT = 'pp' + 'id'
+_PARENT, _KILL = 'pp' + 'id', 'k' + 'ill'
+# A call of os's kill, or of a bare one imported from it, not some other
+# object's method of the same name.
+_OS_KILL = r'(?:\bos\.|(?<![\w.]))' + _KILL
+# The shell's options before the target: `-s SIG` and `-n NUM` take a word.
+_OPTIONS = r'(?:\s+-[sn]\s+\S+|\s+-\S+)'
+# The same as argv words, each quoted.
+_Q = r'[\'"]'
+_ARGV = (_Q + r'(?:[^\'"\s]*/)?' + _KILL + _Q + r'\s*,\s*')
+_ARGV_OPTION = (r'(?:' + _Q + r'-[sn]' + _Q + r'\s*,\s*' + _Q + r'[^\'"]*'
+                + _Q + r'\s*,\s*|' + _Q + r'-[^\'"]*' + _Q + r'\s*,\s*)')
+_ARGV_END = _Q + r'\s*,?\s*[\])]'
 BLIND_KILL = re.compile('|'.join([
     # Python's os call for the parent's pid, unless it is only compared
     # with init's.
@@ -168,28 +179,28 @@ BLIND_KILL = re.compile('|'.join([
     r'\bPP' + _PARENT[2:] + r':',
     # psutil's Process methods.
     r'\.(?:' + _PARENT + r'|parent)\(\)',
-    # Python's kill of pid -1.
-    r'\bkill' + r'\(\s*-1\s*,',
-    # The shell's kill of pid -1, after at least one option or `--`:
-    # `kill -1 PID` is a hangup sent to PID, not a kill of -1.
-    # It may sit in a quoted string or be followed by a redirection.
-    r'\bkill' + r'(?:\s+-[sn]\s+\S+|\s+-\S+)+\s+-1(?![\w$-])',
-    # The same as an argv, each word quoted: the command, at least one
-    # option, and -1 last.
-    r'[\'"]kill' + r'[\'"]\s*,\s*'
-    r'(?:[\'"]-[^\'"]*[\'"]\s*,\s*)+[\'"]-1[\'"]\s*,?\s*[\])]',
-    # Python's signal to its own group: pid 0, or the group by number.
-    r'\bkill' + r'(?:pg)?\(\s*0\s*,',
-    r'\bkill' + r'pg\(\s*(?:os\.)?getpg(?:rp\(\)|id\(\s*(?:0|(?:os\.)?'
+    # Python's kill of pid -1, of its own group as pid 0, or of the group
+    # its own pid or group number names.
+    _OS_KILL + r'(?:pg)?\(\s*(?:-1\b|0\b|-\s*(?:os\.)?get(?:pgrp|pid)\()',
+    _OS_KILL + r'pg\(\s*(?:os\.)?getpg(?:rp\(\)|id\(\s*(?:0|(?:os\.)?'
     r'getpid\(\))\s*\))',
-    # The shell's, with 0 the last word: `kill -0 PID` and `kill -s 0 PID`
-    # only ask whether PID exists. A quote straight after the 0 closes the
-    # string the command sits in; one after a space opens the next word.
-    r'\bkill' + r'(?:\s+-[sn]\s+\S+|\s+-\S+)*\s+0'
-    r'(?=[\'"`]|[ \t]*(?:$|[;&|)>]|\d>))',
-    # The same as an argv, with 0 last.
-    r'[\'"]kill' + r'[\'"]\s*,\s*'
-    r'(?:[\'"]-[^\'"]*[\'"]\s*,\s*)*[\'"]0[\'"]\s*,?\s*[\])]',
+    # The shell's kill of pid -1, after at least one option or `--`:
+    # `kill -1 PID` is a hangup sent to PID, not a kill of -1. It may sit
+    # in a quoted string or be followed by a redirection.
+    r'\b' + _KILL + _OPTIONS + r'+\s+-1(?![\w$-])',
+    # The shell's kill of its own group: the group its pid names, or 0 as
+    # the last word. `kill -0 PID` and `kill -s 0 PID` only ask whether PID
+    # exists, and `-l` and `-L` list signals. A quote straight after the 0
+    # closes the string the command sits in; one after a space opens the
+    # next word.
+    r'\b' + _KILL + _OPTIONS + r'*\s+[\'"]?-\$\$(?!\w)',
+    r'\b' + _KILL + r'(?:\s+-[sn]\s+\S+|\s+-(?![lL0]\b)\S+)*\s+0'
+    r'(?=[\'"`]|[ \t]*(?:$|[;&|)>#]|\d>))',
+    # pkill of the caller's own group.
+    r'\bp' + _KILL + r'\b.*\s-g\s*0\b',
+    # The same as an argv: -1 last after at least one option, or 0 last.
+    _ARGV + _ARGV_OPTION + r'+' + _Q + r'-1' + _ARGV_END,
+    _ARGV + _ARGV_OPTION + r'*' + _Q + r'0' + _ARGV_END,
 ]).encode('ascii'), re.MULTILINE)
 
 
