@@ -53,10 +53,9 @@ CALLBACK_URL = 'https://redirect.url.com'
 # marked per test rather than on the class, because the other seven in this
 # class never reach the child process and pass on macOS today.
 #
-# GitHub Actions sets CI=true on every runner, and this reads it directly. It
-# used to need naming in tox.ini's passenv, because tox filtered the
-# environment -- and until it was named there, this skip silently never fired.
-# tox is gone as of 3.0.0, so the variable simply arrives.
+# GitHub Actions sets CI=true on every runner, and this reads it directly. A
+# runner that filtered the environment would make this skip silently never
+# fire, so the variable must reach the test as it is.
 #
 # What would settle it: run `pytest tests/auth_test.py -k ClientFromLoginFlow`
 # on a physical Mac, where CI is unset and nothing is skipped. If it passes
@@ -2026,7 +2025,7 @@ class LoginExchangeErrorTest(unittest.TestCase):
     def test_a_refused_exchange_carries_the_endpoints_status(self):
         cases = ((429, None, 'http_429'),
                  (401, None, 'http_401'),
-                 # The case that used to be left to authlib, which puts no
+                 # Raised here, not left to authlib, which would put no
                  # status on it.
                  (400, {'error': 'invalid_grant'}, 'invalid_grant'),
                  (429, {'error': 'slow_down'}, 'slow_down'),

@@ -347,8 +347,8 @@ class OrderBuilderTest(unittest.TestCase):
 
     @no_duplicates
     def test_stop_price_precision_is_not_second_guessed(self):
-        # These used to be truncated to two places. Now whatever precision the
-        # caller wrote is what Schwab is asked for.
+        # Not truncated to two places: whatever precision the caller wrote is
+        # what Schwab is asked for.
         for value in ('1.99999', '2.00001'):
             builder = OrderBuilder()
             builder.set_stop_price(value)
@@ -1411,13 +1411,10 @@ class OrderBuilderExamplesTest(unittest.TestCase):
 
 
 class PricesAreStringsTest(unittest.TestCase):
-    '''Prices used to be accepted as floats and converted here, truncating to
-    the venue's tick size. That conversion is gone.
-
-    It was removed rather than fixed because even done correctly -- and it was
-    not, for a while: truncating the binary value sent roughly one in twenty
-    cent-granular prices a tick low, silently -- the library was choosing a
-    rounding on the caller's behalf for a value denominated in money. The
+    '''Prices are strings or `Decimal`, never floats, and are not converted
+    here. Converting a float means choosing a rounding on the caller's behalf
+    for a value denominated in money -- and truncating its binary value sends
+    roughly one in twenty cent-granular prices a tick low, silently. The
     caller knows whether their price should round up, down or to the nearest
     tick, and this cannot.'''
 
@@ -1485,8 +1482,8 @@ class PricesAreStringsTest(unittest.TestCase):
         # NaN and the infinities have a non-integer Decimal exponent, so they
         # skip the decimal-places guard. format() renders them as text and
         # _assert_finite reads a signalling NaN as "not a number at all" and
-        # lets it past, so Decimal('sNaN') reached an order as the string
-        # 'sNaN' until this was checked explicitly.
+        # lets it past, so unchecked, Decimal('sNaN') would reach an order as
+        # the string 'sNaN'. So it is checked explicitly.
         for spelling in ('NaN', 'sNaN', 'Infinity', '-Infinity'):
             for setter in ('set_price', 'set_stop_price'):
                 builder = OrderBuilder()
@@ -1853,13 +1850,12 @@ class NonNumericOrderFieldTest(unittest.TestCase):
 
     @no_duplicates
     def test_the_guard_is_what_keeps_a_built_order_serialisable(self):
-        # This used to build an order out of two good values and assert that
-        # json.dumps worked, which it did before the fix as well -- a test
-        # that passes either way, over a path no bytes ever reached.
+        # Building an order from two good values and checking json.dumps
+        # would pass with or without the guard, over a path no bytes reach.
         #
         # The claim worth making is that the refusal is what prevents the
-        # unserialisable order: b'1' passed the old `float()` check because
-        # float(b'1') is 1.0, went in as bytes, and json.dumps refuses those.
+        # unserialisable order: b'1' would pass a `float()` check, since
+        # float(b'1') is 1.0, and go in as bytes, which json.dumps refuses.
         import json
         builder = OrderBuilder()
         builder.set_quantity(10)
@@ -1974,8 +1970,8 @@ class AcceptedTypesTableTest(unittest.TestCase):
         start = next(i for i, l in enumerate(lines)
                      if l.strip() == '.. _accepted_types:')
         # A simple-table rule is `===== ==== ====`, so it is `=` and spaces --
-        # not `set(...) == {'='}`, which was the first version and matched
-        # nothing because of the column gaps.
+        # not `set(...) == {'='}`, which would match nothing because of the
+        # column gaps.
         rules = [i for i, l in enumerate(lines[start:], start)
                  if l.strip() and set(l.strip()) <= {'=', ' '}]
         assert len(rules) >= 3, 'accepted-types table not found'

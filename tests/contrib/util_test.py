@@ -738,8 +738,8 @@ class DecodeDecimalTest(unittest.TestCase):
     def test_a_corrupt_member_is_refused_rather_than_coerced(self):
         # The failure mode this guards is not an escaping exception -- it is
         # the corruption that decodes. `int(1.9)` is 1, `int('1_0')` is 10 and
-        # `int('\u0663')` is 3, so each of these produced a plausible wrong
-        # number on a money field, silently, in an earlier version.
+        # `int('\u0663')` is 3, so coerced, each of these would be a plausible
+        # wrong number on a money field, silently.
         #
         # Every case carries its own positive control: the same object with a
         # sound member in the same slot must decode to a known value. Without
@@ -861,8 +861,7 @@ class DecodeDecimalTest(unittest.TestCase):
         #
         # The first pair is one digit past each width: thirty for a lone
         # `lo`, which may carry the whole 96-bit mantissa, and eleven for a
-        # `mid`. An eleven-digit `lo` used to be the case here and is an
-        # ordinary value now. That pair is refused by the range check, not
+        # `mid`. An eleven-digit `lo` is an ordinary value. That pair is refused by the range check, not
         # the length check -- the length check decides nothing short of
         # `int()`'s own limit, which only the wider pairs reach -- and the
         # scale is refused by its 0..64 bound before either.
@@ -1145,9 +1144,9 @@ class DecodeDecimalTest(unittest.TestCase):
             decode_decimal({'Foo': 1})
 
     def test_a_dict_subclass_whose_get_and_getitem_disagree_is_catchable(self):
-        # The scale once used `value['signScale']` and escaped as a KeyError
+        # Read as `value['signScale']`, the scale would escape as a KeyError
         # from a mapping whose `get` and `__getitem__` disagree. Fields are
-        # now read once through the mapping's `items()`, so a `get` that
+        # read once through the mapping's `items()`, so a `get` that
         # invents a key is not consulted at all: this one lists no
         # `signScale`, and decodes at scale 0 like any object without one.
         class Odd(dict):

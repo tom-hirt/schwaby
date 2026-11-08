@@ -3,8 +3,8 @@ the mutation that turns the guard off, the test that must then fail, and a
 substring that must appear in the failure.
 
 Add an entry when you fix something. The comment above an entry is the
-record of why the guard exists, and of what made an earlier version of the
-entry lie; keep it when the entry changes.
+statement of what the guard is for and what would make the entry lie;
+keep it when the entry changes.
 '''
 
 class Case:
@@ -874,8 +874,8 @@ CASES = [
          # `quantity <= 0` and raised this instead.
          "not supported between instances of 'str'"),
 
-    # The old version of this built an order from two good values and asserted
-    # json.dumps worked, which it did before the fix too.
+    # Building an order from two good values and checking json.dumps would
+    # pass with or without the guard.
     Case('orders/guard-keeps-the-order-serialisable',
          'schwaby/orders/generic.py',
          "        if _is_instance(price, bool) or not _is_instance(price, (int, float)):",
@@ -896,8 +896,8 @@ CASES = [
          '::test_a_non_number_is_refused_and_the_message_names_the_field',
          'ValueError not raised'),
 
-    # The `# raises` marker used to skip a call. A documented example that
-    # stopped raising would then have gone on claiming it does.
+    # The `# raises` marker is asserted, not skipped: a documented example
+    # that stopped raising would otherwise go on claiming it does.
     Case('docs/raises-marker-is-asserted',
          'docs/order-builder.rst',
          "   equity_buy_market('AAPL', '10')     # raises: quantity does not take a str",
@@ -1231,10 +1231,10 @@ CASES = [
          '::test_a_mantissa_without_a_scale_is_scale_zero',
          '15300'),
 
-    # The bare-value path was once the unvalidated sibling of the member
-    # path. `Decimal`'s parser takes PEP 515 underscores, surrounding
-    # whitespace, a leading +, and every Unicode decimal digit -- so '1_0' was
-    # ten and '\u0663' was three, on a money field, silently.
+    # The bare-value path is validated like the member path. `Decimal`'s
+    # parser takes PEP 515 underscores, surrounding whitespace, a leading +,
+    # and every Unicode decimal digit -- so unvalidated, '1_0' would be ten
+    # and '\u0663' three, on a money field, silently.
     Case('contrib/decimal-bare-value-is-ascii-number',
          'schwaby/contrib/util.py',
          "        if not (value.isascii() and _BARE_NUMBER.match(value)):",
@@ -1892,10 +1892,9 @@ CASES = [
          "'\\nWARNING' unexpectedly found"),
 
     # Exactly the captured set. A token copied from a parser's fallback list
-    # rather than a frame is the defect the observation log in
-    # docs/streaming.rst was corrected for, so the set is pinned. Mutated to
-    # the upper-case spelling that log once used, which is exactly what the
-    # capture corrected.
+    # rather than a frame would put a type Schwab does not send into the
+    # set, so the set is pinned. Mutated to an upper-case spelling, which is
+    # not what the capture shows.
     Case('streaming/message-type-vocabulary-is-the-captured-set',
          'schwaby/streaming.py',
          "        'OrderMonitorCreated', 'OrderMonitorCompleted',",
@@ -3663,10 +3662,11 @@ CASES = [
          'tests/orders/options_test.py::OptionSymbolLayoutTest::test_the_other_refusals_keep_their_messages',
          'does not match'),
 
-    # A code block nested in an admonition used to run on into the paragraph
-    # after it, which dedents to a shallower margin than the code and makes
-    # the whole block an `unexpected indent`. bad_keywords_in swallows a
-    # SyntaxError, so three blocks were skipped and nothing counted them.
+    # A code block nested in an admonition must stop at the paragraph after
+    # it, which dedents to a shallower margin than the code; running on, the
+    # whole block would be an `unexpected indent`. bad_keywords_in swallows a
+    # SyntaxError, so such a block would be skipped and nothing would count
+    # it.
     # A literal inside bold renders its backticks. The check parses with
     # docutils; one case for the detector, one per source it reads, and one
     # for the count that says it read them.

@@ -27,7 +27,7 @@ def free_callback_port():
     two; a test that is not about the flow binding its port serves on
     bound_callback_socket() instead, which leaves no such gap. With a port of
     its own, a login-flow test needs no worker or run to itself: two flows
-    side by side no longer take each other's server for their own.'''
+    side by side do not take each other's server for their own.'''
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('127.0.0.1', 0))
         port = s.getsockname()[1]
@@ -279,8 +279,8 @@ class AsyncMagicMock:
 def has_diff(old, new):
     '''False when old and new are the same JSON. When they differ it raises
     AssertionError carrying the diff, so the difference is in the failure
-    itself: it used to be printed to the test's captured output, and the
-    failure said only "True is not false". Every caller asserts it False.'''
+    itself rather than in the test's captured output, under a failure that
+    says only "True is not false". Every caller asserts it False.'''
     old_out = json.dumps(old, indent=4, sort_keys=True).splitlines()
     new_out = json.dumps(new, indent=4, sort_keys=True).splitlines()
     diff = list(difflib.ndiff(old_out, new_out))

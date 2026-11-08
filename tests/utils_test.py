@@ -481,9 +481,9 @@ class TokenEndpointStatusTest(unittest.TestCase):
 
     @no_duplicates
     def test_a_refusal_with_a_json_body_carries_its_status(self):
-        # The case that used to be left to authlib, which puts no status on
-        # its error, so an implementation reading it from there leaves this
-        # None.
+        # Raised here rather than left to authlib, which puts no status on
+        # its error, so an implementation reading it from there would leave
+        # this None.
         for asynchronous in (False, True):
             for status in (400, 429):
                 with self.subTest(status=status, asynchronous=asynchronous):
@@ -826,9 +826,9 @@ class UtilsTest(unittest.TestCase):
 
     @no_duplicates
     def test_no_location_header_raises_rather_than_returning_none(self):
-        # Both of these used to return None, which is also what plenty of
-        # harmless things return, so `if order_id:` skipped an order Schwab had
-        # very likely placed.
+        # Neither returns None, which is also what plenty of harmless things
+        # return, so `if order_id:` would skip an order Schwab had very likely
+        # placed.
         response = MockResponse({}, 200, headers={})
 
         with self.assertRaises(MissingLocationHeaderError) as cm:
@@ -887,10 +887,9 @@ class UtilsTest(unittest.TestCase):
         # A base that covers most of them is worse than none: it invites
         # `except SchwabError` as a complete guard and is quietly not one.
         #
-        # Walked, not listed. The first version named seven modules, so an
-        # exception added to any module outside that list -- schwaby.debug, say
-        # -- was simply not looked at, and the test went on passing while the
-        # guarantee it states stopped being true.
+        # Walked, not listed: a list of modules would miss an exception added
+        # to any module outside it -- schwaby.debug, say -- and the test would
+        # go on passing while the guarantee it states stopped being true.
         import importlib, inspect, pkgutil
         import schwaby
 

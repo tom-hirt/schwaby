@@ -116,9 +116,9 @@ class OptionSymbolTest(unittest.TestCase):
         self.assertTrue(op.build().endswith('99999999'))
 
     def test_a_strike_finer_than_a_tenth_of_a_cent_is_refused(self):
-        # The symbol encodes thousandths, so int() used to drop the rest
-        # silently: '2.0019' became 00002001, a $2.001 contract, and '0.0005'
-        # became a strike of zero. Both name a different contract or none.
+        # The symbol encodes thousandths, so int() would drop the rest
+        # silently: '2.0019' would become 00002001, a $2.001 contract, and
+        # '0.0005' a strike of zero. Both name a different contract or none.
         for strike in ('2.0019', '0.0005', '1234.5678', '0.00001'):
             with self.assertRaises(ValueError, msg=strike):
                 OptionSymbol('AAPL', datetime.date(2024, 5, 10), 'C', strike)
@@ -157,9 +157,10 @@ class OptionSymbolTest(unittest.TestCase):
             decimal.setcontext(original)
 
     def test_non_finite_strike_is_refused_at_construction(self):
-        # float('nan') parses and `nan <= 0` is False, so these used to pass
-        # the constructor and fail inside build() as `cannot convert NaN to
-        # integer` -- naming neither the strike nor the symbol.
+        # float('nan') parses and `nan <= 0` is False, so unchecked these
+        # would pass the constructor and fail inside build() as `cannot
+        # convert NaN to integer` -- naming neither the strike nor the
+        # symbol.
         for strike in ('nan', 'NaN', 'inf', '-inf', 'Infinity'):
             with self.assertRaises(ValueError, msg=strike):
                 OptionSymbol('AAPL', datetime.date(2024, 5, 10), 'C', strike)

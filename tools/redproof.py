@@ -88,7 +88,7 @@ states where that is lower; usable cores are bounded by the core cap
 SUITE_CORES states the same way. The first baseline runs alone to give that
 measurement. `--jobs` overrides the core count. Entries run side by side
 whatever their tests are: each login-flow test takes a free callback port of
-its own, so two no longer take each other's server for their own.
+its own, so two do not take each other's server for their own.
 
 TRACKED WRITES. A test that writes to a tracked file fails the run, by
 name: the copy is compared with the snapshot after each run, and the audit
@@ -1205,8 +1205,8 @@ def _entry_task(name):
     try:
         verdict, detail = judge(run, c, _job['baselines'][t])
     except Exception as e:
-        # A defect in the harness, reported against the entry it hit: one
-        # used to end the whole run, an hour in, with nothing judged after.
+        # A defect in the harness, reported against the entry it hit, so it
+        # does not end the whole run with nothing judged after it.
         verdict, detail = 'ERROR', 'the harness failed judging it: ' \
             '%s: %s' % (type(e).__name__, e)
     seconds = time.monotonic() - started

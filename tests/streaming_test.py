@@ -319,10 +319,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_login_websocket_connect_args_extra_headers_refused(
             self, ws_connect):
-        # This used to be translated to additional_headers with a
-        # DeprecationWarning. websocket_connect_args is documented as a
-        # passthrough, and quietly rewriting a name on the way through is not
-        # one; the caller is told to change it instead.
+        # Refused, not translated to additional_headers:
+        # websocket_connect_args is documented as a passthrough, and quietly
+        # rewriting a name on the way through is not one; the caller is told
+        # to change it instead.
         self.http_client.get_user_preferences.return_value = MockResponse(
             account_preferences(), 200)
         socket = AsyncMock()
@@ -8782,10 +8782,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     @no_duplicates
     def test_set_json_decoder_does_not_need_contrib_imported(self):
         # schwaby/__init__.py does not import contrib, so looking the base class
-        # up as schwaby.contrib.util.StreamJsonDecoder raised AttributeError for
-        # anyone who subclassed it where it is defined. Every other test here
-        # imports contrib.util first, which is exactly what made the old code
-        # work -- so this one must not.
+        # up as schwaby.contrib.util.StreamJsonDecoder would raise
+        # AttributeError for anyone who subclassed it where it is defined.
+        # Every other test here imports contrib.util first, which would hide
+        # that -- so this one must not.
         for name in list(sys.modules):
             if name.startswith('schwaby.contrib'):
                 del sys.modules[name]
@@ -9493,13 +9493,11 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         # Two absorbed. The third frame is a well-formed empty channel and is
         # not one of them.
         #
-        # It used to be `{'command': 'nothing here'}`, chosen as a frame
-        # carrying neither channel -- which the channel guard now reports,
-        # correctly and for a different reason. That made this test pass while
-        # its own comment was false, and only because there is no fourth
-        # handle_message to drain the queued report. An empty `data` list
-        # tests what this was written to test without overlapping the newer
-        # guard; the guard has its own tests.
+        # Not `{'command': 'nothing here'}`, a frame carrying neither
+        # channel: the channel guard reports that, for a different reason,
+        # so this test would pass for the wrong one. An empty `data` list
+        # tests what this is for without overlapping that guard, which has
+        # its own tests.
         self.assertEqual(2, len(errors))
         for exc in errors:
             self.assertIsInstance(exc, schwaby.streaming.UnusableMessage)
@@ -9651,10 +9649,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
     def test_a_non_string_field_key_is_relabeled_not_dropped(self):
         # `StreamJsonDecoder` is a public extension point that parses the
         # whole frame, so a decoder normalising numeric field ids to ints is
-        # a plausible thing for a consumer to write. Such a message went
-        # unrelabeled, and once the unknown-field check existed, `.isdigit()`
-        # raised AttributeError on it -- absorbed by the relabel guard, so a
-        # message that used to be delivered was dropped instead.
+        # a plausible thing for a caller to write. Keyed on the raw key, such
+        # a message would go unrelabeled, `.isdigit()` would raise
+        # AttributeError on it, and the relabel guard would absorb that and
+        # drop a message it should deliver.
         streaming._reported_fields.clear()
         fields = streaming.StreamClient.LevelOneEquityFields
         raw = {'key': 'F', 1: 21.47, 2: 21.48}

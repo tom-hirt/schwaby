@@ -43,10 +43,10 @@ def cls_own_body(func):
     stack, out = list(func.body), []
     while stack:
         node = stack.pop()
-        # Skipping the node itself, not just its children. The first version
-        # dropped nested `def`s from the *stack* but still appended the one it
-        # was looking at and then walked its body, so a local helper's return
-        # was reported as the test's own.
+        # Skipping the node itself, not just its children: dropping nested
+        # `def`s from the *stack* while still appending the one being looked
+        # at, and walking its body, would report a local helper's return as
+        # the test's own.
         if isinstance(node, nested):
             continue
         out.append(node)
@@ -313,9 +313,9 @@ class LinkTest(unittest.TestCase):
     # Hostnames that appear only inside example code, where they stand for a
     # value the reader replaces. They are not links and nobody clicks them.
     # RFC 2606 reserves example.com for documentation, and loopback is the
-    # callback server rather than a link. `callback.com` used to be here: a
-    # real registrable domain standing in for one the reader supplies, which is
-    # someone else's host to send a reader to.
+    # callback server rather than a link. A real registrable domain, such as
+    # `callback.com`, does not belong here: standing in for one the reader
+    # supplies, it is someone else's host to send a reader to.
     EXAMPLE_HOSTS = frozenset(('127.0.0.1', 'localhost'))
     EXAMPLE_SUFFIXES = ('.example.com', '.example.org', '.example.net')
 
@@ -351,11 +351,9 @@ class LinkTest(unittest.TestCase):
     def linkable_files():
         """Everything a reader's link can come out of: shipped code and docs.
 
-        The first version of this walked `schwab/` and `bin/` only, which left
-        the docs tree -- the place links are actually written -- uncovered, and
-        a dead onboarding hostname sat there through it. `bin/` is gone as of
-        3.0.0; the roots are asserted to exist so a removed one fails loudly
-        rather than quietly reducing what is checked.
+        The docs tree is included because it is where links are actually
+        written. The roots are asserted to exist, so a removed one fails
+        loudly rather than quietly reducing what is checked.
         """
         found = []
         for directory in ('schwaby', 'docs'):
@@ -528,10 +526,9 @@ class LinkTest(unittest.TestCase):
         self.assertGreater(sum(found.values()), 3)
 
         # Named rather than counted. order-templates is written as
-        # concatenated string literals in orders/generic.py, which is the case
-        # that went unseen until the joining above; a count alone would have
-        # stayed green. auth.rst used to be here too and moved to Read the
-        # Docs, which the check below covers instead.
+        # concatenated string literals in orders/generic.py, which only the
+        # joining above can see; a count alone would stay green. Links to Read
+        # the Docs are covered by the check below instead.
         self.assertIn('docs/order-templates.rst', found)
 
         self.assertEqual([], self.broken_own_links_in(files))
@@ -2345,7 +2342,7 @@ class LongDescriptionTest(unittest.TestCase):
     Markdown is far more permissive. Measured against `readme_renderer`, it
     rejects an empty document and a whitespace-only one and accepts everything
     else, including unclosed HTML tags and broken link syntax. So `twine check`
-    alone no longer covers the failure that actually happened, and this asserts
+    alone cannot catch a description that renders as nothing useful, and this asserts
     the property directly instead: the description renders, it is substantial,
     and it contains what the page has to carry.
     """
