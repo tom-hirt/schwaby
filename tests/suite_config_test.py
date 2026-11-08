@@ -1,9 +1,10 @@
 '''The suite's own configuration: how many workers `-n auto` starts, the
-limit every test runs under, the Pythons CI runs, and the publish workflow's
-check that main holds the release commit.'''
+limit every test runs under, the Pythons CI runs, the actions the workflows
+pin, and the publish workflow's check that main holds the release commit.'''
 
 import importlib.util
 import os
+import re
 import subprocess
 import tempfile
 import types
@@ -130,6 +131,91 @@ class PythonPinsTest(unittest.TestCase):
                 '%s sets up a Python other than the pinned one' % workflow)
             self.assertEqual(uv, text.count('The interpreter is the pinned build'),
                              '%s does not check its interpreter' % workflow)
+
+
+#: An action pinned to a commit, and the release the comment beside it names:
+#: `uses: owner/name@<40 hex>  # v1.2.3`.
+PINNED = re.compile(r'uses:\s*([\w.-]+/[\w./-]+)@([0-9a-f]{40})\b([^\n]*)')
+VERSION = re.compile(r'#\s*(v\d+(?:\.\d+)*)\b')
+
+
+def pin_problems(workflows):
+    '''What is wrong with the commit pins in `workflows`, a name-to-text
+    mapping: a pin with no release named beside it, and an action pinned to
+    more than one commit, or one commit named as more than one release.'''
+    problems, seen = [], {}
+    for name, text in sorted(workflows.items()):
+        for n, line in enumerate(text.splitlines(), 1):
+            m = PINNED.search(line)
+            if not m:
+                continue
+            action, sha, rest = m.groups()
+            version = VERSION.search(rest)
+            if not version:
+                problems.append('%s:%d: %s@%s names no release'
+                                % (name, n, action, sha[:7]))
+                continue
+            seen.setdefault(action, set()).add((sha, version.group(1)))
+    for action, pins in sorted(seen.items()):
+        if len(pins) > 1:
+            problems.append('%s is pinned more than one way: %s' % (
+                action, ', '.join('%s as %s' % (sha[:7], v)
+                                  for sha, v in sorted(pins))))
+    return problems
+
+
+class ActionPinsTest(unittest.TestCase):
+    '''A workflow that pins an action to a commit names the release beside
+    it, and every use of that action agrees on both, so a bump that reaches
+    some uses and not others, or moves the commit and not its comment,
+    fails here. Whether the commit is that release is GitHub's to say, and
+    is checked when a pin moves.'''
+
+    def workflows(self):
+        root = os.path.join(ROOT, '.github', 'workflows')
+        found = {}
+        for name in sorted(os.listdir(root)):
+            if name.endswith(('.yml', '.yaml')):
+                with open(os.path.join(root, name), encoding='utf-8') as f:
+                    found[name] = f.read()
+        return found
+
+    def test_every_pin_names_its_release_and_agrees(self):
+        workflows = self.workflows()
+        pins = sum(len(PINNED.findall(text)) for text in workflows.values())
+        # Positive control: the workflows do pin actions to commits.
+        self.assertGreater(pins, 3, 'no commit pins were found')
+        self.assertEqual([], pin_problems(workflows))
+
+    def test_a_pin_with_no_release_named_is_refused(self):
+        sha = 'a' * 40
+        self.assertEqual(
+            ['w.yml:1: o/a@aaaaaaa names no release'],
+            pin_problems({'w.yml': 'uses: o/a@%s\n' % sha}))
+
+    def test_a_partial_bump_is_refused(self):
+        old, new = 'a' * 40, 'b' * 40
+        for shape, texts in (
+                ('the commit moved, not its comment',
+                 {'w.yml': 'uses: o/a@%s  # v1.0.0\n' % old,
+                  'x.yml': 'uses: o/a@%s  # v1.0.0\n' % new}),
+                ('one use left behind',
+                 {'w.yml': 'uses: o/a@%s  # v1.0.0\n' % old,
+                  'x.yml': 'uses: o/a@%s  # v1.0.1\n' % new}),
+                ('the comment moved, not its commit',
+                 {'w.yml': 'uses: o/a@%s  # v1.0.0\n' % old,
+                  'x.yml': 'uses: o/a@%s  # v1.0.1\n' % old})):
+            with self.subTest(shape=shape):
+                problems = pin_problems(texts)
+                self.assertEqual(1, len(problems), problems)
+                self.assertIn('o/a is pinned more than one way', problems[0])
+
+    def test_agreeing_pins_and_tag_pins_pass(self):
+        sha = 'a' * 40
+        self.assertEqual([], pin_problems({
+            'w.yml': 'uses: o/a@%s  # v1.0.0: why\n'
+                     'uses: actions/checkout@v7\n' % sha,
+            'x.yml': '  - uses: o/a@%s   # v1.0.0\n' % sha}))
 
 
 def publish_workflow():
