@@ -134,8 +134,11 @@ class PythonPinsTest(unittest.TestCase):
 
 
 #: An action pinned to a commit, and the release the comment beside it names:
-#: `uses: owner/name@<40 hex>  # v1.2.3`.
-PINNED = re.compile(r'uses:\s*([\w.-]+/[\w./-]+)@([0-9a-f]{40})\b([^\n]*)')
+#: `uses: owner/name@<40 hex>  # v1.2.3`. A live `uses:` only, quoted or not;
+#: one inside a comment is not a pin.
+PINNED = re.compile(r'^[ \t]*(?:-[ \t]*)?uses:[ \t]*["\']?'
+                    r'([\w.-]+/[\w./-]+)@([0-9a-fA-F]{40})\b([^\n]*)',
+                    re.MULTILINE)
 VERSION = re.compile(r'#\s*(v\d+(?:\.\d+)*)\b')
 
 
@@ -149,7 +152,11 @@ def pin_problems(workflows):
             m = PINNED.search(line)
             if not m:
                 continue
-            action, sha, rest = m.groups()
+            path, sha, rest = m.groups()
+            # owner/name/sub is the same release as owner/name: its init and
+            # analyze steps must move together.
+            action = '/'.join(path.split('/')[:2])
+            sha = sha.lower()
             version = VERSION.search(rest)
             if not version:
                 problems.append('%s:%d: %s@%s names no release'
@@ -168,8 +175,8 @@ class ActionPinsTest(unittest.TestCase):
     '''A workflow that pins an action to a commit names the release beside
     it, and every use of that action agrees on both, so a bump that reaches
     some uses and not others, or moves the commit and not its comment,
-    fails here. Whether the commit is that release is GitHub's to say, and
-    is checked when a pin moves.'''
+    fails here. Whether the commit is that release is GitHub's to say:
+    RELEASING.md gives the check to run when a pin moves.'''
 
     def workflows(self):
         root = os.path.join(ROOT, '.github', 'workflows')
@@ -209,6 +216,27 @@ class ActionPinsTest(unittest.TestCase):
                 problems = pin_problems(texts)
                 self.assertEqual(1, len(problems), problems)
                 self.assertIn('o/a is pinned more than one way', problems[0])
+
+    def test_every_spelling_of_a_pin_is_read(self):
+        a, b = 'a' * 40, 'b' * 40
+        for shape, texts in (
+                ('upper case', {'w.yml': 'uses: o/a@%s  # v1.0.0\n' % a,
+                                'x.yml': 'uses: o/a@%s  # v1.0.1\n'
+                                         % b.upper()}),
+                ('quoted', {'w.yml': 'uses: o/a@%s  # v1.0.0\n' % a,
+                            'x.yml': 'uses: "o/a@%s"  # v1.0.1\n' % b}),
+                ('a subpath of one action',
+                 {'w.yml': 'uses: o/a/init@%s  # v1.0.0\n' % a,
+                  'x.yml': 'uses: o/a/analyze@%s  # v1.0.1\n' % b})):
+            with self.subTest(shape=shape):
+                problems = pin_problems(texts)
+                self.assertEqual(1, len(problems), problems)
+                self.assertIn('o/a is pinned more than one way', problems[0])
+
+    def test_a_commented_out_pin_is_not_a_pin(self):
+        self.assertEqual([], pin_problems({
+            'w.yml': '# uses: o/a@%s  # v0.9\n'
+                     '  - uses: o/a@%s  # v1.0.0\n' % ('a' * 40, 'b' * 40)}))
 
     def test_agreeing_pins_and_tag_pins_pass(self):
         sha = 'a' * 40

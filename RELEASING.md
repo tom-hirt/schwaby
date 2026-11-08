@@ -126,6 +126,14 @@ pull request bumping upload to v7 and none for download, which would have left
 that only runs during a release. Merge both or neither, and prove the pair
 round-trips a file before believing it.
 
+**An action pinned to a commit names its release beside the pin, and a
+moved pin is checked against that release's tag.** Every use of one action
+must carry the same commit and the same `# vX.Y.Z` (the suite checks that),
+and the commit must be the one the tag names:
+`gh api repos/OWNER/NAME/git/ref/tags/vX.Y.Z --jq .object.sha`, dereferenced
+once more if that is an annotated tag. A bump that moves the commit but not
+its comment, or reaches some uses and not others, is the shape this catches.
+
 It deliberately does not watch the Python dependencies. Those are floors rather
 than pins, this library places trades, and upgrading one is a decision that wants
 the verification below — not a bot's pull request merged on a quiet afternoon.
