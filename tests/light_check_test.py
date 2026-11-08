@@ -150,8 +150,8 @@ class ForbiddenWordsTest(unittest.TestCase):
 class BlindKillTest(unittest.TestCase):
 
     def test_no_file_in_the_tree_signals_what_it_did_not_start(self):
-        # By the check's own pattern, so the two cannot disagree.
-        pattern = light_check().BLIND_KILL
+        # By the check's own function, so the two cannot disagree.
+        lines = light_check().blind_kill_lines
         found, seen = [], 0
         for rel in the_tree(ROOT):
             path = os.path.join(ROOT, rel)
@@ -160,8 +160,7 @@ class BlindKillTest(unittest.TestCase):
             seen += 1
             with open(path, 'rb') as f:
                 content = f.read()
-            found += [(rel, content.count(b'\n', 0, m.start()) + 1)
-                      for m in pattern.finditer(content)]
+            found += [(rel, line) for line in lines(content)]
         # Positive control: the walk reached the files it is for.
         self.assertGreater(seen, 50, 'the walk read almost nothing')
         self.assertEqual([], found)
@@ -299,6 +298,8 @@ class LightCheckTest(unittest.TestCase):
                  ('mod.py', "subprocess.run(['%s', '-9', '0'])" % KILL),
                  ('mod.py', 'os.system("%s -9 0")' % KILL),
                  ('mod.py', 'x = os.get%s() == 2' % PARENT),
+                 ('mod.py', 'x = 2 == os.get%s()' % PARENT),
+                 ('run.sh', '[ "$%s" -eq 2 ] && exit' % PARENT.upper()),
                  ('run.sh', 'echo $%s' % PARENT.upper()),
                  ('run.sh', 'echo ${%s}' % PARENT.upper()),
                  ('run.sh', 'ps -o %s= -p "$pid"' % PARENT),
@@ -330,7 +331,9 @@ class LightCheckTest(unittest.TestCase):
         self.stage('run.sh', '%s -1 "$pid"\n%s -9 -"$pgid"\n%s -9 -12\n'
                    '%s -0 "$pid"\n%s -s 0 "$pid"\n%s -0 0\n%s -l 0\n'
                    '%s -9 $$\np%s -g 12\n'
-                   % ((KILL,) * 9))
+                   '[ "$%s" -eq 1 ] && exit\n[ $%s != 1 ] || exit\n'
+                   "test \"${%s}\" = '1'\n"
+                   % ((KILL,) * 9 + (PARENT.upper(),) * 3))
         self.stage('mod.py', 'import os\nimport subprocess\n\n'
                    '%s, pgid = 1, 2\nos.%s(-pgid, 9)\nos.%s(-12, 9)\n'
                    "subprocess.run(['%s', '-1', str(pgid)])\n"
@@ -338,9 +341,10 @@ class LightCheckTest(unittest.TestCase):
                    'os.%s(pgid, 0)\nos.%spg(os.getpgid(pgid), 9)\n'
                    'if os.get%s() == 1:\n    pass\n'
                    'if os.get%s() != 1:\n    pass\n'
+                   'if 1 == os.get%s():\n    pass\n'
                    'subprocess.%s(0, 1)\n'
                    % (PARENT, KILL, KILL, KILL, KILL, KILL, KILL, PARENT,
-                      PARENT, KILL))
+                      PARENT, PARENT, KILL))
         code, out = self.check()
         self.assertEqual(0, code, out)
 

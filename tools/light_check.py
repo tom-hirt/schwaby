@@ -25,9 +25,11 @@ commit will contain:
    which holds the shell or test runner that started it unless it began a
    session of its own. A parent found that way is whoever adopted an
    orphan, often the session manager, whose children are the whole desktop.
-   Python's `os.getppid() == 1` (or `!= 1`), the test of an orphan that
-   exits, is let through. A kill names a pid or a process group its caller started
-   and recorded. Each line is named, by the whole file;
+   Comparing the parent's pid with 1, the test of an orphan that exits, is
+   let through, either way round in Python (`os.getppid() == 1`, `!=`) and
+   in a shell test (`[ "$PPID" -eq 1 ]`, `-ne`, `=`, `!=`). A kill names a
+   pid or a process group its caller started and recorded. Each line is
+   named, by the whole file;
  * no staged file, by its name or its content, carries a word on this
    clone's forbidden list, `git config --add lightcheck.forbidden WORD`.
    The list lives in the clone's own configuration, so the repository
@@ -167,10 +169,17 @@ _ARGV = (_Q + r'(?:[^\'"\s]*/)?' + _KILL + _Q + r'\s*,\s*')
 _ARGV_OPTION = (r'(?:' + _Q + r'-[sn]' + _Q + r'\s*,\s*' + _Q + r'[^\'"]*'
                 + _Q + r'\s*,\s*|' + _Q + r'-[^\'"]*' + _Q + r'\s*,\s*)')
 _ARGV_END = _Q + r'\s*,?\s*[\])]'
+_GET_PARENT = r'(?:os\.)?get' + _PARENT + r'\(\)'
+_SHELL_PARENT = r'["\']?\$\{?' + _PARENT.upper() + r'\}?["\']?'
 BLIND_KILL = re.compile('|'.join([
-    # Python's os call for the parent's pid, unless it is only compared
-    # with init's.
-    r'\bget' + _PARENT + r'\b(?!\(\)\s*[=!]=\s*1\b)',
+    # First, so that it takes the text before the lookups below can: a
+    # comparison of the parent's pid with init's, which only asks whether
+    # this process was orphaned. Matches of it are not refusals.
+    r'(?P<orphan_test>1\s*[=!]=\s*' + _GET_PARENT + r'|' + _GET_PARENT
+    + r'\s*[=!]=\s*1\b|' + _SHELL_PARENT + r'\s+(?:-eq|-ne|!?==?)\s+'
+    r'["\']?1\b)',
+    # Python's os call for the parent's pid.
+    r'\bget' + _PARENT + r'\b',
     # The shell's variable for it.
     r'\$\{?' + _PARENT.upper() + r'\b',
     # ps asked for the parent column, on the same line.
@@ -204,12 +213,18 @@ BLIND_KILL = re.compile('|'.join([
 ]).encode('ascii'), re.MULTILINE)
 
 
-def blind_kills_in(path):
-    '''The line numbers at which the staged file looks up its parent's pid,
-    or signals pid -1 or its own group.'''
-    content = blob(':0:' + path) or b''
+def blind_kill_lines(content):
+    '''The line numbers at which content looks up its parent's pid, or
+    signals pid -1 or its own group.'''
     return [content.count(b'\n', 0, m.start()) + 1
-            for m in BLIND_KILL.finditer(content)]
+            for m in BLIND_KILL.finditer(content)
+            if m.group('orphan_test') is None]
+
+
+def blind_kills_in(path):
+    '''The line numbers at which the staged file does what
+    blind_kill_lines finds.'''
+    return blind_kill_lines(blob(':0:' + path) or b'')
 
 
 def compile_error(source, path):
