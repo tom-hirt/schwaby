@@ -98,10 +98,11 @@ class AsyncClient(BaseClient):
 # A function, not a method: every coroutine method of the client is one a
 # caller awaits, and this is only ever awaited by them.
 async def _send(client, req_num, send, *, safe):
-    '''Sends ``client``'s request with ``send()``, and again after a rate
-    limit when :meth:`~schwaby.client.Client.set_rate_limit_retry` asked for
-    it: after a token refresh answered with 429, which sent nothing, and,
-    for a ``safe`` request (a GET), after a 429 response.'''
+    '''Sends ``client``'s request with ``send()``, and, for a ``safe``
+    request (a GET), again after a rate limit when
+    :meth:`~schwaby.client.Client.set_rate_limit_retry` asked for it: after
+    a 429 response, and after a token refresh answered with 429, which sent
+    nothing.'''
     attempt = 0
     while True:
         attempt += 1
@@ -109,7 +110,9 @@ async def _send(client, req_num, send, *, safe):
             with client._translate_token_errors():
                 resp = await send()
         except TokenRefreshError as e:
-            wait = client._refresh_retry_wait(e, attempt)
+            # An order is never held back: one sent late could fill at a
+            # price its caller never saw, or after it was placed again.
+            wait = client._refresh_retry_wait(e, attempt) if safe else None
             if wait is None:
                 raise
             client._log_retry(req_num, 'its token refresh was', wait,

@@ -41,8 +41,11 @@ def _retry_after_seconds(value):
     if not isinstance(value, str):
         return None
     value = value.strip()
-    if re.fullmatch(r'[0-9]{1,9}', value):
-        return float(value)
+    # Seconds, or a header Schwab repeated, which arrives joined with
+    # commas: the longest it asks for.
+    parts = [p.strip() for p in value.split(',')]
+    if all(re.fullmatch(r'[0-9]+', p) for p in parts):
+        return max(int(p) for p in parts)
     try:
         when = email.utils.parsedate_to_datetime(value)
     except (TypeError, ValueError, IndexError, OverflowError):
@@ -477,25 +480,25 @@ class BaseClient(EnumEnforcer):
         until this is called with ``retries`` above zero, and off again with
         zero.
 
-        Only what is safe to send again is retried:
+        Only GETs are retried, the requests that are safe to send again:
 
         * a GET Schwab answers with HTTP 429. The wait is the ``Retry-After``
-          its answer gives, in seconds or as a date; without one, 1 second,
-          then 2, 4 and so on, never more than ``max_wait``. When
-          ``Retry-After`` asks for longer than ``max_wait``, the 429 is
-          returned instead, rather than asking again sooner than Schwab
-          said.
-        * any request whose token refresh, which happens before the request
-          is sent, is answered with HTTP 429. Nothing was sent, so even an
-          order is then sent once, after the wait. The refresh's answer
-          carries no ``Retry-After`` here, so the wait is the backoff.
+          its answer gives, in seconds or as a date, but never less than the
+          backoff: 1 second, then 2, 4 and so on, never more than
+          ``max_wait``. When ``Retry-After`` asks for longer than
+          ``max_wait``, the 429 is returned instead, rather than asking
+          again sooner than Schwab said.
+        * a GET whose token refresh, which happens before the request is
+          sent, is answered with HTTP 429. The wait is the backoff.
 
-        A POST, PUT or DELETE Schwab answers with 429 is never sent again,
-        so an order cannot be placed, replaced or cancelled twice by this.
-        When the retries run out, the last 429 response is returned, or the
-        last :class:`~schwaby.utils.TokenRefreshError` raised, as without
-        them. Each wait is logged as a warning, and the thread or, for
-        :class:`AsyncClient`, the coroutine waits through it.
+        An order, a POST, PUT or DELETE, is never sent again and never held
+        back: one answered with 429 is returned, and one whose token
+        refresh is rate-limited raises
+        :class:`~schwaby.utils.TokenRefreshError`, as without this. When the
+        retries run out, the last 429 response is returned, or the last
+        :class:`~schwaby.utils.TokenRefreshError` raised. Each wait is
+        logged as a warning, and the thread or, for :class:`AsyncClient`,
+        the coroutine waits through it.
 
         :param retries: how many times to send again after a 429; ``0``
                         turns this off.
@@ -521,10 +524,15 @@ class BaseClient(EnumEnforcer):
         send number ``attempt``, or None not to send again.'''
         if attempt > self._rate_limit_retries:
             return None
+        backoff = min(self._rate_limit_max_wait, 2.0 ** (attempt - 1))
         asked = _retry_after_seconds(retry_after)
-        if asked is not None:
-            return asked if asked <= self._rate_limit_max_wait else None
-        return min(self._rate_limit_max_wait, 2.0 ** (attempt - 1))
+        if asked is None:
+            return backoff
+        if asked > self._rate_limit_max_wait:
+            return None
+        # Never less than the backoff: a Retry-After of 0, or a date already
+        # past, would otherwise send every retry back to back.
+        return max(float(asked), backoff)
 
     def _response_retry_wait(self, resp, attempt):
         '''The wait before sending a GET again, or None: only after a 429,

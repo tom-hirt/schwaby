@@ -304,7 +304,11 @@ class _TestClient:
         return stand_in
 
     def waits(self, sleep):
-        return [c.args[0] for c in sleep.call_args_list]
+        # The waits that were awaited: a coroutine sleep that is called and
+        # not awaited waits for nothing.
+        calls = (sleep.await_args_list if isinstance(self.client, AsyncClient)
+                 else sleep.call_args_list)
+        return [c.args[0] for c in calls]
 
     @staticmethod
     def answer(status, headers=None):
@@ -337,7 +341,8 @@ class _TestClient:
                 self.answer(429), self.answer(429), done]
         self.assertIs(done, self.client.get_quote(SYMBOL))
         self.assertEqual(3, self.mock_session.get.call_count)
-        self.assertEqual([1.0, 2.0], self.waits(sleep))
+        self.assertEqual([1.0, 2.0], self.waits(sleep),
+                         'the waits asked for were not the backoff')
 
     @no_duplicates
     def test_the_backoff_never_waits_longer_than_max_wait(self):
@@ -355,9 +360,10 @@ class _TestClient:
         long_past = email.utils.format_datetime(
                 datetime.datetime(2001, 1, 1, tzinfo=datetime.timezone.utc),
                 usegmt=True)
-        for header, wait in (('7', 7.0), (' 12 ', 12.0), (long_past, 0.0),
-                             ('soon', 1.0), ('-3', 1.0), ('1.5', 1.0),
-                             ('9' * 400, 1.0)):
+        for header, wait in (('7', 7.0), (' 12 ', 12.0), ('0', 1.0),
+                             (long_past, 1.0), ('soon', 1.0), ('-3', 1.0),
+                             ('1.5', 1.0), ('00000000005', 5.0),
+                             ('5, 10', 10.0)):
             with self.subTest(header=header[:20]):
                 sleep = self.patch_sleep()
                 self.client.set_rate_limit_retry(1)
@@ -376,7 +382,7 @@ class _TestClient:
         far = email.utils.format_datetime(
                 datetime.datetime(2999, 1, 1, tzinfo=datetime.timezone.utc),
                 usegmt=True)
-        for header in ('60', far):
+        for header in ('60', far, '9' * 400, '9999999999', '5, 60'):
             with self.subTest(header=header):
                 sleep = self.patch_sleep()
                 self.client.set_rate_limit_retry(2, max_wait=5)
@@ -425,16 +431,47 @@ class _TestClient:
                 self.assertEqual([], self.waits(sleep))
 
     @no_duplicates
-    def test_a_rate_limited_refresh_is_retried_even_for_an_order(self):
-        # The refresh comes before the request is sent: nothing reached
-        # Schwab's order endpoint, so sending it after the wait is its first.
+    def test_a_rate_limited_refresh_is_retried_for_a_get(self):
         sleep = self.patch_sleep()
         self.client.set_rate_limit_retry(2)
-        placed = self.answer(201)
-        self.mock_session.post.side_effect = [
-                self.refresh_refused(429), placed]
-        self.assertIs(placed, self.client.place_order(ACCOUNT_HASH, {}))
+        done = self.answer(200)
+        self.mock_session.get.side_effect = [self.refresh_refused(429), done]
+        self.assertIs(done, self.client.get_quote(SYMBOL))
         self.assertEqual([1.0], self.waits(sleep))
+
+    @no_duplicates
+    def test_an_order_whose_refresh_is_rate_limited_is_not_held_back(self):
+        # Sent late, an order could fill at a price its caller never saw,
+        # or after the caller gave up and placed it again.
+        for name, call, method in (
+                ('place', lambda: self.client.place_order(ACCOUNT_HASH, {}),
+                 'post'),
+                ('replace', lambda: self.client.replace_order(
+                    ACCOUNT_HASH, ORDER_ID, {}), 'put'),
+                ('cancel', lambda: self.client.cancel_order(
+                    ORDER_ID, ACCOUNT_HASH), 'delete')):
+            with self.subTest(order=name):
+                sleep = self.patch_sleep()
+                self.client.set_rate_limit_retry(3)
+                send = getattr(self.mock_session, method)
+                send.reset_mock()
+                send.side_effect = [self.refresh_refused(429),
+                                    self.answer(201)]
+                with self.assertRaises(TokenRefreshError,
+                                       msg='an order was held back for a '
+                                           'rate-limited refresh'):
+                    call()
+                self.assertEqual(1, send.call_count)
+                self.assertEqual([], self.waits(sleep))
+
+    @no_duplicates
+    def test_a_response_is_not_read_while_the_retry_is_off(self):
+        class Unreadable:
+            @property
+            def status_code(self):
+                raise AssertionError('the status was read with the retry '
+                                     'off')
+        self.assertIsNone(self.client._response_retry_wait(Unreadable(), 1))
 
     @no_duplicates
     def test_a_refresh_refused_otherwise_is_raised_at_once(self):

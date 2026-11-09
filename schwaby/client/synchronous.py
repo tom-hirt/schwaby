@@ -113,10 +113,10 @@ class Client(BaseClient):
                           safe=False)
 
     def _send(self, req_num, send, *, safe):
-        '''Sends a request with ``send()``, and again after a rate limit
-        when :meth:`set_rate_limit_retry` asked for it: after a token refresh
-        answered with 429, which sent nothing, and, for a ``safe`` request (a
-        GET), after a 429 response.'''
+        '''Sends a request with ``send()``, and, for a ``safe`` request (a
+        GET), again after a rate limit when :meth:`set_rate_limit_retry`
+        asked for it: after a 429 response, and after a token refresh
+        answered with 429, which sent nothing.'''
         attempt = 0
         while True:
             attempt += 1
@@ -124,7 +124,9 @@ class Client(BaseClient):
                 with self._translate_token_errors():
                     resp = send()
             except TokenRefreshError as e:
-                wait = self._refresh_retry_wait(e, attempt)
+                # An order is never held back: one sent late could fill at a
+                # price its caller never saw, or after it was placed again.
+                wait = self._refresh_retry_wait(e, attempt) if safe else None
                 if wait is None:
                     raise
                 self._log_retry(req_num, 'its token refresh was', wait,

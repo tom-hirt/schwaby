@@ -265,8 +265,10 @@ Rate Limits
 +++++++++++
 
 Schwab answers a request it is rate-limiting with HTTP 429, and the client
-returns that response like any other. It can instead wait and send the
-request again, for what is safe to send again, once it is asked to:
+returns that response like any other. It can instead wait and send a GET
+again, once it is asked to. Orders are never retried and never held back:
+placing, replacing or cancelling one that is rate-limited fails at once, as
+without this.
 
 .. code-block:: python
 

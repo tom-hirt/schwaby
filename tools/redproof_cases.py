@@ -9183,16 +9183,17 @@ CASES += [
          'a 429 was retried when no retry was asked'),
     Case('rate-limit/a-retry-after-beyond-max-wait-is-not-retried',
          'schwaby/client/base.py',
-         '            return asked if asked <= self._rate_limit_max_wait else '
-         'None\n',
-         '            return min(asked, self._rate_limit_max_wait)\n',
+         '        if asked > self._rate_limit_max_wait:\n'
+         '            return None\n',
+         '        if False:\n'
+         '            return None\n',
          'tests/client_test.py::ClientTest'
          '::test_a_retry_after_beyond_max_wait_returns_the_429',
          'beyond max_wait was retried'),
     Case('rate-limit/the-backoff-is-capped',
          'schwaby/client/base.py',
-         '        return min(self._rate_limit_max_wait, 2.0 ** (attempt - 1))\n',
-         '        return 2.0 ** (attempt - 1)\n',
+         '        backoff = min(self._rate_limit_max_wait, 2.0 ** (attempt - 1))\n',
+         '        backoff = 2.0 ** (attempt - 1)\n',
          'tests/client_test.py::ClientTest'
          '::test_the_backoff_never_waits_longer_than_max_wait',
          'a wait was longer than max_wait'),
@@ -9203,6 +9204,31 @@ CASES += [
          'tests/client_test.py::ClientTest'
          '::test_the_last_429_is_returned_when_the_retries_run_out',
          'the retries did not stop where asked'),
+    Case('rate-limit/an-order-is-not-held-back-for-a-refresh',
+         'schwaby/client/synchronous.py',
+         '                wait = self._refresh_retry_wait(e, attempt) if safe '
+         'else None\n',
+         '                wait = self._refresh_retry_wait(e, attempt)\n',
+         'tests/client_test.py::ClientTest'
+         '::test_an_order_whose_refresh_is_rate_limited_is_not_held_back',
+         'an order was held back for a rate-limited refresh'),
+    Case('rate-limit/an-async-order-is-not-held-back-for-a-refresh',
+         'schwaby/client/asynchronous.py',
+         '            wait = client._refresh_retry_wait(e, attempt) if safe '
+         'else None\n',
+         '            wait = client._refresh_retry_wait(e, attempt)\n',
+         'tests/client_test.py::AsyncClientTest'
+         '::test_an_order_whose_refresh_is_rate_limited_is_not_held_back',
+         'an order was held back for a rate-limited refresh'),
+    Case('rate-limit/an-async-wait-is-awaited',
+         'schwaby/client/asynchronous.py',
+         "        client._log_retry(req_num, 'it was', wait, attempt)\n"
+         '        await _sleep(wait)\n',
+         "        client._log_retry(req_num, 'it was', wait, attempt)\n"
+         '        _sleep(wait)\n',
+         'tests/client_test.py::AsyncClientTest'
+         '::test_a_rate_limited_get_is_sent_again_after_a_backoff',
+         'the waits asked for were not the backoff'),
     Case('rate-limit/only-a-rate-limited-refresh-is-retried',
          'schwaby/client/base.py',
          '        if not (error.rate_limited and error.endpoint_answered):\n',
