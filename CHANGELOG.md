@@ -26,6 +26,85 @@ what each entry says changed, is the same.
 
 ---
 
+## 5.4.0
+
+*2026-11-09*
+
+A minor release: everything is added, and nothing that worked before
+changes unless you turn it on. A failed refresh or login now says what it
+calls for; a client can wait out Schwab's rate limits, be paced by your own
+limiter, and share one token file with other clients; and tests of code
+built on this library can run without Schwab's servers.
+
+### What a failed refresh or login calls for
+
+`TokenRefreshError` and `LoginExchangeError` carry a `kind`: a
+`TokenErrorKind` (`dead_token`, `rate_limited`, `app_refused`,
+`refused_no_body`, `transient`) or a `LoginErrorKind` (`code_refused`,
+`rate_limited`, `app_refused`, `refused_no_body`, `access_denied`,
+`state_mismatch`, `malformed_redirect`, `transient`), and
+`server_error_code`, the code Schwab sent, when it sent one this library
+did not make up. `find_token_error()` finds either error through an
+exception's causes, and `server_error_code()` reads the code from one.
+Every attribute the errors had is unchanged.
+
+`Client.ensure_token_fresh(margin=600.0)` refreshes the access token now,
+if it expires within `margin` seconds, so a program can choose when the
+refresh happens; it returns a `TokenFreshness`. A login with no browser to
+open raises `NoBrowserAvailable`, still a `webbrowser.Error`, naming
+`client_from_manual_flow`.
+
+### Rate limits: an opt-in retry, and your own pace
+
+`client.set_rate_limit_retry(retries, max_wait=60.0, max_sleep=120.0)`
+waits and sends a GET again when Schwab answers 429, or when the token
+refresh before it is answered 429: after `Retry-After`, never less than a
+backoff of 1, 2, 4... seconds, never more than `max_wait` a wait or
+`max_sleep` a call. Orders are never sent again and never held back by
+it. `with client.no_rate_limit_retry():` turns it off for the calls inside,
+in that thread or asyncio task, for reads that must not wait. It is off
+until set.
+
+`client.set_pace(pace)` calls your own rate limiter before every request
+the client sends, a retry or a token refresh included, with a
+`PaceRequest` saying what is about to go; `with client.pace_tag(tag):`
+gives it a lane. An `AsyncClient` awaits an async pace. A refresh is paced
+once, however many calls need it.
+
+The retry follows an idea from
+[Schwab-py-NG](https://github.com/neusse/Schwab-py-NG), whose opt-in 429
+recovery suggested it; no code was taken from it.
+
+### One token file, several clients
+
+`client_from_token_file(..., shared=True)` lets several clients, in one
+process or several, use one token file: a refresh holds a lock on it, a
+client takes the token another refreshed instead of sending its own, and
+a token is never written over a newer one, so a fresh login always wins
+over a refresh of the old token. The login functions, `easy_client` and
+`token_file_writer` take `shared`, `lock_path` and `lock_timeout` too, and
+`shared_token_file()` gives a reader and a writer for
+`client_from_access_functions`. Past `lock_timeout` a refresh raises
+`TokenRefreshError`, kind `transient`, having sent nothing, caused by
+`TokenFileLockTimeout`. `token_file_created_at()` and
+`refresh_token_expires_at()` read a token file's login time and the end of
+its refresh token's seven days. Without `shared`, nothing changes.
+
+### Testing without Schwab's servers
+
+Every `client_from_*` function and `easy_client` take `transport=`, an
+`httpx2` transport every request goes through, the token endpoint's
+included. `schwaby.testing` gives a test `FakeTokenEndpoint`, which answers
+refreshes and logins as the test says, `block_network()` (a decorator, and
+the pytest fixture `no_network`), which refuses any connection off the
+machine, and helpers for tokens, refusals, token files and redirects.
+
+### For contributors
+
+No CI job runs on a schedule, and none for a docs-only change; the release
+red-proof runs only what it must prove. The suite prints its progress
+when its output is not a terminal.
+
 ## 5.3.1
 
 *2026-11-07*
