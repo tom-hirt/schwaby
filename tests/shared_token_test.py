@@ -238,6 +238,41 @@ class LockTest(SharedTokenTestCase):
             pass
 
     @no_duplicates
+    def test_a_wait_cancelled_after_the_worker_took_the_lock_gives_it_back(
+            self):
+        # The worker has the lock and has handed it over, but the task has
+        # not resumed when it is cancelled: the task gives it back.
+        st.write_token_file(self.path)
+        shared = _shared_token.SharedTokenFile(self.path, lock_timeout=5)
+        started, took = threading.Event(), threading.Event()
+        acquire_for = shared._acquire_for
+
+        def watched(key, claim):
+            started.set()
+            fd = acquire_for(key, claim)
+            took.set()
+            return fd
+        shared._acquire_for = watched
+
+        async def cancel_late():
+            async def take():
+                async with shared.alock():
+                    pass
+            task = asyncio.ensure_future(take())
+            while not started.is_set():
+                await asyncio.sleep(0)
+            # Blocks the loop until the worker has the lock, so the task
+            # cannot resume before the cancel.
+            self.assertTrue(took.wait(10))
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        asyncio.run(cancel_late())
+        other = _shared_token.SharedTokenFile(self.path, lock_timeout=1)
+        with other.lock():
+            pass
+
+    @no_duplicates
     def test_a_wait_whose_event_loop_has_closed_gives_the_lock_back(self):
         # The task gives up, and its event loop closes, before the worker
         # thread gets the lock: the worker gives it back itself.

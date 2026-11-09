@@ -9448,14 +9448,8 @@ CASES += [
          '                self._release(key, fd)\n'
          '            raise\n',
          '            raise\n',
-         'tests/shared_token_test.py::LockTest::test_an_async_wait_cancelled_gives_the_lock_back',
-         'TokenFileLockTimeout',
-         superseded='The test cancels before the worker takes the lock, and '
-                    'the worker gives a lock it takes for an abandoned wait '
-                    'back itself (shared/a-wait-whose-loop-has-closed-gives-'
-                    'the-lock-back). The release here is for a lock taken in '
-                    'the instant before the cancel, which no test reaches '
-                    'deterministically.'),
+         'tests/shared_token_test.py::LockTest::test_a_wait_cancelled_after_the_worker_took_the_lock_gives_it_back',
+         'TokenFileLockTimeout'),
     # A task that gave up, whose event loop has closed, cannot give the
     # lock back: the worker that took it does.
     Case('shared/a-wait-whose-loop-has-closed-gives-the-lock-back',
