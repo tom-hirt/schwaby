@@ -954,7 +954,8 @@ class DocCoverageTest(unittest.TestCase):
     MODULES = ('schwaby.auth', 'schwaby.client', 'schwaby.streaming',
                'schwaby.orders.generic', 'schwaby.orders.common',
                'schwaby.orders.equities', 'schwaby.orders.options',
-               'schwaby.utils', 'schwaby.debug', 'schwaby.contrib.util')
+               'schwaby.utils', 'schwaby.debug', 'schwaby.contrib.util',
+               'schwaby.testing')
 
     # Every other module in the package, and why it is not walked. A module
     # in neither list fails the suite, so a new one has to be classified.

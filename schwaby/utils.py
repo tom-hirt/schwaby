@@ -160,6 +160,10 @@ class SchwabError(Exception):
     you is the ability to catch the library's own failures *without* also
     catching every ``int()`` and ``float()`` in the same block.
 
+    :mod:`schwaby.testing`'s errors are not among them: each is a test's
+    failure, an ``AssertionError``, so code under test that catches this
+    does not hide one.
+
     Two of the order exceptions additionally inherit ``ValueError``, so an
     ``except ValueError`` around order placement catches them.
     :class:`OrderIdNotFoundError` deliberately does not: see its own

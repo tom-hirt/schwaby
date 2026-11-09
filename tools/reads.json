@@ -318,6 +318,16 @@
   "tests/test.py",
   "tests/utils.py"
  ],
+ "tests/testing_test.py": [
+  "schwaby/__init__.py",
+  "schwaby/auth.py",
+  "schwaby/testing.py",
+  "setup.cfg",
+  "tests/__init__.py",
+  "tests/conftest.py",
+  "tests/testing_test.py",
+  "tests/utils.py"
+ ],
  "tests/utils_test.py": [
   "schwaby/",
   "schwaby/__init__.py",

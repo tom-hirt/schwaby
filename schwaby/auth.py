@@ -374,7 +374,17 @@ def _expiry_needs_refreshing_first(token):
     return not _expiry_authlib_acts_on(expires_at)
 
 
-def _new_session(session_class, api_key, app_secret, token, update_token):
+def _transport_kwargs(transport):
+    '''The session arguments that send every request through ``transport``.
+    The environment's proxies are not used with one: httpx2 already leaves
+    them out when given a transport, and ``trust_env=False`` says so.'''
+    if transport is None:
+        return {}
+    return {'transport': transport, 'trust_env': False}
+
+
+def _new_session(session_class, api_key, app_secret, token, update_token,
+                 transport=None):
     '''The refreshing session every client is built on.
 
     One builder for every entry point, so the check on refresh responses
@@ -386,7 +396,8 @@ def _new_session(session_class, api_key, app_secret, token, update_token):
                             token=token,
                             token_endpoint=TOKEN_ENDPOINT,
                             update_token=update_token,
-                            leeway=300)
+                            leeway=300,
+                            **_transport_kwargs(transport))
     session.register_compliance_hook(
             'refresh_token_response', _refuse_unusable_token_response)
     return session
@@ -788,7 +799,7 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
                            asyncio=False, enforce_enums=False, 
                            token_write_func=None, callback_timeout=300.0,
                            interactive=True, requested_browser=None,
-                           callback_socket=None):
+                           callback_socket=None, *, transport=None):
     '''
     Open a web browser to perform an OAuth webapp login flow and creates a 
     client wrapped around the resulting token. The client will be configured to 
@@ -854,6 +865,8 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
                             finishing this login late reaches the next flow
                             served on it. A redirect for a different login,
                             told by its ``state``, is ignored, on either path.
+    :param transport: See the corresponding parameter to
+                      :func:`client_from_access_functions`.
     '''
     api_key = __normalize_credential(api_key, 'api_key')
     app_secret = __normalize_credential(app_secret, 'app_secret')
@@ -1108,7 +1121,8 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
 
         return client_from_received_url(
                 api_key, app_secret, auth_context, received_url, 
-                token_write_func, asyncio, enforce_enums)
+                token_write_func, asyncio, enforce_enums,
+                transport=transport)
 
 
 ################################################################################
@@ -1116,7 +1130,7 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
 
 
 def client_from_token_file(token_path, api_key, app_secret, asyncio=False,
-                           enforce_enums=True):
+                           enforce_enums=True, *, transport=None):
     '''
     Returns a session from an existing token file. The session will perform
     an auth refresh as needed. It will also update the token on disk whenever
@@ -1136,6 +1150,8 @@ def client_from_token_file(token_path, api_key, app_secret, asyncio=False,
                           the client methods. Only do it if you know you really
                           need it. For most users, it is advised to use enums
                           to avoid errors.
+    :param transport: See the corresponding parameter to
+                      :func:`client_from_access_functions`.
     '''
     api_key = __normalize_credential(api_key, 'api_key')
     app_secret = __normalize_credential(app_secret, 'app_secret')
@@ -1144,7 +1160,7 @@ def client_from_token_file(token_path, api_key, app_secret, asyncio=False,
 
     return client_from_access_functions(
         api_key, app_secret, load, __make_update_token_func(token_path),
-        asyncio=asyncio, enforce_enums=enforce_enums)
+        asyncio=asyncio, enforce_enums=enforce_enums, transport=transport)
 
 
 ################################################################################
@@ -1153,7 +1169,7 @@ def client_from_token_file(token_path, api_key, app_secret, asyncio=False,
 
 def client_from_manual_flow(api_key, app_secret, callback_url, token_path,
                             asyncio=False, token_write_func=None,
-                            enforce_enums=True):
+                            enforce_enums=True, *, transport=None):
     '''
     Walks the user through performing an OAuth login flow by manually
     copy-pasting URLs, and returns a client wrapped around the resulting token.
@@ -1178,6 +1194,8 @@ def client_from_manual_flow(api_key, app_secret, callback_url, token_path,
                           the client methods. Only do it if you know you really
                           need it. For most users, it is advised to use enums
                           to avoid errors.
+    :param transport: See the corresponding parameter to
+                      :func:`client_from_access_functions`.
     '''
     api_key = __normalize_credential(api_key, 'api_key')
     app_secret = __normalize_credential(app_secret, 'app_secret')
@@ -1225,7 +1243,7 @@ def client_from_manual_flow(api_key, app_secret, callback_url, token_path,
 
     return client_from_received_url(
             api_key, app_secret, auth_context, received_url, token_write_func, 
-            asyncio, enforce_enums)
+            asyncio, enforce_enums, transport=transport)
 
 
 ################################################################################
@@ -1234,7 +1252,7 @@ def client_from_manual_flow(api_key, app_secret, callback_url, token_path,
 
 def client_from_access_functions(api_key, app_secret, token_read_func,
                                  token_write_func, asyncio=False,
-                                 enforce_enums=True):
+                                 enforce_enums=True, *, transport=None):
     '''
     Returns a session from an existing token file, using the accessor methods to
     read and write the token. This is an advanced method for users who do not
@@ -1284,6 +1302,16 @@ def client_from_access_functions(api_key, app_secret, token_read_func,
                           the client methods. Only do it if you know you really
                           need it. For most users, it is advised to use enums
                           to avoid errors.
+    :param transport: An ``httpx2`` transport that every request this client
+                      sends goes through, the token endpoint's included,
+                      instead of the network: ``httpx2.MockTransport`` in a
+                      test, or :class:`schwaby.testing.FakeTokenEndpoint`.
+                      With one, the environment's proxy settings are not
+                      used. The streaming connection does not go through it.
+                      A login exchanges its code synchronously, even for an
+                      ``asyncio`` client, so a login given a transport needs
+                      one that serves both kinds of request, as
+                      ``httpx2.MockTransport`` does.
     '''
     api_key = __normalize_credential(api_key, 'api_key')
     app_secret = __normalize_credential(app_secret, 'app_secret')
@@ -1321,7 +1349,7 @@ def client_from_access_functions(api_key, app_secret, token_read_func,
     return client_class(
         api_key,
         _new_session(session_class, api_key, app_secret, token,
-                     oauth_client_update_token),
+                     oauth_client_update_token, transport),
         token_metadata=metadata,
         enforce_enums=enforce_enums)
 
@@ -1386,7 +1414,7 @@ def get_auth_context(api_key, callback_url, state=None):
 
 def client_from_received_url(
         api_key, app_secret, auth_context, received_url, token_write_func, 
-        asyncio=False, enforce_enums=True):
+        asyncio=False, enforce_enums=True, *, transport=None):
     '''
     Finish a login started by :func:`get_auth_context` and return a client.
 
@@ -1413,6 +1441,8 @@ def client_from_received_url(
                          the token it becomes: do not log it.
     :param token_write_func: Called with the token when it is created and on
                              every refresh thereafter.
+    :param transport: See the corresponding parameter to
+                      :func:`client_from_access_functions`.
     '''
     # XXX: The AuthContext must be serializable, which means the original 
     #      OAuth2Client created in get_auth_context cannot be passed around. 
@@ -1429,7 +1459,8 @@ def client_from_received_url(
                 urllib.parse.urlparse(received_url).query).get('code', []):
             _redact.register(code, 'AUTHORIZATION_CODE')
 
-    oauth = OAuth2Client(api_key, redirect_uri=auth_context.callback_url)
+    oauth = OAuth2Client(api_key, redirect_uri=auth_context.callback_url,
+                         **_transport_kwargs(transport))
     # The token a login exchanges its code for is written just below, so it
     # gets the check a refresh does. Unchecked, {"message": "Unauthorized"} is
     # written as the token, and every call after it fails without contacting
@@ -1516,7 +1547,7 @@ def client_from_received_url(
     return client_class(
         api_key,
         _new_session(session_class, api_key, app_secret, token,
-                     oauth_client_update_token),
+                     oauth_client_update_token, transport),
         token_metadata=metadata_manager, enforce_enums=enforce_enums)
 
 
@@ -1552,7 +1583,7 @@ def __running_in_notebook():
 def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False, 
                 enforce_enums=True, max_token_age=60*60*24*6.5,
                 callback_timeout=300.0, interactive=True,
-                requested_browser=None):
+                requested_browser=None, *, transport=None):
     '''
     Convenient wrapper around :func:`client_from_login_flow` and
     :func:`client_from_token_file`. If ``token_path`` exists, loads the token
@@ -1606,6 +1637,8 @@ def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False,
     :param requested_browser: See the corresponding parameter to 
                               :func:`client_from_login_flow 
                               <client_from_login_flow>`.
+    :param transport: See the corresponding parameter to
+                      :func:`client_from_access_functions`.
     '''
     api_key = __normalize_credential(api_key, 'api_key')
     app_secret = __normalize_credential(app_secret, 'app_secret')
@@ -1621,7 +1654,8 @@ def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False,
     if os.path.isfile(token_path):
         c = client_from_token_file(token_path, api_key, app_secret,
                                    asyncio=asyncio,
-                                   enforce_enums=enforce_enums)
+                                   enforce_enums=enforce_enums,
+                                   transport=transport)
         logger.info('Loaded token from file \'%s\'', token_path)
 
         if max_token_age > 0 and c.token_age() >= max_token_age:
@@ -1636,7 +1670,8 @@ def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False,
     if __running_in_notebook():
         c = client_from_manual_flow(api_key, app_secret, callback_url,
                                     token_path, asyncio=asyncio,
-                                    enforce_enums=enforce_enums)
+                                    enforce_enums=enforce_enums,
+                                    transport=transport)
         logger.info(
             'Returning client fetched using manual flow, writing' +
             'token to \'%s\'', token_path)
@@ -1644,7 +1679,8 @@ def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False,
         c = client_from_login_flow(
             api_key, app_secret, callback_url, token_path, asyncio=asyncio,
             enforce_enums=enforce_enums, callback_timeout=callback_timeout,
-            requested_browser=requested_browser, interactive=interactive)
+            requested_browser=requested_browser, interactive=interactive,
+            transport=transport)
 
         logger.info(
             'Returning client fetched using web browser, writing' +

@@ -70,6 +70,7 @@ New here? Start with :ref:`getting_started`, then :ref:`auth`.
   order-templates
   order-builder
   util
+  testing
   api
   help
   contributing

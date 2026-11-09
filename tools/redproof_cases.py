@@ -8921,4 +8921,176 @@ CASES += [
          'tests/auth_test.py::EnsureTokenFreshSessionTest'
          '::test_two_async_calls_at_once_refresh_once',
          'two calls at once each sent a refresh'),
+
+    # transport=: every request a client sends goes through the transport it
+    # was given, the token endpoint's included. A path that drops it sends
+    # that request to Schwab; inside block_network() the test sees it refused.
+    Case('transport/the-session-sends-through-it',
+         'schwaby/auth.py',
+         '                            leeway=300,\n'
+         '                            **_transport_kwargs(transport))\n',
+         '                            leeway=300)\n',
+         'tests/testing_test.py::TransportTest::test_a_token_file_client_refreshes_and_calls_through_it',
+         'NetworkBlocked', subtest='asyncio=False'),
+
+    Case('transport/a-logins-exchange-sends-through-it',
+         'schwaby/auth.py',
+         '    oauth = OAuth2Client(api_key, redirect_uri=auth_context.callback_url,\n'
+         '                         **_transport_kwargs(transport))\n',
+         '    oauth = OAuth2Client(api_key, redirect_uri=auth_context.callback_url)\n',
+         'tests/testing_test.py::TransportTest::test_a_login_exchanges_its_code_through_it',
+         'NetworkBlocked', subtest='asyncio=False'),
+
+    Case('transport/a-logins-client-sends-through-it',
+         'schwaby/auth.py',
+         '                     oauth_client_update_token, transport),\n'
+         '        token_metadata=metadata_manager, enforce_enums=enforce_enums)\n',
+         '                     oauth_client_update_token),\n'
+         '        token_metadata=metadata_manager, enforce_enums=enforce_enums)\n',
+         'tests/testing_test.py::TransportTest::test_a_login_exchanges_its_code_through_it',
+         'NetworkBlocked', subtest='asyncio=False'),
+
+    Case('transport/an-access-functions-client-sends-through-it',
+         'schwaby/auth.py',
+         '                     oauth_client_update_token, transport),\n'
+         '        token_metadata=metadata,\n',
+         '                     oauth_client_update_token),\n'
+         '        token_metadata=metadata,\n',
+         'tests/testing_test.py::TransportTest::test_an_access_functions_client_uses_it',
+         'NetworkBlocked'),
+
+    Case('transport/a-token-file-passes-it-on',
+         'schwaby/auth.py',
+         '        asyncio=asyncio, enforce_enums=enforce_enums, transport=transport)\n',
+         '        asyncio=asyncio, enforce_enums=enforce_enums)\n',
+         'tests/testing_test.py::TransportTest::test_a_token_file_client_refreshes_and_calls_through_it',
+         'NetworkBlocked', subtest='asyncio=False'),
+
+    Case('transport/the-login-flow-passes-it-on',
+         'schwaby/auth.py',
+         '                token_write_func, asyncio, enforce_enums,\n'
+         '                transport=transport)\n',
+         '                token_write_func, asyncio, enforce_enums)\n',
+         'tests/testing_test.py::TransportTest::test_the_login_flow_exchanges_its_code_through_it',
+         'NetworkBlocked'),
+
+    Case('transport/a-manual-login-passes-it-on',
+         'schwaby/auth.py',
+         '            asyncio, enforce_enums, transport=transport)\n',
+         '            asyncio, enforce_enums)\n',
+         'tests/testing_test.py::TransportTest::test_a_manual_login_uses_it',
+         'NetworkBlocked'),
+
+    Case('transport/easy-client-passes-it-to-a-token-file',
+         'schwaby/auth.py',
+         '                                   enforce_enums=enforce_enums,\n'
+         '                                   transport=transport)\n',
+         '                                   enforce_enums=enforce_enums)\n',
+         'tests/testing_test.py::TransportTest::test_easy_client_passes_it_on',
+         'NetworkBlocked'),
+
+    Case('transport/easy-client-passes-it-to-a-manual-login',
+         'schwaby/auth.py',
+         '                                    enforce_enums=enforce_enums,\n'
+         '                                    transport=transport)\n',
+         '                                    enforce_enums=enforce_enums)\n',
+         'tests/testing_test.py::TransportTest::test_easy_client_passes_it_on',
+         "KeyError: 'transport'", subtest='client_from_manual_flow'),
+
+    Case('transport/easy-client-passes-it-to-the-login-flow',
+         'schwaby/auth.py',
+         '            requested_browser=requested_browser, interactive=interactive,\n'
+         '            transport=transport)\n',
+         '            requested_browser=requested_browser, interactive=interactive)\n',
+         'tests/testing_test.py::TransportTest::test_easy_client_passes_it_on',
+         "KeyError: 'transport'", subtest='client_from_login_flow'),
+
+    # With a transport the environment's proxies are not used. httpx2 already
+    # leaves them out when given one, so this pins the stated setting, not a
+    # proxy reached: no test can see one used with a transport either way.
+    Case('transport/the-environment-is-not-trusted-with-one',
+         'schwaby/auth.py',
+         "    return {'transport': transport, 'trust_env': False}\n",
+         "    return {'transport': transport}\n",
+         'tests/testing_test.py::TransportTest::test_the_environments_proxies_are_not_used_with_one',
+         'True is not false'),
+
+    # Without one, the session is built as it was before transport= existed.
+    Case('transport/nothing-changes-without-one',
+         'schwaby/auth.py',
+         '    if transport is None:\n'
+         '        return {}\n',
+         '    if transport is None:\n'
+         "        return {'trust_env': False}\n",
+         'tests/testing_test.py::TransportTest::test_without_one_nothing_changes',
+         'False is not true'),
+
+    # block_network(): each way out is refused. The test stubs the real
+    # functions underneath, so a guard switched off reaches the stub, not the
+    # network, and the mutated run sends nothing.
+    Case('block/a-lookup-is-refused',
+         'schwaby/testing.py',
+         '    socket.getaddrinfo = _guarded_getaddrinfo\n',
+         '    pass\n',
+         'tests/testing_test.py::BlockNetworkTest::test_a_connection_out_is_refused_every_way',
+         'Reached', subtest='a lookup'),
+
+    Case('block/a-connection-is-refused',
+         'schwaby/testing.py',
+         'def _guarded_connect(self, address):\n'
+         '    _check_address(self, address)\n',
+         'def _guarded_connect(self, address):\n',
+         'tests/testing_test.py::BlockNetworkTest::test_a_connection_out_is_refused_every_way',
+         'Reached', subtest='an address'),
+
+    Case('block/connect-ex-is-refused',
+         'schwaby/testing.py',
+         'def _guarded_connect_ex(self, address):\n'
+         '    _check_address(self, address)\n',
+         'def _guarded_connect_ex(self, address):\n',
+         'tests/testing_test.py::BlockNetworkTest::test_a_connection_out_is_refused_every_way',
+         'Reached', subtest='connect_ex'),
+
+    # Only loopback and unspecified addresses are this machine.
+    Case('block/only-this-machine-is-let-through',
+         'schwaby/testing.py',
+         '    return address.is_loopback or address.is_unspecified\n',
+         '    return True\n',
+         'tests/testing_test.py::BlockNetworkTest::test_a_connection_out_is_refused_every_way',
+         'Reached', subtest='an address'),
+
+    # Code under test that catches the refusal does not get the test past it.
+    Case('block/a-swallowed-attempt-fails-the-test',
+         'schwaby/testing.py',
+         '        if exc_type is None and self.attempts:\n',
+         '        if False:\n',
+         'tests/testing_test.py::BlockNetworkTest::test_a_swallowed_attempt_is_raised_when_the_block_ends',
+         'NetworkBlocked not raised'),
+
+    Case('block/the-proxies-are-cleared',
+         'schwaby/testing.py',
+         "    for name in _saved['environ']:\n"
+         '        del os.environ[name]\n',
+         "    for name in _saved['environ']:\n"
+         '        pass\n',
+         'tests/testing_test.py::BlockNetworkTest::test_the_proxies_are_cleared_and_put_back',
+         "'HTTPS_PROXY' unexpectedly found"),
+
+    # FakeTokenEndpoint: an answer is used once, so a test that refreshes
+    # more often than it means to fails instead of passing on a reused token.
+    Case('fake/each-answer-is-used-once',
+         'schwaby/testing.py',
+         '                    value = queue.pop(0)\n',
+         '                    value = queue[0]\n',
+         'tests/testing_test.py::FakeTokenEndpointTest::test_answers_are_given_in_order_and_once',
+         'TokenRefreshError not raised'),
+
+    # A refresh is not answered with a login's answer, or the reverse.
+    Case('fake/the-grants-are-kept-apart',
+         'schwaby/testing.py',
+         '                queue = self._answers.get(grant_type)\n',
+         "                queue = (self._answers['refresh_token']\n"
+         "                         or self._answers['authorization_code'])\n",
+         'tests/testing_test.py::FakeTokenEndpointTest::test_the_grants_are_kept_apart',
+         'UnexpectedRequest not raised'),
 ]

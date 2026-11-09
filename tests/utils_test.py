@@ -915,6 +915,13 @@ class UtilsTest(unittest.TestCase):
                 if (inspect.isclass(obj) and issubclass(obj, BaseException)
                         and obj.__module__ == name):
                     found['%s.%s' % (name, attr)] = obj
+                    # schwaby.testing's are a test's failures, AssertionErrors,
+                    # and kept out of SchwabError so that code under test
+                    # catching that does not hide one.
+                    if name == 'schwaby.testing':
+                        self.assertTrue(issubclass(obj, AssertionError), attr)
+                        self.assertFalse(issubclass(obj, SchwabError), attr)
+                        continue
                     if not issubclass(obj, SchwabError):
                         missing.append('%s.%s' % (name, attr))
 
@@ -923,6 +930,7 @@ class UtilsTest(unittest.TestCase):
         # rather than counting: a count survives a whole module dropping out.
         self.assertGreater(len(modules), 8)
         for expected in ('schwaby.utils.OrderIdNotFoundError',
+                         'schwaby.testing.NetworkBlocked',
                          'schwaby.auth.RedirectTimeoutError',
                          'schwaby.streaming.ResponseTimeoutError',
                          'schwaby.orders.common.InvalidOrderException'):
@@ -998,6 +1006,9 @@ class UtilsTest(unittest.TestCase):
             'InvalidOrderException': ('m',),
             'UnusableDecimalScale': ('m',),
             'UnparsableMessageData': ('m',),
+            # schwaby.testing's, raised in a test, not by the library.
+            'NetworkBlocked': ('m',),
+            'UnexpectedRequest': ('m', None),
         }
 
         # Seeded with `schwaby` for the same reason as the walk above: an
