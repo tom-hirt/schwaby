@@ -7256,9 +7256,9 @@ CASES += HARNESS_JUDGING_CASES_2
 # The light check, and the workflows' pinned build.
 TOOLS_CASES = [
     Case('suite/every-workflow-uses-the-pinned-build',
-         '.github/workflows/fresh.yml',
-         '        python-version: ${{ steps.pin.outputs.version }}\n',
-         '        python-version: ${{ matrix.python }}\n',
+         '.github/workflows/python.yml',
+         '    # runs this suite runs. A minor version with no pin fails here, by name.\n    - name: Pinned Python ${{ matrix.python }}\n      id: pin\n      shell: bash\n      run: |\n        version=$(tr -d \'\\r\' < .python-versions | grep -E "^${MINOR//./\\\\.}\\.[0-9]+$") || {\n          echo "no pin for $MINOR in .python-versions"; exit 1; }\n        echo "version=$version" >> "$GITHUB_OUTPUT"\n      env:\n        MINOR: ${{ matrix.python }}\n    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3: setup-uv publishes no floating major tag\n      with:\n        version: "0.13.4"\n        python-version: ${{ steps.pin.outputs.version }}\n',
+         '    # runs this suite runs. A minor version with no pin fails here, by name.\n    - name: Pinned Python ${{ matrix.python }}\n      id: pin\n      shell: bash\n      run: |\n        version=$(tr -d \'\\r\' < .python-versions | grep -E "^${MINOR//./\\\\.}\\.[0-9]+$") || {\n          echo "no pin for $MINOR in .python-versions"; exit 1; }\n        echo "version=$version" >> "$GITHUB_OUTPUT"\n      env:\n        MINOR: ${{ matrix.python }}\n    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3: setup-uv publishes no floating major tag\n      with:\n        version: "0.13.4"\n        python-version: ${{ matrix.python }}\n',
          'tests/suite_config_test.py::PythonPinsTest'
          '::test_ci_tests_the_pinned_pythons',
          'sets up a Python other than the pinned one'),

@@ -113,10 +113,22 @@ class PythonPinsTest(unittest.TestCase):
         self.assertIn("python_requires='>=%s'" % minors[0],
                       self.read('setup.py'))
 
+    def test_no_workflow_runs_on_a_schedule(self):
+        # CI runs when code it tests changes, never on a timer.
+        import re
+        directory = os.path.join(ROOT, '.github', 'workflows')
+        workflows = sorted(os.listdir(directory))
+        self.assertIn('python.yml', workflows)
+        for workflow in workflows:
+            with self.subTest(workflow=workflow):
+                text = self.read('.github', 'workflows', workflow)
+                self.assertIsNone(re.search(r'^\s*schedule\s*:', text, re.M),
+                                  '%s runs on a schedule' % workflow)
+
     def test_ci_tests_the_pinned_pythons(self):
         import re
         minors = [p.rsplit('.', 1)[0] for p in self.pins()]
-        for workflow in ('python.yml', 'publish.yml', 'fresh.yml'):
+        for workflow in ('python.yml', 'publish.yml'):
             text = self.read('.github', 'workflows', workflow)
             matrices = re.findall(r'python: \[([^\]]*)\]', text)
             self.assertTrue(matrices, workflow)

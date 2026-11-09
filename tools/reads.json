@@ -298,7 +298,6 @@
  "tests/suite_config_test.py": [
   ".github/",
   ".github/workflows/",
-  ".github/workflows/fresh.yml",
   ".github/workflows/publish.yml",
   ".github/workflows/python.yml",
   ".python-versions",
