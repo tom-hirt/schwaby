@@ -1,3 +1,4 @@
+# safety-lint: shapes
 # The shapes of a blind kill, and of a blind delete: one line of code each, judged alone by
 # tools/light_check.py. `$pid`, `pid`, `p` and `proc` are what the line's
 # code started and recorded; `$JOB` and `$PGID` a group it created and
