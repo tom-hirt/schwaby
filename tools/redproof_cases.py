@@ -2630,7 +2630,7 @@ CASES = [
     # token endpoint returns.
     Case('auth/login-client-uses-the-shared-session-builder',
          'schwaby/auth.py',
-         '        _new_session(session_class, api_key, app_secret, token,\n                     oauth_client_update_token),\n        token_metadata=metadata_manager, enforce_enums=enforce_enums)',
+         '        _new_session(session_class, api_key, app_secret, token,\n                     oauth_client_update_token, transport),\n        token_metadata=metadata_manager, enforce_enums=enforce_enums)',
          '        session_class(api_key, client_secret=app_secret, token=token,\n                      token_endpoint=TOKEN_ENDPOINT,\n                      update_token=oauth_client_update_token, leeway=300),\n        token_metadata=metadata_manager, enforce_enums=enforce_enums)',
          'tests/utils_test.py::HTTPStatusErrorTest::test_a_client_from_a_login_does_not_store_a_bad_refresh_response',
          '1 != 2'),
@@ -9030,15 +9030,16 @@ CASES += [
     # network, and the mutated run sends nothing.
     Case('block/a-lookup-is-refused',
          'schwaby/testing.py',
-         '    socket.getaddrinfo = _guarded_getaddrinfo\n',
-         '    pass\n',
+         "    (socket, 'getaddrinfo', _guarded_getaddrinfo),\n",
+         '',
          'tests/testing_test.py::BlockNetworkTest::test_a_connection_out_is_refused_every_way',
          'Reached', subtest='a lookup'),
 
     Case('block/a-connection-is-refused',
          'schwaby/testing.py',
          'def _guarded_connect(self, address):\n'
-         '    _check_address(self, address)\n',
+         '    if _active_blocks:\n'
+         '        _check_address(self, address)\n',
          'def _guarded_connect(self, address):\n',
          'tests/testing_test.py::BlockNetworkTest::test_a_connection_out_is_refused_every_way',
          'Reached', subtest='an address'),
@@ -9046,10 +9047,28 @@ CASES += [
     Case('block/connect-ex-is-refused',
          'schwaby/testing.py',
          'def _guarded_connect_ex(self, address):\n'
-         '    _check_address(self, address)\n',
+         '    if _active_blocks:\n'
+         '        _check_address(self, address)\n',
          'def _guarded_connect_ex(self, address):\n',
          'tests/testing_test.py::BlockNetworkTest::test_a_connection_out_is_refused_every_way',
          'Reached', subtest='connect_ex'),
+
+    Case('block/gethostbyname-is-refused',
+         'schwaby/testing.py',
+         "    (socket, 'gethostbyname', _guarded_gethostbyname),\n",
+         '',
+         'tests/testing_test.py::BlockNetworkTest::test_a_connection_out_is_refused_every_way',
+         'Reached', subtest='gethostbyname'),
+
+    # A guard kept past its block -- a reference taken inside, a patch
+    # started inside and stopped after -- hands calls on to the functions as
+    # they were, not to what a block that has ended replaced.
+    Case('block/a-guard-kept-past-its-block-lets-everything-through',
+         'schwaby/testing.py',
+         '    return _saved[name] if _active_blocks else _ORIGINAL[name]\n',
+         '    return _saved[name]\n',
+         'tests/testing_test.py::BlockNetworkTest::test_a_guard_kept_past_its_block_lets_everything_through',
+         'Reached'),
 
     # Only loopback and unspecified addresses are this machine.
     Case('block/only-this-machine-is-let-through',
@@ -9069,9 +9088,9 @@ CASES += [
 
     Case('block/the-proxies-are-cleared',
          'schwaby/testing.py',
-         "    for name in _saved['environ']:\n"
+         '    for name in _saved_environ:\n'
          '        del os.environ[name]\n',
-         "    for name in _saved['environ']:\n"
+         '    for name in _saved_environ:\n'
          '        pass\n',
          'tests/testing_test.py::BlockNetworkTest::test_the_proxies_are_cleared_and_put_back',
          "'HTTPS_PROXY' unexpectedly found"),

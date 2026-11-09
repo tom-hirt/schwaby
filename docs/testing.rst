@@ -102,8 +102,9 @@ exchange of its code:
 Keeping the test home
 ---------------------
 
-:func:`block_network` refuses every connection and name lookup that leaves
-the machine, and clears the ``*_PROXY`` settings while it is active. A
+:func:`block_network` refuses the connections and name lookups that leave
+the machine, as ``httpx2`` and ``websockets`` make them, and clears the
+``*_PROXY`` settings while it is active. A
 request the client was not given a transport for, or one from code the test
 did not expect to call out, fails the test there.
 

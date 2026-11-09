@@ -49,6 +49,7 @@ class NetworkBlocked(AssertionError):
 _block_lock = threading.Lock()
 _active_blocks = []
 _saved = {}
+_saved_environ = {}
 
 # Names that are this machine, so a test's own server still works.
 _LOCAL_NAMES = frozenset({None, '', 'localhost', 'localhost.'})
@@ -80,10 +81,27 @@ def _refuse(what):
     raise NetworkBlocked(message)
 
 
-def _guarded_getaddrinfo(host, *args, **kwargs):
-    if not _is_local(host):
-        _refuse('a lookup of {!r}'.format(host))
-    return _saved['getaddrinfo'](host, *args, **kwargs)
+def _replaced(name):
+    '''What a guard hands a call it lets through: what it replaced when the
+    active block began, or, once no block is active, the function as it was
+    when this module was imported. A guard can outlive its block -- a
+    reference taken inside it, or a patch started inside and stopped after,
+    which puts the guard back -- and what it replaced then may be gone.'''
+    return _saved[name] if _active_blocks else _ORIGINAL[name]
+
+
+def _guarded_lookup(name):
+    def guarded(host, *args, **kwargs):
+        if _active_blocks and not _is_local(host):
+            _refuse('a lookup of {!r}'.format(host))
+        return _replaced(name)(host, *args, **kwargs)
+    guarded.__name__ = guarded.__qualname__ = name
+    return guarded
+
+
+_guarded_getaddrinfo = _guarded_lookup('getaddrinfo')
+_guarded_gethostbyname = _guarded_lookup('gethostbyname')
+_guarded_gethostbyname_ex = _guarded_lookup('gethostbyname_ex')
 
 
 def _check_address(sock, address):
@@ -96,13 +114,26 @@ def _check_address(sock, address):
 
 
 def _guarded_connect(self, address):
-    _check_address(self, address)
-    return _saved['connect'](self, address)
+    if _active_blocks:
+        _check_address(self, address)
+    return _replaced('connect')(self, address)
 
 
 def _guarded_connect_ex(self, address):
-    _check_address(self, address)
-    return _saved['connect_ex'](self, address)
+    if _active_blocks:
+        _check_address(self, address)
+    return _replaced('connect_ex')(self, address)
+
+
+# What each guard replaces.
+_GUARDS = (
+    (socket, 'getaddrinfo', _guarded_getaddrinfo),
+    (socket, 'gethostbyname', _guarded_gethostbyname),
+    (socket, 'gethostbyname_ex', _guarded_gethostbyname_ex),
+    (socket.socket, 'connect', _guarded_connect),
+    (socket.socket, 'connect_ex', _guarded_connect_ex),
+)
+_ORIGINAL = {name: getattr(target, name) for target, name, _ in _GUARDS}
 
 
 def _is_proxy_variable(name):
@@ -111,31 +142,36 @@ def _is_proxy_variable(name):
 
 
 def _install():
-    _saved['getaddrinfo'] = socket.getaddrinfo
-    _saved['connect'] = socket.socket.connect
-    _saved['connect_ex'] = socket.socket.connect_ex
-    _saved['environ'] = {name: value for name, value in os.environ.items()
-                         if _is_proxy_variable(name)}
-    socket.getaddrinfo = _guarded_getaddrinfo
-    socket.socket.connect = _guarded_connect
-    socket.socket.connect_ex = _guarded_connect_ex
-    for name in _saved['environ']:
+    for target, name, guard in _GUARDS:
+        current = getattr(target, name)
+        # A guard still in place from an earlier block replaces what it
+        # replaced then, not itself.
+        if current is not guard:
+            _saved[name] = current
+            setattr(target, name, guard)
+    _saved_environ.clear()
+    _saved_environ.update({name: value for name, value in os.environ.items()
+                           if _is_proxy_variable(name)})
+    for name in _saved_environ:
         del os.environ[name]
 
 
 def _uninstall():
-    socket.getaddrinfo = _saved.pop('getaddrinfo')
-    socket.socket.connect = _saved.pop('connect')
-    socket.socket.connect_ex = _saved.pop('connect_ex')
-    environ = _saved.pop('environ')
+    for target, name, guard in _GUARDS:
+        # Something patched over it inside the block will put the guard
+        # back when it stops, and the guard then lets everything through.
+        if getattr(target, name) is guard:
+            setattr(target, name, _saved[name])
     for name in [n for n in os.environ if _is_proxy_variable(n)]:
         del os.environ[name]
-    os.environ.update(environ)
+    os.environ.update(_saved_environ)
 
 
 class block_network:
-    '''Refuses every connection and name lookup outside this machine, for as
-    long as it is active, and clears the environment's proxy settings.
+    '''Refuses connections and name lookups that leave this machine, as
+    httpx2 and websockets make them, for as long as it is active, and
+    clears the environment's proxy settings. The note below says what it
+    does not stop.
 
     ::
 
@@ -152,11 +188,17 @@ class block_network:
     Connections to ``localhost`` and loopback addresses, and Unix sockets,
     are let through, so a test's own server still works.
 
-    .. note:: It replaces ``socket.getaddrinfo``, ``socket.socket.connect``
-       and ``connect_ex`` for the whole process, every thread included, and
-       puts them back when the last active block ends. Code that reaches the
-       network some other way -- its own resolver, a C extension that opens
-       sockets itself -- is not stopped by it.
+    .. note:: It replaces ``socket.getaddrinfo``, ``gethostbyname``,
+       ``gethostbyname_ex``, and ``socket.socket.connect`` and
+       ``connect_ex``, for the whole process, every thread included, and
+       puts them back when the last active block ends. What reaches the
+       network some other way is not stopped: a datagram sent with
+       ``sendto``, a resolver of its own, uvloop, which resolves and
+       connects in libuv, a C extension that opens sockets itself, or, on
+       Windows, asyncio's own connections, made without
+       ``socket.connect``. An ``asyncio`` client connecting to an address
+       rather than a name may raise the refusal inside an
+       ``ExceptionGroup``.
     '''
 
     def __init__(self):
@@ -176,8 +218,10 @@ class block_network:
                 _uninstall()
         if exc_type is None and self.attempts:
             raise NetworkBlocked(
-                    'block_network() refused {} attempt(s) that the code '
-                    'under test caught, the first {}'.format(
+                    'block_network() refused {} attempt(s) to reach the '
+                    'network, the first {}, and the block ended without the '
+                    'refusal: the code under test caught it, or the test '
+                    'failed on it already'.format(
                         len(self.attempts), self.attempts[0]))
         return False
 
@@ -364,8 +408,9 @@ class FakeTokenEndpoint(httpx2.MockTransport):
         client = schwaby.auth.client_from_token_file(
                 path, api_key, app_secret, transport=endpoint)
 
-    Answers are given in order, and each is used once, unless given with
-    ``repeat=True``, which answers every request after it the same way. A
+    Answers are given in order, and each is used once. One given with
+    ``repeat=True`` answers every request that finds no other answer
+    waiting, and a later one replaces it. A
     request with no answer waiting raises :class:`UnexpectedRequest`, which
     reaches the code under test as the exception it sees. It serves a
     synchronous and an ``asyncio`` client alike, and is safe across threads.
@@ -406,8 +451,9 @@ class FakeTokenEndpoint(httpx2.MockTransport):
         '''Hands every request that is not to the token endpoint to
         ``handler``, a function that takes the ``httpx2.Request`` and returns
         an ``httpx2.Response``, a ``dict`` to send as JSON with status 200, or
-        an answer from :func:`answer` and the rest. Without one, such a
-        request raises :class:`UnexpectedRequest`.'''
+        an answer from :func:`answer` and the rest. For an ``asyncio``
+        client it may be a coroutine function. Without one, such a request
+        raises :class:`UnexpectedRequest`.'''
         self._api = handler
 
     def posts(self, grant_type=None):
@@ -448,9 +494,19 @@ class FakeTokenEndpoint(httpx2.MockTransport):
                     'with on_api()'.format(request.method, request.url.path),
                     request)
         result = self._api(request)
-        if isinstance(result, httpx2.Response):
-            return result
-        return _as_answer(result).respond(request)
+        if inspect.isawaitable(result):
+            # httpx2 waits for this on an asyncio client, and refuses it on
+            # a synchronous one.
+            async def finish():
+                return _api_response(await result, request)
+            return finish()
+        return _api_response(result, request)
+
+
+def _api_response(result, request):
+    if isinstance(result, httpx2.Response):
+        return result
+    return _as_answer(result).respond(request)
 
 
 def _is_token_post(request):

@@ -292,6 +292,18 @@ class FakeTokenEndpointTest(Base):
         self.assertEqual(1, self.endpoint.posts())
 
     @no_duplicates
+    def test_an_async_handler_answers_an_asyncio_client(self):
+        async def handler(request):
+            await asyncio.sleep(0)
+            return {'async': True}
+        self.endpoint.on_api(handler)
+        response = self.quote(self.client(asyncio_=True, expires_in=1800))
+        self.assertEqual({'async': True}, response.json())
+        # A synchronous client cannot wait for it, and says so.
+        with self.assertRaises(TypeError):
+            self.quote(self.client(expires_in=1800))
+
+    @no_duplicates
     def test_an_api_request_with_no_handler_is_refused(self):
         endpoint = st.FakeTokenEndpoint()
         written = st.write_token_file(self.path)
@@ -440,6 +452,8 @@ class BlockNetworkTest(unittest.TestCase):
         def reached(*args, **kwargs):
             raise Reached('the network was reached')
         for target, name in ((socket, 'getaddrinfo'),
+                             (socket, 'gethostbyname'),
+                             (socket, 'gethostbyname_ex'),
                              (socket.socket, 'connect'),
                              (socket.socket, 'connect_ex')):
             stub = patch.object(target, name, reached)
@@ -465,6 +479,10 @@ class BlockNetworkTest(unittest.TestCase):
                     ('httpx2', lambda: httpx2.get('https://api.schwabapi.com')),
                     ('httpx2 async', lambda: asyncio.run(async_get())),
                     ('a lookup', lambda: socket.getaddrinfo('example.com', 80)),
+                    ('gethostbyname',
+                     lambda: socket.gethostbyname('example.com')),
+                    ('gethostbyname_ex',
+                     lambda: socket.gethostbyname_ex('example.com')),
                     ('an address', lambda: connect(('192.0.2.1', 80))),
                     ('connect_ex', lambda: connect_ex(('192.0.2.1', 80))),
                     ('a connection', lambda: socket.create_connection(
@@ -520,7 +538,8 @@ class BlockNetworkTest(unittest.TestCase):
                     socket.getaddrinfo('example.com', 80)
                 except Exception:
                     pass
-        self.assertIn('caught', str(cm.exception))
+        self.assertIn('the block ended without the refusal',
+                      str(cm.exception))
         self.assertIn("'example.com'", str(cm.exception))
         # An error leaving the block is not replaced by it.
         with self.assertRaises(KeyError):
@@ -530,6 +549,43 @@ class BlockNetworkTest(unittest.TestCase):
                 except Exception:
                     pass
                 raise KeyError('mine')
+
+    @no_duplicates
+    def test_a_guard_kept_past_its_block_lets_everything_through(self):
+        # The guard this leaves on connect lets everything through; put
+        # back anyway, for the tests after it.
+        self.addCleanup(setattr, socket.socket, 'connect',
+                        socket.socket.connect)
+        with socket.socket() as server:
+            server.bind(('127.0.0.1', 0))
+            server.listen(2)
+            port = server.getsockname()[1]
+            with st.block_network():
+                held = socket.getaddrinfo
+                # Started inside, stopped after: it puts the guard back.
+                inner = patch.object(socket.socket, 'connect',
+                                     socket.socket.connect)
+                inner.start()
+            inner.stop()
+            # Outside any block, both still work, as what they replaced.
+            self.assertTrue(held('127.0.0.1', port))
+            with socket.socket() as s:
+                s.settimeout(5)
+                s.connect(('127.0.0.1', port))
+                server.accept()[0].close()
+            # A block after it, over a stub, still refuses.
+            def reached(*args, **kwargs):
+                raise Reached('the network was reached')
+            with patch.object(socket.socket, 'connect', reached):
+                with st.block_network() as blocked:
+                    self.refused(blocked, lambda: socket.socket().connect(
+                            ('192.0.2.1', 80)))
+            # The stub is gone, and the guard left in its place hands on to
+            # what connect was, not to the stub that block replaced.
+            with socket.socket() as s:
+                s.settimeout(5)
+                s.connect(('127.0.0.1', port))
+                server.accept()[0].close()
 
     @no_duplicates
     def test_it_decorates_a_test(self):
