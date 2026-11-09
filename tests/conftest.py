@@ -86,7 +86,7 @@ def guard_login_flow_ports(monkeypatch):
     monkeypatch.setattr(multiprocess.Process, '__init__', checked)
 
 
-# progress: DONE/TOTAL sentinels, on a line of its own as the count moves, so
+# progress: DONE/TOTAL tests, on a line of its own as the count moves, so
 # a scheduler running the suite can show how far it has got. Printed when the
 # output is not a terminal, or with SUITE_PROGRESS=1; never with
 # SUITE_PROGRESS=0. Once per whole percent, and at the end, rather than once
@@ -114,7 +114,7 @@ class _Progress:
             if getattr(reporter._tw, 'width_of_current_line', 0):
                 reporter.write('\n')
             reporter.write_line(
-                    'progress: {}/{} sentinels'.format(done, self.total))
+                    'progress: {}/{} tests'.format(done, self.total))
 
     def collected(self, count):
         self.total = count

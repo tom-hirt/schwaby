@@ -113,7 +113,7 @@ so a green run here is a green run there:
   python -m twine check --strict dist/*     # what PyPI will accept
 
 When its output is not a terminal, the gate prints ``progress: DONE/TOTAL
-sentinels`` on a line of its own as it goes, for a scheduler to show how far
+tests`` on a line of its own as it goes, for a scheduler to show how far
 it is. ``SUITE_PROGRESS=1`` prints it at a terminal too, and
 ``SUITE_PROGRESS=0`` never.
 

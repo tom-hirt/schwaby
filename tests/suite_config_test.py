@@ -462,7 +462,7 @@ class ReleaseCommitOnMainTest(unittest.TestCase):
 
 
 class ProgressLineTest(unittest.TestCase):
-    '''The suite prints `progress: DONE/TOTAL sentinels`, each on a line of
+    '''The suite prints `progress: DONE/TOTAL tests`, each on a line of
     its own, ending at the total, so a scheduler can show how far it is.'''
 
     def run_part(self, choice):
@@ -479,9 +479,9 @@ class ProgressLineTest(unittest.TestCase):
         lines = [line for line in out.splitlines() if 'progress:' in line]
         self.assertTrue(lines, out[-2000:])
         for line in lines:
-            self.assertRegex(line, r'^progress: \d+/\d+ sentinels$')
+            self.assertRegex(line, r'^progress: \d+/\d+ tests$')
         done, total = map(int, re.findall(r'\d+', lines[-1]))
         self.assertEqual(done, total)
-        self.assertEqual('progress: 0/{} sentinels'.format(total), lines[0])
+        self.assertEqual('progress: 0/{} tests'.format(total), lines[0])
         # And none when turned off.
         self.assertNotIn('progress:', self.run_part('0'))
