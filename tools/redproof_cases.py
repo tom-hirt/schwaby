@@ -9510,6 +9510,24 @@ CASES += [
          '            return waited, True\n',
          'tests/shared_token_test.py::AdoptTest::test_ensure_token_fresh_says_fresh_when_it_took_a_token',
          'a token taken was called a refresh', subtest='asyncio=True'),
+    # A token taken from the file that is still inside ensure_token_fresh's
+    # margin is refreshed once more, not called fresh.
+    Case('shared/a-token-taken-inside-the-margin-is-refreshed',
+         'schwaby/client/synchronous.py',
+         '                if taken and not fresh():\n'
+         '                    # The token taken is still inside what the caller asked\n',
+         '                if False:\n'
+         '                    # The token taken is still inside what the caller asked\n',
+         'tests/shared_token_test.py::AdoptTest::test_a_token_taken_inside_the_margin_is_refreshed_once_more',
+         'a token inside the margin was called fresh', subtest='asyncio=False'),
+    Case('shared/an-async-token-taken-inside-the-margin-is-refreshed',
+         'schwaby/client/asynchronous.py',
+         '                if taken and not fresh():\n'
+         '                    # The token taken is still inside what the caller asked\n',
+         '                if False:\n'
+         '                    # The token taken is still inside what the caller asked\n',
+         'tests/shared_token_test.py::AdoptTest::test_a_token_taken_inside_the_margin_is_refreshed_once_more',
+         'a token inside the margin was called fresh', subtest='asyncio=True'),
     Case('fresh/a-flight-is-its-loops',
          'schwaby/client/asynchronous.py',
          '        if held is not None and held[0] is loop:\n',

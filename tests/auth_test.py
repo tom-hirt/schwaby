@@ -3551,7 +3551,7 @@ class PacedSessionTest(unittest.TestCase):
         c._refresh_flight = (abandoned, asyncio.Event())
 
         async def refresh():
-            return await asyncio.wait_for(c.ensure_token_fresh(), 10)
+            return await asyncio.wait_for(c.ensure_token_fresh(), 2)
         with patch.object(httpx2.AsyncHTTPTransport, 'handle_async_request',
                           answer):
             from schwaby import TokenFreshness

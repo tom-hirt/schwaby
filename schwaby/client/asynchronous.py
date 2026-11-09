@@ -181,6 +181,14 @@ async def _refresh_unless(client, fresh, *, attempt):
                         client._translate_token_errors():
                     await client.session.refresh_token(
                             refresh_token=client._refresh_token_to_send())
+                if taken and not fresh():
+                    # The token taken is still inside what the caller asked
+                    # for: refreshed once, with its own refresh token. The
+                    # file holds nothing newer now, so this sends.
+                    with client._translate_token_errors():
+                        await client.session.refresh_token(
+                                refresh_token=client._refresh_token_to_send())
+                    return waited, True
             return waited, not taken
         finally:
             if client._refresh_flight is mine:
