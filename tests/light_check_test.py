@@ -441,6 +441,8 @@ class LightCheckTest(unittest.TestCase):
         # Positive control: the same lines anywhere else are judged.
         self.assertEqual(len(refuse), len(lines(content, 'other.txt')))
 
+    @unittest.skipIf(os.name == 'nt',
+                     "a file name cannot hold ':' on Windows")
     def test_a_python_file_named_like_a_stage_is_checked(self):
         # ':0:x' is not ':x': read as the latter, '0:bad.py' would be stage 0
         # of 'bad.py', which does not exist, and pass unread.

@@ -7,6 +7,7 @@ that misses the transport fails it instead of reaching Schwab.
 import asyncio
 import errno
 import inspect
+import ipaddress
 import json
 import os
 import socket
@@ -376,7 +377,8 @@ class HelpersTest(unittest.TestCase):
             path = os.path.join(directory, 'token.json')
             written = st.write_token_file(path, expires_in=900,
                                           created_days_ago=6.5)
-            self.assertEqual(0o600, os.stat(path).st_mode & 0o777)
+            if os.name != 'nt':   # no POSIX mode there, as the docs say
+                self.assertEqual(0o600, os.stat(path).st_mode & 0o777)
             client = auth.client_from_token_file(path, API_KEY, APP_SECRET)
             self.assertAlmostEqual(6.5 * 86400, client.token_age(), delta=5)
             self.assertAlmostEqual(
@@ -450,15 +452,40 @@ class BlockNetworkTest(unittest.TestCase):
     def stub_the_network(self):
         # Under the block, so a guard that lets a call past reaches this and
         # fails the test, instead of the network. Not an OSError, which
-        # httpx2 would turn into a ConnectError.
-        def reached(*args, **kwargs):
-            raise Reached('the network was reached')
-        for target, name in ((socket, 'getaddrinfo'),
-                             (socket, 'gethostbyname'),
-                             (socket, 'gethostbyname_ex'),
-                             (socket.socket, 'connect'),
-                             (socket.socket, 'connect_ex')):
-            stub = patch.object(target, name, reached)
+        # httpx2 would turn into a ConnectError. This machine is let through
+        # to the real function: Windows makes an event loop by connecting a
+        # socket pair over loopback. Told by a check of its own, so a guard
+        # mutated to take any address for this machine still meets the stub.
+        def local(host):
+            if host in (None, '', 'localhost', b'localhost'):
+                return True
+            try:
+                return ipaddress.ip_address(
+                        host.decode() if isinstance(host, bytes) else host
+                        ).is_loopback
+            except ValueError:
+                return False
+
+        def lookup(real):
+            def stub(host, *args, **kwargs):
+                if local(host):
+                    return real(host, *args, **kwargs)
+                raise Reached('the network was reached')
+            return stub
+
+        def connect(real):
+            def stub(sock, address):
+                host = address[0] if isinstance(address, tuple) else None
+                if isinstance(address, tuple) and local(host):
+                    return real(sock, address)
+                raise Reached('the network was reached')
+            return stub
+        for target, name, make in ((socket, 'getaddrinfo', lookup),
+                                   (socket, 'gethostbyname', lookup),
+                                   (socket, 'gethostbyname_ex', lookup),
+                                   (socket.socket, 'connect', connect),
+                                   (socket.socket, 'connect_ex', connect)):
+            stub = patch.object(target, name, make(getattr(target, name)))
             stub.start()
             self.addCleanup(stub.stop)
 
