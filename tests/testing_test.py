@@ -590,6 +590,35 @@ class BlockNetworkTest(unittest.TestCase):
                 with self.assertRaises(Reached,
                                        msg='the stub below was skipped'):
                     s.connect(('127.0.0.1', 9))
+                # Nor does it refuse, outside a block.
+                with self.assertRaises(Reached):
+                    s.connect(('192.0.2.1', 80))
+
+    @no_duplicates
+    def test_guards_left_one_after_another_do_not_pile_up(self):
+        # As a pytest test leaves one when its own patch of connect is
+        # undone after its block ends: in a large suite, once per test.
+        self.keep_the_socket_functions()
+
+        def depth():
+            n, function = 0, socket.socket.connect
+            while hasattr(function, '_block_network_replaced'):
+                n, function = n + 1, function._block_network_replaced
+            return n
+        for _ in range(3):
+            with st.block_network():
+                inner = patch.object(socket.socket, 'connect', self.reached)
+                inner.start()
+            inner.stop()
+        self.assertEqual(1, depth(), 'the guards left piled up')
+        with socket.socket() as server:
+            server.bind(('127.0.0.1', 0))
+            server.listen(1)
+            with st.block_network():
+                with socket.socket() as s:
+                    s.settimeout(5)
+                    s.connect(server.getsockname())
+                    server.accept()[0].close()
 
     @no_duplicates
     def test_a_block_over_a_leftover_guard_works(self):

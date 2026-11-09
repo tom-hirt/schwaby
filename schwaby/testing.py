@@ -125,11 +125,21 @@ def _is_proxy_variable(name):
     return name.endswith('_proxy') and name != 'no_proxy'
 
 
+def _unguarded(function):
+    '''``function``, or, when it is a guard left from an earlier block, what
+    the guards under it replaced. A block wraps that, so guards left one
+    after another do not pile up into a chain that ends in RecursionError.'''
+    while hasattr(function, '_block_network_replaced'):
+        function = function._block_network_replaced
+    return function
+
+
 def _install():
     _installed[:] = []
     for target, name, make in _GUARDS:
-        replaced = getattr(target, name)
+        replaced = _unguarded(getattr(target, name))
         guard = make(replaced)
+        guard._block_network_replaced = replaced
         guard.__name__ = guard.__qualname__ = name
         setattr(target, name, guard)
         _installed.append((target, name, guard, replaced))

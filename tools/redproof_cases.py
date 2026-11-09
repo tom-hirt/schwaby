@@ -9075,6 +9075,25 @@ CASES += [
          'tests/testing_test.py::BlockNetworkTest::test_a_guard_put_back_hands_on_to_what_it_replaced',
          'RecursionError'),
 
+    # Guards left one after another do not pile up: one is left per test in
+    # a common pytest shape, and a chain of them ends in RecursionError.
+    Case('block/guards-left-do-not-pile-up',
+         'schwaby/testing.py',
+         '        replaced = _unguarded(getattr(target, name))\n',
+         '        replaced = getattr(target, name)\n',
+         'tests/testing_test.py::BlockNetworkTest::test_guards_left_one_after_another_do_not_pile_up',
+         'the guards left piled up'),
+
+    Case('block/a-kept-connect-guard-refuses-nothing',
+         'schwaby/testing.py',
+         '    def guarded(self, address):\n'
+         '        if _active_blocks:\n'
+         '            _check_address(self, address)\n',
+         '    def guarded(self, address):\n'
+         '        _check_address(self, address)\n',
+         'tests/testing_test.py::BlockNetworkTest::test_a_guard_put_back_hands_on_to_what_it_replaced',
+         'NetworkBlocked'),
+
     # A guard kept past its block refuses nothing.
     Case('block/a-kept-guard-refuses-nothing',
          'schwaby/testing.py',
