@@ -4,6 +4,7 @@ from ..debug import register_redactions_from_response
 
 import inspect
 import json
+import threading
 import time
 from time import sleep as _sleep
 
@@ -66,24 +67,45 @@ class Client(BaseClient):
 
     def _refresh_unless(self, fresh, *, attempt):
         '''Refreshes the token through the pace, unless ``fresh()`` finds it
-        fresh once the lock is held. Returns the seconds the pace took, and
-        whether it refreshed.'''
+        fresh. One call refreshes at a time: another that needs it waits for
+        that one, and checks again, so a refresh is paced once and sent
+        once. Returns the seconds this call waited, and whether it
+        refreshed.'''
         # A token with no refresh token is dead before the pace is asked.
         with self._translate_token_errors():
             self._refresh_token_to_send()
-        # Paced before the lock, so a pace that waits holds nothing else up.
-        paced = self._call_pace('token_refresh', 'POST', TOKEN_PATH, attempt)
-        # Checked again inside the lock, since another call may have just
-        # refreshed. Without a pace the synchronous session refreshes on its
-        # own, with no lock, so a request in another thread can still refresh
-        # at the same moment, as two requests can.
-        with self._refresh_lock:
-            if fresh():
-                return paced, False
-            with self._translate_token_errors():
-                self.session.refresh_token(
-                        refresh_token=self._refresh_token_to_send())
-        return paced, True
+        waited = 0.0
+        while True:
+            with self._refresh_lock:
+                flight = self._refresh_flight
+                if flight is None:
+                    if fresh():
+                        return waited, False
+                    flight = self._refresh_flight = threading.Event()
+                    leading = True
+                else:
+                    leading = False
+            if not leading:
+                started = time.monotonic()
+                flight.wait()
+                waited += time.monotonic() - started
+                continue
+            try:
+                waited += self._call_pace('token_refresh', 'POST', TOKEN_PATH,
+                                          attempt)
+                # Without a pace the synchronous session refreshes on its
+                # own, with no lock, so a request in another thread may have
+                # just refreshed, as two requests can.
+                if fresh():
+                    return waited, False
+                with self._translate_token_errors():
+                    self.session.refresh_token(
+                            refresh_token=self._refresh_token_to_send())
+                return waited, True
+            finally:
+                with self._refresh_lock:
+                    self._refresh_flight = None
+                flight.set()
 
     def _call_pace(self, purpose, method, path, attempt):
         '''Calls the pace, when there is one, and returns the seconds it
@@ -109,7 +131,8 @@ class Client(BaseClient):
                 req_num, dest, LazyLog(lambda: json.dumps(params, indent=4)))
 
         return self._send(req_num, 'GET', path,
-                          lambda: self.session.get(dest, params=params),
+                          lambda **auth:
+                              self.session.get(dest, params=params, **auth),
                           safe=True)
 
     def _post_request(self, path, data):
@@ -120,7 +143,8 @@ class Client(BaseClient):
             req_num, dest, LazyLog(lambda: json.dumps(data, indent=4)))
 
         return self._send(req_num, 'POST', path,
-                          lambda: self.session.post(dest, json=data),
+                          lambda **auth:
+                              self.session.post(dest, json=data, **auth),
                           safe=False)
 
     def _put_request(self, path, data):
@@ -131,7 +155,8 @@ class Client(BaseClient):
             req_num, dest, LazyLog(lambda: json.dumps(data, indent=4)))
 
         return self._send(req_num, 'PUT', path,
-                          lambda: self.session.put(dest, json=data),
+                          lambda **auth:
+                              self.session.put(dest, json=data, **auth),
                           safe=False)
 
     def _delete_request(self, path):
@@ -141,7 +166,8 @@ class Client(BaseClient):
         self.logger.debug('Req %s: DELETE to %s', req_num, dest)
 
         return self._send(req_num, 'DELETE', path,
-                          lambda: self.session.delete(dest),
+                          lambda **auth:
+                              self.session.delete(dest, **auth),
                           safe=False)
 
     def _send(self, req_num, method, path, send, *, safe):
@@ -162,7 +188,7 @@ class Client(BaseClient):
                             lambda: not self._token_due(), attempt=attempt)
                     waited += paced
                 with self._translate_token_errors():
-                    resp = send()
+                    resp = send(**self._send_auth())
             except TokenRefreshError as e:
                 # An order is never held back: one sent late could fill at a
                 # price its caller never saw, or after it was placed again.

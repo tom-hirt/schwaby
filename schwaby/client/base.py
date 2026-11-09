@@ -46,6 +46,9 @@ def _retry_after_seconds(value):
     # commas: the longest it asks for.
     parts = [p.strip() for p in value.split(',')]
     if all(re.fullmatch(r'[0-9]+', p) for p in parts):
+        # Longer than int() reads, and past any max_wait anyway.
+        if any(len(p) > 12 for p in parts):
+            return float('inf')
         return max(int(p) for p in parts)
     try:
         when = email.utils.parsedate_to_datetime(value)
@@ -65,11 +68,6 @@ TOKEN_PATH = '/v1/oauth/token'
 # a ContextVar must be; each client is a key in them.
 _retry_off = contextvars.ContextVar('schwaby_retry_off', default=frozenset())
 _pace_tags = contextvars.ContextVar('schwaby_pace_tags', default=None)
-
-# With a pace, the client refreshes a token itself this long before the
-# session would, so that the session never finds one to refresh in the
-# moment between the client's check and the request.
-_REFRESH_AHEAD = 1.0
 
 
 ##########################################################################
@@ -114,6 +112,8 @@ class BaseClient(EnumEnforcer):
         # The caller's rate limiter, and this client's key in the scopes.
         self._pace = None
         self._scope_key = object()
+        # The refresh in flight, which other calls needing one wait for.
+        self._refresh_flight = None
 
     # XXX: This class's tests perform monkey patching to inject synthetic values
     # of utcnow(). To avoid being confused by this, these are the values
@@ -488,16 +488,24 @@ class BaseClient(EnumEnforcer):
 
     def _token_due(self):
         '''Whether the session would refresh the token before a request sent
-        now, by authlib's rule, or will within ``_REFRESH_AHEAD`` seconds.
-        authlib refreshes only a token whose ``expires_at`` is an int, and
-        this does too.'''
+        now, by authlib's rule: it refreshes only a token whose
+        ``expires_at`` is an int, and this does too.'''
         try:
             expires_at = self.session.token.get('expires_at')
         except Exception:
             return False
         if not isinstance(expires_at, int):
             return False
-        return expires_at - self._leeway() < time.time() + _REFRESH_AHEAD
+        return expires_at - self._leeway() < time.time()
+
+    def _send_auth(self):
+        '''With a pace, the token's auth given to the request itself, so that
+        the session does not refresh on the way past, unpaced: the client
+        has refreshed already, through the pace, when the token was due.
+        Without one, nothing, and the session refreshes as it always has.'''
+        if self._pace is None:
+            return {}
+        return {'auth': self.session.token_auth}
 
     def _refresh_token_to_send(self):
         '''The refresh token to refresh with. A stored token with none is
@@ -582,7 +590,9 @@ class BaseClient(EnumEnforcer):
         :meth:`set_rate_limit_retry` set: for reads that must not wait, such
         as those on an order path. It holds for the calls made in this
         thread or, for :class:`AsyncClient`, this asyncio task, inside the
-        ``with``, and nowhere else.'''
+        ``with``, and in an asyncio task created inside it, which keeps it
+        after the ``with`` ends, as a task keeps any ``contextvars`` value it
+        was created with. A thread started inside it does not.'''
         token = _retry_off.set(_retry_off.get() | {self._scope_key})
         try:
             yield
@@ -643,7 +653,8 @@ class BaseClient(EnumEnforcer):
         not to send again.'''
         if attempt > self._rate_limit_retries:
             return None
-        backoff = min(self._rate_limit_max_wait, 2.0 ** (attempt - 1))
+        backoff = min(self._rate_limit_max_wait,
+                      2.0 ** min(attempt - 1, 62))
         asked = _retry_after_seconds(retry_after)
         if asked is None:
             wait = backoff

@@ -8905,15 +8905,20 @@ CASES += [
          'a login refusal was given the wrong kind'),
     Case('fresh/a-second-call-finds-the-token-fresh',
          'schwaby/client/synchronous.py',
-         '        with self._refresh_lock:\n'
-         '            if fresh():\n'
-         '                return paced, False\n',
-         '        with self._refresh_lock:\n'
-         '            if False:\n'
-         '                return paced, False\n',
+         '                if flight is None:\n'
+         '                    if fresh():\n'
+         '                        return waited, False\n',
+         '                if flight is None:\n'
+         '                    if False:\n'
+         '                        return waited, False\n',
          'tests/auth_test.py::EnsureTokenFreshSessionTest'
          '::test_two_calls_at_once_refresh_once',
-         'two calls at once each sent a refresh'),
+         'two calls at once each sent a refresh',
+         # The check after the pace finds it fresh too; both go.
+         also=('                # just refreshed, as two requests can.\n'
+               '                if fresh():\n',
+               '                # just refreshed, as two requests can.\n'
+               '                if False:\n')),
     Case('fresh/the-async-client-holds-the-sessions-lock',
          'schwaby/client/asynchronous.py',
          "    lock = getattr(client.session, '_token_refresh_lock', None)\n",
@@ -9194,8 +9199,9 @@ CASES += [
          'beyond max_wait was retried'),
     Case('rate-limit/the-backoff-is-capped',
          'schwaby/client/base.py',
-         '        backoff = min(self._rate_limit_max_wait, 2.0 ** (attempt - 1))\n',
-         '        backoff = 2.0 ** (attempt - 1)\n',
+         '        backoff = min(self._rate_limit_max_wait,\n'
+         '                      2.0 ** min(attempt - 1, 62))\n',
+         '        backoff = 2.0 ** min(attempt - 1, 62)\n',
          'tests/client_test.py::ClientTest'
          '::test_the_backoff_never_waits_longer_than_max_wait',
          'a wait was longer than max_wait'),
@@ -9316,4 +9322,42 @@ CASES += [
          '            if inspect.iscoroutine(result):\n',
          'tests/client_test.py::ClientTest::test_a_coroutine_pace_is_refused_and_sends_nothing',
          'TypeError not raised'),
+    # One refresh at a time: a call that finds one in flight waits for it,
+    # so a refresh is paced once and sent once, and no pace slot goes to a
+    # refresh never sent, ahead of an order.
+    Case('pace/a-refresh-is-paced-once',
+         'schwaby/client/synchronous.py',
+         '                flight = self._refresh_flight\n',
+         '                flight = None\n',
+         'tests/auth_test.py::PacedSessionTest::test_calls_at_once_pace_and_send_one_refresh',
+         'a refresh was paced that was never sent'),
+    Case('pace/an-async-refresh-is-paced-once',
+         'schwaby/client/asynchronous.py',
+         '        flight = client._refresh_flight\n'
+         '        if flight is not None:\n',
+         '        flight = None\n'
+         '        if flight is not None:\n',
+         'tests/auth_test.py::PacedSessionTest::test_async_calls_at_once_pace_and_send_one_refresh',
+         'a refresh was paced that was never sent'),
+    # With a pace, the session is given the token's auth, so it does not
+    # refresh on the way past, unpaced, a token answered with less life
+    # than its leeway.
+    Case('pace/the-session-does-not-refresh-again-unpaced',
+         'schwaby/client/base.py',
+         "        return {'auth': self.session.token_auth}\n",
+         '        return {}\n',
+         'tests/auth_test.py::PacedSessionTest::test_a_short_lived_refresh_is_not_refreshed_again_unpaced',
+         'the session refreshed again, unpaced'),
+    Case('rate-limit/a-retry-after-too-long-to-read-is-past-max-wait',
+         'schwaby/client/base.py',
+         '        if any(len(p) > 12 for p in parts):\n',
+         '        if False:\n',
+         'tests/client_test.py::ClientTest::test_a_retry_after_too_long_to_read_returns_the_429',
+         'ValueError'),
+    Case('rate-limit/a-long-backoff-does-not-overflow',
+         'schwaby/client/base.py',
+         '                      2.0 ** min(attempt - 1, 62))\n',
+         '                      2.0 ** (attempt - 1))\n',
+         'tests/client_test.py::ClientTest::test_a_long_backoff_does_not_overflow',
+         'OverflowError'),
 ]

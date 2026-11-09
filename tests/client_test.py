@@ -700,6 +700,30 @@ class _TestClient:
                 refresh_token='r')
 
     @no_duplicates
+    def test_due_is_authlibs_rule(self):
+        self.mock_session.leeway = 300
+        for left, due in ((299, True), (-5, True), (310, False),
+                          (3600, False)):
+            with self.subTest(left=left):
+                self.mock_session.token = {
+                        'expires_at': int(time.time()) + left}
+                self.assertEqual(due, self.client._token_due())
+
+    @no_duplicates
+    def test_a_retry_after_too_long_to_read_returns_the_429(self):
+        sleep = self.patch_sleep()
+        self.client.set_rate_limit_retry(3)
+        limited = self.answer(429, {'Retry-After': '9' * 5000})
+        self.mock_session.get.side_effect = [limited, self.answer(200)]
+        self.assertIs(limited, self.client.get_quote(SYMBOL))
+        self.assertEqual([], self.waits(sleep))
+
+    @no_duplicates
+    def test_a_long_backoff_does_not_overflow(self):
+        self.client.set_rate_limit_retry(2000, max_wait=0.001)
+        self.assertEqual(0.001, self.client._retry_wait(1500, 0.0))
+
+    @no_duplicates
     def test_with_a_pace_a_fresh_token_is_left_to_the_session(self):
         told = self.paced()
         self.mock_session.leeway = 300

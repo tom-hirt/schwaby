@@ -3402,3 +3402,75 @@ class PacedSessionTest(unittest.TestCase):
                           ('token_refresh', 2)],
                          [(r.purpose, r.attempt) for r in told])
         sleep.assert_called_once_with(1.0)
+
+    def test_calls_at_once_pace_and_send_one_refresh(self):
+        # Every call finds the token due; one paces and refreshes, and the
+        # rest wait for it, so no pace slot goes to a refresh never sent.
+        import threading
+        import httpx2
+        told = []
+
+        def slow(transport, request):
+            if request.url.path == self.TOKEN_URL:
+                time.sleep(0.2)
+            return self.answer(request)
+        with patch.object(httpx2.HTTPTransport, 'handle_request', slow):
+            c = self.client()
+            c.set_pace(told.append)
+            threads = [threading.Thread(target=c.get_quote, args=('AAPL',))
+                       for _ in range(5)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(10)
+                self.assertFalse(t.is_alive())
+        self.assertEqual(1, [r.purpose for r in told].count('token_refresh'),
+                         'a refresh was paced that was never sent')
+        self.assertEqual(1, self.posts.count(self.TOKEN_URL))
+
+    def test_async_calls_at_once_pace_and_send_one_refresh(self):
+        import httpx2
+        told = []
+
+        async def answer(transport, request):
+            if request.url.path == self.TOKEN_URL:
+                await asyncio.sleep(0.1)
+            return self.answer(request)
+
+        async def run():
+            c = self.client(asyncio_=True)
+            c.set_pace(told.append)
+            await asyncio.gather(*(c.get_quote('AAPL') for _ in range(5)))
+        with patch.object(httpx2.AsyncHTTPTransport, 'handle_async_request',
+                          answer):
+            asyncio.run(run())
+        self.assertEqual(1, [r.purpose for r in told].count('token_refresh'),
+                         'a refresh was paced that was never sent')
+        self.assertEqual(1, self.posts.count(self.TOKEN_URL))
+
+    def test_a_short_lived_refresh_is_not_refreshed_again_unpaced(self):
+        # A token answered with less life than the session's leeway: the
+        # session would refresh it again on the way past, past the pace.
+        import httpx2
+        for asyncio_ in (False, True):
+            with self.subTest(asyncio=asyncio_):
+                self.posts, self.answers = [], [(200, {
+                        'access_token': 'NEW', 'token_type': 'Bearer',
+                        'expires_in': 100, 'refresh_token': 'r'})] * 3
+                told = []
+
+                async def answer(transport, request):
+                    return self.answer(request)
+                c = self.client(asyncio_=asyncio_)
+                c.set_pace(told.append)
+                if asyncio_:
+                    with patch.object(httpx2.AsyncHTTPTransport,
+                                      'handle_async_request', answer):
+                        asyncio.run(c.get_quote('AAPL'))
+                else:
+                    with patch.object(
+                            httpx2.HTTPTransport, 'handle_request',
+                            lambda transport, request: self.answer(request)):
+                        c.get_quote('AAPL')
+                self.assertEqual([self.TOKEN_URL, self.QUOTES], self.posts,
+                                 'the session refreshed again, unpaced')

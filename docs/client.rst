@@ -266,9 +266,9 @@ Rate Limits
 
 Schwab answers a request it is rate-limiting with HTTP 429, and the client
 returns that response like any other. It can instead wait and send a GET
-again, once it is asked to. Orders are never retried and never held back:
-placing, replacing or cancelling one that is rate-limited fails at once, as
-without this.
+again, once it is asked to. The retry never sends an order again and never
+holds one back: placing, replacing or cancelling one that is rate-limited
+fails at once, as without it.
 
 .. code-block:: python
 
@@ -286,6 +286,12 @@ without this.
 
      with client.no_rate_limit_retry():
          client.get_orders_for_account(account_hash)
+
+   A :class:`~schwaby.streaming.StreamClient` built on a synchronous
+   :class:`~schwaby.client.Client` makes its login's request from inside
+   the event loop, so a retry's wait there blocks the loop: log in inside
+   ``no_rate_limit_retry()``, or build it on an
+   :class:`~schwaby.client.AsyncClient`.
 
 Retries are one layer. Code that turns this on removes its own retry of a
 429, or the attempts multiply.
@@ -313,9 +319,10 @@ is awaitable, so an ``async def`` pace works there.
 
 .. note::
 
-   The pace is called with the token's refresh lock held by no one, so a
-   pace that waits holds up only the call it was asked about. Code that
-   sets a pace stops pacing those calls itself, or each is paced twice.
+   Orders are paced too, as every request is: a pace that waits holds the
+   order with it. A refresh is paced once, and calls that need the same
+   refresh wait for it. Code that sets a pace stops pacing those calls
+   itself, or each is paced twice.
 
 .. automethod:: schwaby.client.Client.set_pace
 .. automethod:: schwaby.client.Client.pace_tag
