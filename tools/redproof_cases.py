@@ -9030,45 +9030,58 @@ CASES += [
     # network, and the mutated run sends nothing.
     Case('block/a-lookup-is-refused',
          'schwaby/testing.py',
-         "    (socket, 'getaddrinfo', _guarded_getaddrinfo),\n",
+         "    (socket, 'getaddrinfo', _lookup_guard),\n",
          '',
          'tests/testing_test.py::BlockNetworkTest::test_a_connection_out_is_refused_every_way',
          'Reached', subtest='a lookup'),
 
     Case('block/a-connection-is-refused',
          'schwaby/testing.py',
-         'def _guarded_connect(self, address):\n'
-         '    if _active_blocks:\n'
-         '        _check_address(self, address)\n',
-         'def _guarded_connect(self, address):\n',
+         "    (socket.socket, 'connect', _connect_guard),\n",
+         '',
          'tests/testing_test.py::BlockNetworkTest::test_a_connection_out_is_refused_every_way',
          'Reached', subtest='an address'),
 
     Case('block/connect-ex-is-refused',
          'schwaby/testing.py',
-         'def _guarded_connect_ex(self, address):\n'
-         '    if _active_blocks:\n'
-         '        _check_address(self, address)\n',
-         'def _guarded_connect_ex(self, address):\n',
+         "    (socket.socket, 'connect_ex', _connect_guard),\n",
+         '',
          'tests/testing_test.py::BlockNetworkTest::test_a_connection_out_is_refused_every_way',
          'Reached', subtest='connect_ex'),
 
     Case('block/gethostbyname-is-refused',
          'schwaby/testing.py',
-         "    (socket, 'gethostbyname', _guarded_gethostbyname),\n",
+         "    (socket, 'gethostbyname', _lookup_guard),\n",
          '',
          'tests/testing_test.py::BlockNetworkTest::test_a_connection_out_is_refused_every_way',
          'Reached', subtest='gethostbyname'),
 
     # A guard kept past its block -- a reference taken inside, a patch
-    # started inside and stopped after -- hands calls on to the functions as
-    # they were, not to what a block that has ended replaced.
+    # started inside and stopped after -- hands a call on to what it
+    # replaced: never to the function in its place now, which may be
+    # itself, or a patch wrapping it.
     Case('block/a-guard-kept-past-its-block-lets-everything-through',
          'schwaby/testing.py',
-         '    return _saved[name] if _active_blocks else _ORIGINAL[name]\n',
-         '    return _saved[name]\n',
-         'tests/testing_test.py::BlockNetworkTest::test_a_guard_kept_past_its_block_lets_everything_through',
-         'Reached'),
+         '        return replaced(host, *args, **kwargs)\n',
+         '        return getattr(socket, guarded.__name__)(host, *args, '
+         '**kwargs)\n',
+         'tests/testing_test.py::BlockNetworkTest::test_a_block_over_a_leftover_guard_works',
+         'RecursionError'),
+
+    Case('block/a-put-back-guard-hands-on-to-what-it-replaced',
+         'schwaby/testing.py',
+         '        return replaced(self, address)\n',
+         '        return socket.socket.connect(self, address)\n',
+         'tests/testing_test.py::BlockNetworkTest::test_a_guard_put_back_hands_on_to_what_it_replaced',
+         'RecursionError'),
+
+    # A guard kept past its block refuses nothing.
+    Case('block/a-kept-guard-refuses-nothing',
+         'schwaby/testing.py',
+         '        if _active_blocks and not _is_local(host):\n',
+         '        if not _is_local(host):\n',
+         'tests/testing_test.py::BlockNetworkTest::test_a_guard_kept_past_its_block_refuses_nothing',
+         'NetworkBlocked'),
 
     # Only loopback and unspecified addresses are this machine.
     Case('block/only-this-machine-is-let-through',

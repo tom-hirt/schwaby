@@ -45,10 +45,10 @@ class NetworkBlocked(AssertionError):
     takes it for one.'''
 
 
-# Every active block_network, and what they replaced while any is active.
+# Every active block_network, and the guards they installed.
 _block_lock = threading.Lock()
 _active_blocks = []
-_saved = {}
+_installed = []
 _saved_environ = {}
 
 # Names that are this machine, so a test's own server still works.
@@ -81,27 +81,12 @@ def _refuse(what):
     raise NetworkBlocked(message)
 
 
-def _replaced(name):
-    '''What a guard hands a call it lets through: what it replaced when the
-    active block began, or, once no block is active, the function as it was
-    when this module was imported. A guard can outlive its block -- a
-    reference taken inside it, or a patch started inside and stopped after,
-    which puts the guard back -- and what it replaced then may be gone.'''
-    return _saved[name] if _active_blocks else _ORIGINAL[name]
-
-
-def _guarded_lookup(name):
+def _lookup_guard(replaced):
     def guarded(host, *args, **kwargs):
         if _active_blocks and not _is_local(host):
             _refuse('a lookup of {!r}'.format(host))
-        return _replaced(name)(host, *args, **kwargs)
-    guarded.__name__ = guarded.__qualname__ = name
+        return replaced(host, *args, **kwargs)
     return guarded
-
-
-_guarded_getaddrinfo = _guarded_lookup('getaddrinfo')
-_guarded_gethostbyname = _guarded_lookup('gethostbyname')
-_guarded_gethostbyname_ex = _guarded_lookup('gethostbyname_ex')
 
 
 def _check_address(sock, address):
@@ -113,27 +98,26 @@ def _check_address(sock, address):
         _refuse('a connection to {!r}'.format(host))
 
 
-def _guarded_connect(self, address):
-    if _active_blocks:
-        _check_address(self, address)
-    return _replaced('connect')(self, address)
+def _connect_guard(replaced):
+    def guarded(self, address):
+        if _active_blocks:
+            _check_address(self, address)
+        return replaced(self, address)
+    return guarded
 
 
-def _guarded_connect_ex(self, address):
-    if _active_blocks:
-        _check_address(self, address)
-    return _replaced('connect_ex')(self, address)
-
-
-# What each guard replaces.
+# What a block replaces, and how each guard is made. Each block makes its
+# own guards, each holding what it replaced, and hands a call it lets
+# through to that. A guard can outlive its block -- a reference taken
+# inside it, or a patch started inside and stopped after, which puts the
+# guard back -- and it then lets everything through, to what it replaced.
 _GUARDS = (
-    (socket, 'getaddrinfo', _guarded_getaddrinfo),
-    (socket, 'gethostbyname', _guarded_gethostbyname),
-    (socket, 'gethostbyname_ex', _guarded_gethostbyname_ex),
-    (socket.socket, 'connect', _guarded_connect),
-    (socket.socket, 'connect_ex', _guarded_connect_ex),
+    (socket, 'getaddrinfo', _lookup_guard),
+    (socket, 'gethostbyname', _lookup_guard),
+    (socket, 'gethostbyname_ex', _lookup_guard),
+    (socket.socket, 'connect', _connect_guard),
+    (socket.socket, 'connect_ex', _connect_guard),
 )
-_ORIGINAL = {name: getattr(target, name) for target, name, _ in _GUARDS}
 
 
 def _is_proxy_variable(name):
@@ -142,13 +126,13 @@ def _is_proxy_variable(name):
 
 
 def _install():
-    for target, name, guard in _GUARDS:
-        current = getattr(target, name)
-        # A guard still in place from an earlier block replaces what it
-        # replaced then, not itself.
-        if current is not guard:
-            _saved[name] = current
-            setattr(target, name, guard)
+    _installed[:] = []
+    for target, name, make in _GUARDS:
+        replaced = getattr(target, name)
+        guard = make(replaced)
+        guard.__name__ = guard.__qualname__ = name
+        setattr(target, name, guard)
+        _installed.append((target, name, guard, replaced))
     _saved_environ.clear()
     _saved_environ.update({name: value for name, value in os.environ.items()
                            if _is_proxy_variable(name)})
@@ -157,11 +141,12 @@ def _install():
 
 
 def _uninstall():
-    for target, name, guard in _GUARDS:
-        # Something patched over it inside the block will put the guard
-        # back when it stops, and the guard then lets everything through.
+    for target, name, guard, replaced in _installed:
+        # Something patched over it inside the block puts it back when it
+        # stops, and it then lets everything through.
         if getattr(target, name) is guard:
-            setattr(target, name, _saved[name])
+            setattr(target, name, replaced)
+    _installed[:] = []
     for name in [n for n in os.environ if _is_proxy_variable(n)]:
         del os.environ[name]
     os.environ.update(_saved_environ)

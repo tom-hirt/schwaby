@@ -550,42 +550,76 @@ class BlockNetworkTest(unittest.TestCase):
                     pass
                 raise KeyError('mine')
 
+    # A guard can outlive its block: a reference taken inside it, or a patch
+    # started inside and stopped after, which puts the guard back. None of
+    # these reaches the network, mutated or not: each address is loopback,
+    # or the call meets a stub.
+
+    def keep_the_socket_functions(self):
+        # For the tests after: what these leave in place is put back.
+        for target, name in ((socket, 'getaddrinfo'),
+                             (socket.socket, 'connect')):
+            self.addCleanup(setattr, target, name, getattr(target, name))
+
+    @staticmethod
+    def reached(*args, **kwargs):
+        raise Reached('the network was reached')
+
     @no_duplicates
-    def test_a_guard_kept_past_its_block_lets_everything_through(self):
-        # The guard this leaves on connect lets everything through; put
-        # back anyway, for the tests after it.
-        self.addCleanup(setattr, socket.socket, 'connect',
-                        socket.socket.connect)
+    def test_a_guard_kept_past_its_block_refuses_nothing(self):
+        self.keep_the_socket_functions()
+        with patch.object(socket, 'getaddrinfo', self.reached):
+            with st.block_network():
+                held = socket.getaddrinfo
+            # Handed on to what it replaced, the stub, and not refused.
+            with self.assertRaises(Reached):
+                held('192.0.2.1', 80)
+
+    @no_duplicates
+    def test_a_guard_put_back_hands_on_to_what_it_replaced(self):
+        # A stub started before the block is still there below the guard a
+        # patch put back.
+        self.keep_the_socket_functions()
+        with patch.object(socket.socket, 'connect', self.reached):
+            with st.block_network():
+                inner = patch.object(socket.socket, 'connect',
+                                     socket.socket.connect)
+                inner.start()
+            inner.stop()
+            with socket.socket() as s:
+                with self.assertRaises(Reached,
+                                       msg='the stub below was skipped'):
+                    s.connect(('127.0.0.1', 9))
+
+    @no_duplicates
+    def test_a_block_over_a_leftover_guard_works(self):
+        self.keep_the_socket_functions()
         with socket.socket() as server:
             server.bind(('127.0.0.1', 0))
             server.listen(2)
             port = server.getsockname()[1]
             with st.block_network():
-                held = socket.getaddrinfo
-                # Started inside, stopped after: it puts the guard back.
                 inner = patch.object(socket.socket, 'connect',
                                      socket.socket.connect)
                 inner.start()
             inner.stop()
-            # Outside any block, both still work, as what they replaced.
-            self.assertTrue(held('127.0.0.1', port))
-            with socket.socket() as s:
-                s.settimeout(5)
-                s.connect(('127.0.0.1', port))
-                server.accept()[0].close()
-            # A block after it, over a stub, still refuses.
-            def reached(*args, **kwargs):
-                raise Reached('the network was reached')
-            with patch.object(socket.socket, 'connect', reached):
-                with st.block_network() as blocked:
-                    self.refused(blocked, lambda: socket.socket().connect(
-                            ('192.0.2.1', 80)))
-            # The stub is gone, and the guard left in its place hands on to
-            # what connect was, not to the stub that block replaced.
-            with socket.socket() as s:
-                s.settimeout(5)
-                s.connect(('127.0.0.1', port))
-                server.accept()[0].close()
+            # A plain block over the guard left on connect.
+            with st.block_network() as blocked:
+                with socket.socket() as s:
+                    s.settimeout(5)
+                    s.connect(('127.0.0.1', port))
+                    server.accept()[0].close()
+            self.assertEqual([], blocked.attempts)
+            # And one over a patch wrapping a guard left on getaddrinfo.
+            with st.block_network():
+                inner = patch.object(socket, 'getaddrinfo',
+                                     socket.getaddrinfo)
+                inner.start()
+            inner.stop()
+            with patch.object(socket, 'getaddrinfo',
+                              wraps=socket.getaddrinfo):
+                with st.block_network():
+                    self.assertTrue(socket.getaddrinfo('127.0.0.1', port))
 
     @no_duplicates
     def test_it_decorates_a_test(self):
