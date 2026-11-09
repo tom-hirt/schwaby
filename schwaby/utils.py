@@ -902,7 +902,9 @@ class PaceRequest(typing.NamedTuple):
     #: refresh has the attempt of the call it is sent for.
     attempt: int
     #: What :meth:`~schwaby.client.Client.pace_tag` set around the call, or
-    #: ``None``.
+    #: ``None``. Always ``None`` for a ``'token_refresh'``: one refresh serves
+    #: every call waiting on it, whatever their tags, so a pace with lanes
+    #: routes it by ``purpose``.
     tag: object = None
 
 

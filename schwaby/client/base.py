@@ -643,9 +643,12 @@ class BaseClient(EnumEnforcer):
             _pace_tags.reset(token)
 
     def _pace_request(self, purpose, method, path, attempt):
+        # A refresh serves every call waiting on it, so it carries none's
+        # tag: an order waiting on it would otherwise wait in the lane of
+        # whichever call happened to need it first.
         tags = _pace_tags.get() or {}
-        return PaceRequest(method, path, purpose, attempt,
-                           tags.get(self._scope_key))
+        tag = None if purpose == 'token_refresh' else tags.get(self._scope_key)
+        return PaceRequest(method, path, purpose, attempt, tag)
 
     def _retry_wait(self, attempt, waited, retry_after=None):
         '''The seconds to wait before sending again after the 429 that ended

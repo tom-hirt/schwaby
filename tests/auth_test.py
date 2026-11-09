@@ -3440,7 +3440,9 @@ class PacedSessionTest(unittest.TestCase):
         async def run():
             c = self.client(asyncio_=True)
             c.set_pace(told.append)
-            await asyncio.gather(*(c.get_quote('AAPL') for _ in range(5)))
+            # Bounded, so a flight left set fails this rather than hanging.
+            await asyncio.wait_for(asyncio.gather(
+                    *(c.get_quote('AAPL') for _ in range(5))), 10)
         with patch.object(httpx2.AsyncHTTPTransport, 'handle_async_request',
                           answer):
             asyncio.run(run())
@@ -3474,3 +3476,57 @@ class PacedSessionTest(unittest.TestCase):
                         c.get_quote('AAPL')
                 self.assertEqual([self.TOKEN_URL, self.QUOTES], self.posts,
                                  'the session refreshed again, unpaced')
+
+    def test_calls_waiting_on_a_refresh_that_fails_all_finish(self):
+        # The refresh they wait on is refused; each then leads its own, and
+        # none is left waiting.
+        import threading
+        import httpx2
+        for asyncio_ in (False, True):
+            with self.subTest(asyncio=asyncio_):
+                self.posts = []
+                self.answers = [(400, {'error': 'invalid_grant'})] + [
+                        (200, {'access_token': 'NEW', 'token_type': 'Bearer',
+                               'expires_in': 1800, 'refresh_token': 'r'})] * 5
+                c = self.client(asyncio_=asyncio_)
+                c.set_pace(lambda request: None)
+                results = []
+                if asyncio_:
+                    async def answer(transport, request):
+                        if request.url.path == self.TOKEN_URL:
+                            await asyncio.sleep(0.05)
+                        return self.answer(request)
+
+                    async def run():
+                        return await asyncio.wait_for(asyncio.gather(
+                                *(c.get_quote('AAPL') for _ in range(3)),
+                                return_exceptions=True), 10)
+                    with patch.object(httpx2.AsyncHTTPTransport,
+                                      'handle_async_request', answer):
+                        results = asyncio.run(run())
+                else:
+                    def slow(transport, request):
+                        if request.url.path == self.TOKEN_URL:
+                            time.sleep(0.05)
+                        return self.answer(request)
+
+                    def call():
+                        try:
+                            results.append(c.get_quote('AAPL'))
+                        except Exception as e:
+                            results.append(e)
+                    with patch.object(httpx2.HTTPTransport, 'handle_request',
+                                      slow):
+                        threads = [threading.Thread(target=call)
+                                   for _ in range(3)]
+                        for t in threads:
+                            t.start()
+                        for t in threads:
+                            t.join(10)
+                            self.assertFalse(t.is_alive(),
+                                             'a call was left waiting')
+                self.assertEqual(3, len(results))
+                self.assertIsNone(c._refresh_flight,
+                                  'the flight was left set')
+                self.assertEqual(1, sum(isinstance(r, Exception)
+                                        for r in results))

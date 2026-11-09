@@ -9360,4 +9360,13 @@ CASES += [
          '                      2.0 ** (attempt - 1))\n',
          'tests/client_test.py::ClientTest::test_a_long_backoff_does_not_overflow',
          'OverflowError'),
+    # A refresh carries no call's tag: it serves every call waiting on it,
+    # and an order waiting on it would otherwise wait in the lane of
+    # whichever call needed it first.
+    Case('pace/a-refresh-is-in-no-calls-lane',
+         'schwaby/client/base.py',
+         "        tag = None if purpose == 'token_refresh' else tags.get(self._scope_key)\n",
+         '        tag = tags.get(self._scope_key)\n',
+         'tests/client_test.py::ClientTest::test_ensure_token_fresh_refreshes_through_the_pace',
+         "a refresh was paced in one call's lane"),
 ]

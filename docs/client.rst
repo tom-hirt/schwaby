@@ -307,6 +307,7 @@ included, and tells it what is about to go:
 .. code-block:: python
 
   def pace(request):            # a schwaby.PaceRequest
+      # A refresh has no tag: it serves every call waiting on it.
       limiter.wait(lane=request.tag or request.purpose)
 
   client.set_pace(pace)

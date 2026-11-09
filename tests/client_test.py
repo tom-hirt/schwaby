@@ -791,8 +791,10 @@ class _TestClient:
         self.due_token()
         with self.client.pace_tag('warm'):
             self.client.ensure_token_fresh()
+        # No tag: the refresh serves every call waiting on it.
         self.assertEqual([PaceRequest('POST', '/v1/oauth/token',
-                                      'token_refresh', 1, 'warm')], told)
+                                      'token_refresh', 1, None)], told,
+                         "a refresh was paced in one call's lane")
 
     @no_duplicates
     def test_set_rate_limit_retry_refuses_what_it_cannot_use(self):
