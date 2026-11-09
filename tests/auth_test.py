@@ -2859,7 +2859,9 @@ class EasyClientTest(unittest.TestCase):
                 API_KEY, APP_SECRET, CALLBACK_URL, self.token_path, 
                 asyncio='asyncio', enforce_enums='enforce_enums', 
                 callback_timeout='callback_timeout', interactive='interactive',
-                requested_browser='requested_browser', transport='transport')
+                requested_browser='requested_browser', shared=True,
+                lock_path='lock_path', lock_timeout='lock_timeout',
+                transport='transport')
 
         self.assertIs(c, mock_client)
 
@@ -2867,7 +2869,9 @@ class EasyClientTest(unittest.TestCase):
                 API_KEY, APP_SECRET, CALLBACK_URL, self.token_path,
                 asyncio='asyncio', enforce_enums='enforce_enums',
                 callback_timeout='callback_timeout', interactive='interactive',
-                requested_browser='requested_browser', transport='transport')
+                requested_browser='requested_browser', shared=True,
+                lock_path='lock_path', lock_timeout='lock_timeout',
+                transport='transport')
 
 
     @no_duplicates
@@ -2901,6 +2905,8 @@ class EasyClientTest(unittest.TestCase):
 
         c = auth.easy_client(API_KEY, APP_SECRET, CALLBACK_URL, self.token_path,
                              asyncio='asyncio', enforce_enums='enforce_enums',
+                             shared=True, lock_path='lock_path',
+                             lock_timeout='lock_timeout',
                              transport='transport')
 
         self.assertIs(c, mock_client)
@@ -2908,7 +2914,8 @@ class EasyClientTest(unittest.TestCase):
         client_from_token_file.assert_called_once_with(
                 self.token_path, API_KEY, APP_SECRET,
                 asyncio='asyncio', enforce_enums='enforce_enums',
-                transport='transport')
+                shared=True, lock_path='lock_path',
+                lock_timeout='lock_timeout', transport='transport')
 
 
     @no_duplicates

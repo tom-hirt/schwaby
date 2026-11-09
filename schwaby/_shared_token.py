@@ -1,0 +1,359 @@
+'''A token file several clients share, in one process or several.
+
+A write, or a refresh with the write it makes, holds an exclusive lock: a
+process-wide lock keyed by the token file's real path, since ``flock`` does
+not exclude the threads of one process, and an ``flock`` on a lock file
+opened afresh (``msvcrt.locking`` on Windows). A load takes no lock.
+
+Under the lock the file is read first, and a token is written only if it is
+at least as new as the file's, so a fresh sign-in is never overwritten by a
+refresh of the old token. Before refreshing, a client takes the file's token
+instead when another client has refreshed already, and sends nothing.
+
+No token, nor any part of one, is logged here.
+'''
+
+import asyncio
+import contextlib
+import contextvars
+import json
+import math
+import os
+import threading
+import time
+
+from . import _redact
+from .utils import TokenErrorKind, TokenFileLockTimeout, TokenRefreshError
+
+
+def get_logger():
+    return _redact.get_logger(__name__)
+
+
+# The real paths whose lock this thread or asyncio task holds, so that the
+# write a refresh makes, inside the lock, does not take it again.
+_held = contextvars.ContextVar('schwaby_token_lock_held', default=frozenset())
+
+# One lock per token file in this process, by its real path.
+_process_locks = {}
+_process_locks_guard = threading.Lock()
+
+# How long a wait for another process's lock sleeps between tries.
+_POLL = 0.01
+
+
+def _process_lock(key):
+    with _process_locks_guard:
+        lock = _process_locks.get(key)
+        if lock is None:
+            lock = _process_locks[key] = threading.Lock()
+        return lock
+
+
+def _try_lock_fd(fd):
+    '''Takes the lock on ``fd`` without waiting; whether it did.'''
+    if os.name == 'nt':  # pragma: no cover
+        import msvcrt
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+    import fcntl
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    return True
+
+
+def _unlock_fd(fd):
+    if os.name == 'nt':  # pragma: no cover
+        import msvcrt
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        return
+    import fcntl
+    fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+def _number(value):
+    '''An ordering value: a finite real number, else lower than any.'''
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return -math.inf
+    return value if math.isfinite(value) else -math.inf
+
+
+def _order(wrapped):
+    '''What a stored token is ordered by: its login's creation time, then
+    its access token's expiry.'''
+    if not isinstance(wrapped, dict):
+        return (-math.inf, -math.inf)
+    token = wrapped.get('token')
+    expires_at = token.get('expires_at') if isinstance(token, dict) else None
+    return (_number(wrapped.get('creation_timestamp')), _number(expires_at))
+
+
+def is_at_least_as_new(ours, theirs):
+    '''Whether stored token ``ours`` is at least as new as ``theirs``:
+    ordered by the login's creation time, then the access token's expiry,
+    and then, only when both carry one, the time each arrived. A token
+    written without one, by an older version, is ordered by the first two
+    alone, as that version orders them.'''
+    if theirs is None:
+        return True
+    a, b = _order(ours), _order(theirs)
+    if a != b:
+        return a > b
+    received = [w.get('received_at') if isinstance(w, dict) else None
+                for w in (ours, theirs)]
+    if all(isinstance(r, (int, float)) and not isinstance(r, bool)
+           for r in received):
+        return _number(received[0]) >= _number(received[1])
+    return True
+
+
+def _check_timeout(lock_timeout):
+    if (isinstance(lock_timeout, bool)
+            or not isinstance(lock_timeout, (int, float))):
+        raise TypeError('lock_timeout must be a number of seconds')
+    if not math.isfinite(lock_timeout) or lock_timeout < 0:
+        raise ValueError('lock_timeout must be a finite number of seconds, '
+                         'zero or more, got {!r}'.format(lock_timeout))
+    return float(lock_timeout)
+
+
+def _default_read_bytes(path):
+    with open(path, 'rb') as f:
+        return f.read()
+
+
+class SharedTokenFile:
+    '''One client's view of a shared token file: how it is read, written
+    and locked.'''
+
+    def __init__(self, token_path, *, read_bytes=None, write_bytes=None,
+                 lock_path=None, lock_timeout=10.0, default_write=None):
+        if not isinstance(token_path, (str, os.PathLike)):
+            raise TypeError('token_path must be a str or an os.PathLike')
+        token_path = os.fspath(token_path)
+        if not isinstance(token_path, str):
+            raise TypeError('token_path must be a str path, not bytes')
+        if lock_path is not None:
+            if not isinstance(lock_path, (str, os.PathLike)):
+                raise TypeError('lock_path must be a str or an os.PathLike')
+            lock_path = os.fspath(lock_path)
+            if not isinstance(lock_path, str):
+                raise TypeError('lock_path must be a str path, not bytes')
+        for name, function in (('read_bytes', read_bytes),
+                               ('write_bytes', write_bytes)):
+            if function is not None and not callable(function):
+                raise TypeError('{} must be callable or None'.format(name))
+        self.token_path = token_path
+        self.lock_path = lock_path
+        self.lock_timeout = _check_timeout(lock_timeout)
+        self.read_bytes = read_bytes or _default_read_bytes
+        self.write_bytes = write_bytes or default_write
+        # When the client's current token arrived, as written or loaded.
+        self.received_at = None
+
+    # ---------------------------------------------------------- the lock
+
+    def _key(self):
+        return os.path.realpath(self.token_path)
+
+    def _lock_file(self, key):
+        return self.lock_path if self.lock_path is not None else key + '.lock'
+
+    def _acquire(self, key):
+        '''Takes both locks, within the timeout; returns the lock file's
+        descriptor. Raises TokenFileLockTimeout past it.'''
+        deadline = time.monotonic() + self.lock_timeout
+        process_lock = _process_lock(key)
+        if not process_lock.acquire(timeout=self.lock_timeout):
+            raise self._timed_out()
+        try:
+            fd = os.open(self._lock_file(key), os.O_RDWR | os.O_CREAT, 0o600)
+        except BaseException:
+            process_lock.release()
+            raise
+        try:
+            while not _try_lock_fd(fd):
+                if time.monotonic() >= deadline:
+                    raise self._timed_out()
+                time.sleep(_POLL)
+        except BaseException:
+            os.close(fd)
+            process_lock.release()
+            raise
+        return fd
+
+    def _release(self, key, fd):
+        try:
+            _unlock_fd(fd)
+        finally:
+            os.close(fd)
+            _process_lock(key).release()
+
+    def _timed_out(self):
+        return TokenFileLockTimeout(
+                'The token file is locked by another client, and stayed '
+                'locked for the {:g} seconds of lock_timeout.'.format(
+                    self.lock_timeout))
+
+    @contextlib.contextmanager
+    def lock(self):
+        '''Holds the lock, or does nothing when this thread or task holds it
+        already.'''
+        key = self._key()
+        held = _held.get()
+        if key in held:
+            yield
+            return
+        fd = self._acquire(key)
+        token = _held.set(held | {key})
+        try:
+            yield
+        finally:
+            _held.reset(token)
+            self._release(key, fd)
+
+    @contextlib.asynccontextmanager
+    async def alock(self):
+        '''The lock, taken in a worker thread so the event loop does not wait
+        on it. A task cancelled while it waits gives back the lock it would
+        have taken.'''
+        key = self._key()
+        held = _held.get()
+        if key in held:
+            yield
+            return
+        taking = asyncio.ensure_future(asyncio.to_thread(self._acquire, key))
+        try:
+            fd = await asyncio.shield(taking)
+        except asyncio.CancelledError:
+            def give_back(future):
+                if not future.cancelled() and future.exception() is None:
+                    self._release(key, future.result())
+            taking.add_done_callback(give_back)
+            raise
+        token = _held.set(held | {key})
+        try:
+            yield
+        finally:
+            _held.reset(token)
+            self._release(key, fd)
+
+    # ---------------------------------------------- reading and writing
+
+    def read(self):
+        '''The stored token, as loaded; raises as loading a token file
+        does. Takes no lock.'''
+        data = self.read_bytes(self.token_path)
+        try:
+            stored = json.loads(data)
+        except RecursionError:
+            raise ValueError(
+                    'The token file is nested too deeply to be a token this '
+                    'library wrote. Delete it and create a new one.') from None
+        if isinstance(stored, dict):
+            received = stored.get('received_at')
+            if isinstance(received, (int, float)) and not isinstance(
+                    received, bool):
+                self.received_at = received
+        return stored
+
+    def _read_or_none(self):
+        '''The stored token, or None when there is none to compare with: no
+        file, or one that is not JSON.'''
+        try:
+            return json.loads(self.read_bytes(self.token_path))
+        except FileNotFoundError:
+            return None
+        except (ValueError, RecursionError):
+            return None
+
+    def write(self, wrapped, *args, **kwargs):
+        '''Writes the stored token ``wrapped`` under the lock, if it is at
+        least as new as the file's; whether it did.'''
+        wrapped = dict(wrapped)
+        wrapped['received_at'] = time.time()
+        with self.lock():
+            current = self._read_or_none()
+            if not is_at_least_as_new(wrapped, current):
+                get_logger().info(
+                        'Kept the newer token in %s: the token it would have '
+                        'replaced is older', self.token_path)
+                return False
+            data = json.dumps(wrapped).encode('utf-8')
+            self.write_bytes(self.token_path, data)
+            self.received_at = wrapped['received_at']
+            return True
+
+    # ------------------------------------------------ the refresh hook
+
+    def newer_stored(self, metadata, session):
+        '''The file's token when it is newer than the client's, else None.
+        Called under the lock.'''
+        stored = self._read_or_none()
+        if not isinstance(stored, dict) or not isinstance(
+                stored.get('token'), dict):
+            return None
+        ours = {'creation_timestamp': metadata.creation_timestamp,
+                'token': dict(session.token or {}),
+                'received_at': self.received_at}
+        if is_at_least_as_new(ours, stored):
+            return None
+        return stored
+
+
+def _lock_timeout_error(error):
+    return TokenRefreshError(
+            'Failed to refresh the Schwab token: ' + str(error) + ' Nothing '
+            'was sent.', kind=TokenErrorKind.TRANSIENT)
+
+
+def share_refresh(session, shared, metadata, adopt, *, is_async):
+    '''Makes ``session``'s refresh hold ``shared``'s lock, and take the
+    file's token instead when it is newer. ``adopt(stored)`` makes the
+    client's view of the token the file's, and says whether it could: a
+    stored token that does not check out is not taken.'''
+    refresh = session.refresh_token
+
+    def taken(stored, kwargs):
+        '''Takes the file's newer token; whether it needs no refresh.'''
+        if not adopt(stored):
+            return False
+        received = stored.get('received_at')
+        shared.received_at = (received if isinstance(received, (int, float))
+                              and not isinstance(received, bool) else None)
+        get_logger().info('Took the newer token another client wrote to %s',
+                          shared.token_path)
+        if not session.token.is_expired(leeway=getattr(session, 'leeway', 0)):
+            return True
+        # Still due: refreshed with the file's refresh token, not the old.
+        kwargs['refresh_token'] = session.token.get('refresh_token')
+        return False
+
+    if is_async:
+        async def shared_refresh(*args, **kwargs):
+            try:
+                async with shared.alock():
+                    stored = shared.newer_stored(metadata, session)
+                    if stored is not None and taken(stored, kwargs):
+                        return session.token
+                    return await refresh(*args, **kwargs)
+            except TokenFileLockTimeout as e:
+                raise _lock_timeout_error(e) from e
+    else:
+        def shared_refresh(*args, **kwargs):
+            try:
+                with shared.lock():
+                    stored = shared.newer_stored(metadata, session)
+                    if stored is not None and taken(stored, kwargs):
+                        return session.token
+                    return refresh(*args, **kwargs)
+            except TokenFileLockTimeout as e:
+                raise _lock_timeout_error(e) from e
+    session.refresh_token = shared_refresh

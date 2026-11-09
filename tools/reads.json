@@ -281,6 +281,18 @@
   "tests/secret_logging_test.py",
   "tests/utils.py"
  ],
+ "tests/shared_token_test.py": [
+  "schwaby/",
+  "schwaby/__init__.py",
+  "schwaby/_shared_token.py",
+  "schwaby/auth.py",
+  "schwaby/testing.py",
+  "setup.cfg",
+  "tests/__init__.py",
+  "tests/conftest.py",
+  "tests/shared_token_test.py",
+  "tests/utils.py"
+ ],
  "tests/streaming_test.py": [
   "schwaby/__init__.py",
   "schwaby/_redact.py",
@@ -298,6 +310,7 @@
  "tests/suite_config_test.py": [
   ".github/",
   ".github/workflows/",
+  ".github/workflows/docs.yml",
   ".github/workflows/publish.yml",
   ".github/workflows/python.yml",
   ".python-versions",

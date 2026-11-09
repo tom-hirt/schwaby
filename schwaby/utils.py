@@ -908,6 +908,13 @@ class PaceRequest(typing.NamedTuple):
     tag: object = None
 
 
+class TokenFileLockTimeout(SchwabError, TimeoutError):
+    '''A shared token file stayed locked by another client for longer than
+    ``lock_timeout``. A refresh that meets it raises
+    :class:`TokenRefreshError`, with kind ``transient`` and this as its
+    cause, having sent nothing; a login's write raises this itself.'''
+
+
 class TokenFreshness(str, enum.Enum):
     '''What :meth:`~schwaby.client.Client.ensure_token_fresh` did.'''
 

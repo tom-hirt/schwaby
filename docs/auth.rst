@@ -237,6 +237,8 @@ A program that only needs the age --- a monitor, or a job that warns before the
 window closes --- can read it from the token file without building a client:
 
 .. autofunction:: schwaby.auth.token_file_age
+.. autofunction:: schwaby.auth.token_file_created_at
+.. autofunction:: schwaby.auth.refresh_token_expires_at
 
 
 .. _token_file:
@@ -283,6 +285,58 @@ rather than the link being replaced.
 Never commit a token file, never paste one into an issue, and never share it in
 logs. See :ref:`the help page <help>` for what redaction does and does not
 cover.
+
+
+.. _shared_token_file:
+
+++++++++++++++++++++++++
+Sharing One Token File
+++++++++++++++++++++++++
+
+By default a token file belongs to one client. Several clients reading and
+refreshing the same file, in one process or several, can each refresh it, and
+a refresh of an old token can overwrite a newer login's. ``shared=True``
+makes them take turns:
+
+.. code-block:: python
+
+  client = schwaby.auth.client_from_token_file(
+          '/path/to/token.json', api_key, app_secret, shared=True)
+
+With it:
+
+- a refresh, and the write it makes, holds an exclusive lock on the file,
+  across threads and processes alike. A load takes none;
+- before refreshing, the client reads the file, and when another client has
+  refreshed already it takes that token and sends nothing;
+- a token is written only if it is at least as new as the file's: by the
+  login it came from, then its access token's expiry. A fresh login always
+  wins over a refresh of the old token;
+- the lock is a file beside the token file's real path, ``token.json.lock``,
+  created readable only by you, or ``lock_path``;
+- the wait for the lock is bounded by ``lock_timeout``, 10 seconds by
+  default. Past it a refresh raises
+  :class:`~schwaby.utils.TokenRefreshError` with kind ``transient``, having
+  sent nothing, the request included, and a login's write raises
+  :class:`~schwaby.utils.TokenFileLockTimeout`.
+
+The login functions and :func:`~schwaby.auth.easy_client` take ``shared``,
+``lock_path`` and ``lock_timeout`` too, so a fresh login takes the lock as a
+refresh does. For a token kept somewhere else, the reader and writer
+:func:`~schwaby.auth.shared_token_file` returns take ``read_bytes`` and
+``write_bytes`` of your own; the lock and the order of tokens stay this
+library's.
+
+.. note::
+
+   The lock works where the operating system's file lock does: on a local
+   disk, ``flock`` on Linux and macOS, ``msvcrt.locking`` on Windows. On a
+   network file system it may lock nothing. Every client that shares the
+   file must pass ``shared=True``; one that does not neither takes the lock
+   nor waits for it.
+
+.. autofunction:: schwaby.auth.shared_token_file
+.. autoexception:: schwaby.utils.TokenFileLockTimeout
 
 
 ++++++++++++++++++++++++++

@@ -10,8 +10,8 @@ from .version import version as __version__
 # The token errors and what reads them, at the top as well as in utils.
 from .utils import (
         LoginErrorKind, LoginExchangeError, NoBrowserAvailable, PaceRequest,
-        TokenErrorKind, TokenFreshness, TokenRefreshError, find_token_error,
-        server_error_code)
+        TokenErrorKind, TokenFileLockTimeout, TokenFreshness,
+        TokenRefreshError, find_token_error, server_error_code)
 
 LOG_REDACTOR = debug.LogRedactor()
 
@@ -21,7 +21,8 @@ _redact.protect_dependencies()
 
 __all__ = [
     'LOG_REDACTOR', 'LoginErrorKind', 'LoginExchangeError',
-    'NoBrowserAvailable', 'PaceRequest', 'TokenErrorKind', 'TokenFreshness',
+    'NoBrowserAvailable', 'PaceRequest', 'TokenErrorKind',
+    'TokenFileLockTimeout', 'TokenFreshness',
     'TokenRefreshError', 'auth', 'client', 'debug', 'find_token_error',
     'orders', 'server_error_code', 'streaming', 'utils', 'version',
 ]

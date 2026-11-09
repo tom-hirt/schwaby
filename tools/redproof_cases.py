@@ -8949,9 +8949,9 @@ CASES += [
     Case('transport/a-logins-client-sends-through-it',
          'schwaby/auth.py',
          '                     oauth_client_update_token, transport),\n'
-         '        token_metadata=metadata_manager, enforce_enums=enforce_enums)\n',
+         '        token_metadata=metadata_manager, enforce_enums=enforce_enums),\n',
          '                     oauth_client_update_token),\n'
-         '        token_metadata=metadata_manager, enforce_enums=enforce_enums)\n',
+         '        token_metadata=metadata_manager, enforce_enums=enforce_enums),\n',
          'tests/testing_test.py::TransportTest::test_a_login_exchanges_its_code_through_it',
          'NetworkBlocked', subtest='asyncio=False'),
 
@@ -8988,25 +8988,29 @@ CASES += [
 
     Case('transport/easy-client-passes-it-to-a-token-file',
          'schwaby/auth.py',
-         '                                   enforce_enums=enforce_enums,\n'
+         'enforce_enums=enforce_enums,\n'
+         '                                   shared=shared, lock_path=lock_path,\n'
+         '                                   lock_timeout=lock_timeout,\n'
          '                                   transport=transport)\n',
-         '                                   enforce_enums=enforce_enums)\n',
+         'enforce_enums=enforce_enums,\n'
+         '                                   shared=shared, lock_path=lock_path,\n'
+         '                                   lock_timeout=lock_timeout)\n',
          'tests/testing_test.py::TransportTest::test_easy_client_passes_it_on',
          'NetworkBlocked'),
 
     Case('transport/easy-client-passes-it-to-a-manual-login',
          'schwaby/auth.py',
-         '                                    enforce_enums=enforce_enums,\n'
+         '                                    lock_timeout=lock_timeout,\n'
          '                                    transport=transport)\n',
-         '                                    enforce_enums=enforce_enums)\n',
+         '                                    lock_timeout=lock_timeout)\n',
          'tests/testing_test.py::TransportTest::test_easy_client_passes_it_on',
          "KeyError: 'transport'", subtest='client_from_manual_flow'),
 
     Case('transport/easy-client-passes-it-to-the-login-flow',
          'schwaby/auth.py',
-         '            requested_browser=requested_browser, interactive=interactive,\n'
+         '            shared=shared, lock_path=lock_path, lock_timeout=lock_timeout,\n'
          '            transport=transport)\n',
-         '            requested_browser=requested_browser, interactive=interactive)\n',
+         '            shared=shared, lock_path=lock_path, lock_timeout=lock_timeout)\n',
          'tests/testing_test.py::TransportTest::test_easy_client_passes_it_on',
          "KeyError: 'transport'", subtest='client_from_login_flow'),
 
@@ -9369,6 +9373,95 @@ CASES += [
          '        tag = tags.get(self._scope_key)\n',
          'tests/client_test.py::ClientTest::test_ensure_token_fresh_refreshes_through_the_pace',
          "a refresh was paced in one call's lane"),
+]
+
+# A shared token file. What must hold: a token is never written over a
+# newer one, ordered by the login, then the expiry, then received_at only
+# when both carry it; a client takes the token another refreshed and sends
+# nothing; one that does not check out is not taken; the lock is beside the
+# real file, is not taken twice by the refresh that writes, is given back by
+# a cancelled wait, and past its timeout fails a refresh as transient with
+# nothing sent; and shared=False is as before.
+CASES += [
+    Case('shared/a-later-login-or-expiry-is-newer',
+         'schwaby/_shared_token.py',
+         '    if a != b:\n'
+         '        return a > b\n',
+         '    if a != b:\n'
+         '        return True\n',
+         'tests/shared_token_test.py::NewestWinsTest::test_the_order_of_two_tokens',
+         'two tokens were ordered wrongly'),
+    Case('shared/received-at-only-when-both-carry-it',
+         'schwaby/_shared_token.py',
+         '    if all(isinstance(r, (int, float)) and not isinstance(r, bool)\n',
+         '    if any(isinstance(r, (int, float)) and not isinstance(r, bool)\n',
+         'tests/shared_token_test.py::NewestWinsTest::test_the_order_of_two_tokens',
+         'two tokens were ordered wrongly'),
+    Case('shared/an-older-token-is-not-written',
+         'schwaby/_shared_token.py',
+         '            if not is_at_least_as_new(wrapped, current):\n',
+         '            if False:\n',
+         'tests/shared_token_test.py::NewestWinsTest::test_an_older_token_is_not_written_over_a_newer_one',
+         'an older token was written over a newer one'),
+    Case('shared/a-client-takes-the-token-another-refreshed',
+         'schwaby/_shared_token.py',
+         '                with shared.lock():\n'
+         '                    stored = shared.newer_stored(metadata, session)\n',
+         '                with shared.lock():\n'
+         '                    stored = None\n',
+         'tests/shared_token_test.py::AdoptTest::test_a_client_takes_the_token_another_refreshed',
+         'the second client refreshed again', subtest='asyncio=False'),
+    Case('shared/an-async-client-takes-the-token-another-refreshed',
+         'schwaby/_shared_token.py',
+         '                async with shared.alock():\n'
+         '                    stored = shared.newer_stored(metadata, session)\n',
+         '                async with shared.alock():\n'
+         '                    stored = None\n',
+         'tests/shared_token_test.py::AdoptTest::test_a_client_takes_the_token_another_refreshed',
+         'the second client refreshed again', subtest='asyncio=True'),
+    Case('shared/a-stored-token-that-does-not-check-out-is-not-taken',
+         'schwaby/auth.py',
+         '        if not _is_usable_token(token):\n'
+         '            return False\n'
+         '        _register_token(token)\n',
+         '        _register_token(token)\n',
+         'tests/shared_token_test.py::AdoptTest::test_a_stored_token_that_does_not_check_out_is_not_taken',
+         '1 != 0'),
+    Case('shared/the-lock-is-beside-the-real-file',
+         'schwaby/_shared_token.py',
+         "        return self.lock_path if self.lock_path is not None else key + '.lock'\n",
+         "        return self.lock_path if self.lock_path is not None else self.token_path + '.lock'\n",
+         'tests/shared_token_test.py::LockTest::test_a_refresh_makes_the_lock_file_beside_the_real_one',
+         'the lock is beside the link'),
+    Case('shared/the-refresh-does-not-take-its-own-lock-again',
+         'schwaby/_shared_token.py',
+         '        if key in held:\n'
+         '            yield\n'
+         '            return\n'
+         '        fd = self._acquire(key)\n',
+         '        fd = self._acquire(key)\n',
+         'tests/shared_token_test.py::AdoptTest::test_a_client_takes_the_token_another_refreshed',
+         'TokenRefreshError', subtest='asyncio=False'),
+    Case('shared/a-cancelled-wait-gives-the-lock-back',
+         'schwaby/_shared_token.py',
+         '            taking.add_done_callback(give_back)\n',
+         '            pass\n',
+         'tests/shared_token_test.py::LockTest::test_an_async_wait_cancelled_gives_the_lock_back',
+         'TokenFileLockTimeout'),
+    Case('shared/a-lock-timeout-is-transient',
+         'schwaby/_shared_token.py',
+         "            'was sent.', kind=TokenErrorKind.TRANSIENT)\n",
+         "            'was sent.', kind=TokenErrorKind.DEAD_TOKEN)\n",
+         'tests/shared_token_test.py::LockTest::test_a_lock_held_past_the_timeout_fails_the_refresh',
+         'TRANSIENT'),
+    Case('shared/not-shared-is-as-before',
+         'schwaby/auth.py',
+         '                         \'shared=True with it\')\n'
+         '    return shared\n',
+         '                         \'shared=True with it\')\n'
+         '    return True\n',
+         'tests/shared_token_test.py::LockTest::test_without_shared_there_is_no_lock',
+         'True is not false'),
 ]
 
 

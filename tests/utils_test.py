@@ -999,6 +999,7 @@ class UtilsTest(unittest.TestCase):
             'UnusableAccountNumbersError': ('m',),
             'UnusableOrderActivityError': ('m',),
             'NoBrowserAvailable': ('m',),
+            'TokenFileLockTimeout': ('m',),
             'TokenRefreshError': ('m',),
             'LoginExchangeError': ('invalid_grant', 'code already used'),
             'RedirectTimeoutError': ('m',),

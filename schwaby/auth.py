@@ -25,6 +25,7 @@ import warnings
 import webbrowser
 
 from schwaby import _redact
+from schwaby import _shared_token
 from schwaby.client import AsyncClient, Client
 from schwaby.utils import (LoginErrorKind, LoginExchangeError,
         NoBrowserAvailable, SchwabError,
@@ -411,7 +412,8 @@ def __make_update_token_func(token_path):
     return update_token
 
 
-def token_file_writer(token_path):
+def token_file_writer(token_path, *, shared=False, lock_path=None,
+                      lock_timeout=10.0):
     '''Returns a ``token_write_func`` that writes to ``token_path`` the way
     this library writes its own token files.
 
@@ -436,6 +438,12 @@ def token_file_writer(token_path):
                        write, say -- means logging in again. A relative path
                        is resolved against the working directory at each
                        write, as it is for the other entry points.
+    :param shared: See the corresponding parameter to
+                   :func:`client_from_token_file`.
+    :param lock_path: See the corresponding parameter to
+                      :func:`client_from_token_file`.
+    :param lock_timeout: See the corresponding parameter to
+                         :func:`client_from_token_file`.
     :raises TypeError: ``token_path`` is not a ``str`` path. A ``bytes`` path
                        is refused too: the write cannot use one.
     :raises ValueError: ``token_path`` is empty or contains a NUL, or names a
@@ -466,8 +474,108 @@ def token_file_writer(token_path):
     if not os.path.isdir(directory):
         raise ValueError('token_path must be in an existing directory, and '
                          '{!r} is not one'.format(directory))
+    if _check_shared(shared, lock_path):
+        return _shared_writer(_shared_file(token_path, lock_path=lock_path,
+                                           lock_timeout=lock_timeout))
     return __make_update_token_func(token_path)
 
+
+def _check_shared(shared, lock_path):
+    '''Whether ``shared`` asks for a shared token file; refuses what it
+    cannot use.'''
+    if not isinstance(shared, bool):
+        raise TypeError('shared must be True or False')
+    if lock_path is not None and not shared:
+        raise ValueError('lock_path is for a shared token file: pass '
+                         'shared=True with it')
+    return shared
+
+
+def _write_token_bytes(token_path, data):
+    '''A shared token file's default writer: this library's own, atomic.'''
+    __write_token_file(token_path, json.loads(data))
+
+
+def _shared_file(token_path, *, read_bytes=None, write_bytes=None,
+                 lock_path=None, lock_timeout=10.0):
+    return _shared_token.SharedTokenFile(
+            token_path, read_bytes=read_bytes, write_bytes=write_bytes,
+            lock_path=lock_path, lock_timeout=lock_timeout,
+            default_write=_write_token_bytes)
+
+
+def _shared_writer(shared):
+    def update_token(t, *args, **kwargs):
+        get_logger().info('Updating token to file %s', shared.token_path)
+        shared.write(t)
+    update_token._schwaby_shared_token_file = shared
+    return update_token
+
+
+def shared_token_file(token_path, *, read_bytes=None, write_bytes=None,
+                      lock_path=None, lock_timeout=10.0):
+    '''A ``token_read_func`` and ``token_write_func`` for a token file other
+    clients share, for :func:`client_from_access_functions`: the reader
+    takes no lock, and the writer and every refresh behave as
+    ``shared=True`` makes them for :func:`client_from_token_file`. One pair
+    is for one client.
+
+    :param token_path: The token file, a ``str`` or ``os.PathLike``.
+    :param read_bytes: ``read_bytes(path) -> bytes`` in place of reading the
+                       file; the locking and the order of tokens stay this
+                       library's.
+    :param write_bytes: ``write_bytes(path, data)`` in place of this
+                        library's atomic write.
+    :param lock_path: See :func:`client_from_token_file`.
+    :param lock_timeout: See :func:`client_from_token_file`.
+    :return: ``(token_read_func, token_write_func)``.
+    '''
+    shared = _shared_file(token_path, read_bytes=read_bytes,
+                          write_bytes=write_bytes, lock_path=lock_path,
+                          lock_timeout=lock_timeout)
+    return shared.read, _shared_writer(shared)
+
+
+def _share_session(client, token_write_func, metadata):
+    '''Holds a shared token file's lock around the client's refreshes, when
+    its writer is one.'''
+    shared = getattr(token_write_func, '_schwaby_shared_token_file', None)
+    if shared is None:
+        return client
+    session = client.session
+
+    def adopt(stored):
+        try:
+            loaded = TokenMetadata.from_loaded_token(stored, None)
+            token = _stored_token_for_session(loaded.token)
+            register_redactions(token)
+        except (ValueError, TypeError, RecursionError):
+            return False
+        if not _is_usable_token(token):
+            return False
+        _register_token(token)
+        metadata.creation_timestamp = loaded.creation_timestamp
+        metadata.token = token
+        session.token = token
+        return True
+    _shared_token.share_refresh(session, shared, metadata, adopt,
+                                is_async=isinstance(client, AsyncClient))
+    return client
+
+
+
+def _login_writer(token_path, token_write_func, shared, lock_path,
+                  lock_timeout):
+    '''The writer a login writes its token with.'''
+    if not _check_shared(shared, lock_path):
+        return (__make_update_token_func(token_path)
+                if token_write_func is None else token_write_func)
+    if token_write_func is not None:
+        raise ValueError('shared is for the token file at token_path, and '
+                         'a token_write_func of your own replaces it: use '
+                         'shared_token_file() for one')
+    return token_file_writer(token_path, shared=True, lock_path=lock_path,
+                             lock_timeout=lock_timeout)
 
 
 def __normalize_credential(value, name):
@@ -697,6 +805,39 @@ def token_file_age(token_path):
     return metadata.token_age()
 
 
+def token_file_created_at(token_path):
+    '''When the login that made the token in ``token_path`` happened, in
+    seconds since the epoch: the ``creation_timestamp`` this library stores
+    in the file, read as :func:`token_file_age` reads it.
+
+    :raises ValueError: as :func:`token_file_age` does.
+    :raises OSError: The file cannot be read.
+    '''
+    metadata = TokenMetadata.from_loaded_token(
+            __token_loader(token_path, level=logging.DEBUG)(), None)
+    _stored_token_for_session(metadata.token)
+    return float(metadata.creation_timestamp)
+
+
+#: Schwab's documented life of a refresh token, from the login: seven days.
+REFRESH_TOKEN_LIFETIME = 7 * 24 * 60 * 60
+
+
+def refresh_token_expires_at(token_path):
+    '''When the refresh token in ``token_path`` expires, in seconds since the
+    epoch: :func:`token_file_created_at` plus the seven days Schwab
+    documents.
+
+    .. note:: Schwab has not always held to the seven days, so a refresh can
+       fail before this, and a token is best replaced with a login a little
+       ahead of it.
+
+    :raises ValueError: as :func:`token_file_age` does.
+    :raises OSError: The file cannot be read.
+    '''
+    return token_file_created_at(token_path) + REFRESH_TOKEN_LIFETIME
+
+
 ################################################################################
 # client_from_login_flow
 
@@ -799,7 +940,9 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
                            asyncio=False, enforce_enums=False, 
                            token_write_func=None, callback_timeout=300.0,
                            interactive=True, requested_browser=None,
-                           callback_socket=None, *, transport=None):
+                           callback_socket=None, *, shared=False,
+                           lock_path=None, lock_timeout=10.0,
+                           transport=None):
     '''
     Open a web browser to perform an OAuth webapp login flow and creates a 
     client wrapped around the resulting token. The client will be configured to 
@@ -865,11 +1008,21 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
                             finishing this login late reaches the next flow
                             served on it. A redirect for a different login,
                             told by its ``state``, is ignored, on either path.
+    :param shared: See the corresponding parameter to
+                   :func:`client_from_token_file`.
+    :param lock_path: See the corresponding parameter to
+                      :func:`client_from_token_file`.
+    :param lock_timeout: See the corresponding parameter to
+                         :func:`client_from_token_file`.
     :param transport: See the corresponding parameter to
                       :func:`client_from_access_functions`.
     '''
     api_key = __normalize_credential(api_key, 'api_key')
     app_secret = __normalize_credential(app_secret, 'app_secret')
+    # Decided before the browser opens or anything is asked, so a writer it
+    # cannot use is refused before the login.
+    token_write_func = _login_writer(token_path, token_write_func, shared,
+                                     lock_path, lock_timeout)
 
     if callback_timeout is None:
         callback_timeout = 0
@@ -1115,10 +1268,6 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
                     'can set a longer timeout by passing a value of ' +
                     'callback_timeout to client_from_login_flow.')
 
-        token_write_func = (
-            __make_update_token_func(token_path) if token_write_func is None
-            else token_write_func)
-
         return client_from_received_url(
                 api_key, app_secret, auth_context, received_url, 
                 token_write_func, asyncio, enforce_enums,
@@ -1130,7 +1279,9 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
 
 
 def client_from_token_file(token_path, api_key, app_secret, asyncio=False,
-                           enforce_enums=True, *, transport=None):
+                           enforce_enums=True, *, shared=False,
+                           lock_path=None, lock_timeout=10.0,
+                           transport=None):
     '''
     Returns a session from an existing token file. The session will perform
     an auth refresh as needed. It will also update the token on disk whenever
@@ -1150,16 +1301,36 @@ def client_from_token_file(token_path, api_key, app_secret, asyncio=False,
                           the client methods. Only do it if you know you really
                           need it. For most users, it is advised to use enums
                           to avoid errors.
+    :param shared: ``True`` for a token file other clients use too, in this
+                   process or another: a refresh, and the write it makes,
+                   hold a lock on the file; a token is written only if it is
+                   at least as new as the file's; and before refreshing, the
+                   client takes the file's token instead when another client
+                   has refreshed already. See :ref:`shared_token_file`.
+                   ``False``, the default, is as before, with no lock.
+    :param lock_path: The lock file, with ``shared``: by default the token
+                      file's real path with ``.lock`` added, created 0600.
+    :param lock_timeout: With ``shared``, how long to wait for the lock, in
+                         seconds. Past it, a refresh raises
+                         :class:`~schwaby.utils.TokenRefreshError`, kind
+                         ``transient``, having sent nothing, and a login's
+                         write raises
+                         :class:`~schwaby.utils.TokenFileLockTimeout`.
     :param transport: See the corresponding parameter to
                       :func:`client_from_access_functions`.
     '''
     api_key = __normalize_credential(api_key, 'api_key')
     app_secret = __normalize_credential(app_secret, 'app_secret')
 
-    load = __token_loader(token_path)
+    if _check_shared(shared, lock_path):
+        load, write = shared_token_file(token_path, lock_path=lock_path,
+                                        lock_timeout=lock_timeout)
+    else:
+        load = __token_loader(token_path)
+        write = __make_update_token_func(token_path)
 
     return client_from_access_functions(
-        api_key, app_secret, load, __make_update_token_func(token_path),
+        api_key, app_secret, load, write,
         asyncio=asyncio, enforce_enums=enforce_enums, transport=transport)
 
 
@@ -1169,7 +1340,9 @@ def client_from_token_file(token_path, api_key, app_secret, asyncio=False,
 
 def client_from_manual_flow(api_key, app_secret, callback_url, token_path,
                             asyncio=False, token_write_func=None,
-                            enforce_enums=True, *, transport=None):
+                            enforce_enums=True, *, shared=False,
+                            lock_path=None, lock_timeout=10.0,
+                            transport=None):
     '''
     Walks the user through performing an OAuth login flow by manually
     copy-pasting URLs, and returns a client wrapped around the resulting token.
@@ -1194,11 +1367,21 @@ def client_from_manual_flow(api_key, app_secret, callback_url, token_path,
                           the client methods. Only do it if you know you really
                           need it. For most users, it is advised to use enums
                           to avoid errors.
+    :param shared: See the corresponding parameter to
+                   :func:`client_from_token_file`.
+    :param lock_path: See the corresponding parameter to
+                      :func:`client_from_token_file`.
+    :param lock_timeout: See the corresponding parameter to
+                         :func:`client_from_token_file`.
     :param transport: See the corresponding parameter to
                       :func:`client_from_access_functions`.
     '''
     api_key = __normalize_credential(api_key, 'api_key')
     app_secret = __normalize_credential(app_secret, 'app_secret')
+    # Decided before anything is asked, so a writer it cannot use is refused
+    # before the login.
+    token_write_func = _login_writer(token_path, token_write_func, shared,
+                                     lock_path, lock_timeout)
     get_logger().info('Creating new token with callback URL \'%s\' ' +
                        'and token path \'%s\'', callback_url, token_path)
 
@@ -1236,10 +1419,6 @@ def client_from_manual_flow(api_key, app_secret, callback_url, token_path,
                'to stop seeing this message.').format(callback_url))
 
     received_url = input('Redirect URL> ').strip()
-
-    token_write_func = (
-        __make_update_token_func(token_path) if token_write_func is None
-        else token_write_func)
 
     return client_from_received_url(
             api_key, app_secret, auth_context, received_url, token_write_func, 
@@ -1346,12 +1525,12 @@ def client_from_access_functions(api_key, app_secret, token_read_func,
         session_class = OAuth2Client
         client_class = Client
 
-    return client_class(
+    return _share_session(client_class(
         api_key,
         _new_session(session_class, api_key, app_secret, token,
                      oauth_client_update_token, transport),
         token_metadata=metadata,
-        enforce_enums=enforce_enums)
+        enforce_enums=enforce_enums), token_write_func, metadata)
 
 
 ################################################################################
@@ -1520,6 +1699,7 @@ def client_from_received_url(
     register_redactions(token)
 
     # Set up token writing and perform the initial token write
+    shared_writer = token_write_func
     metadata_manager = TokenMetadata(token, int(time.time()), token_write_func)
     token_write_func = metadata_manager.wrapped_token_write_func()
     token_write_func(token)
@@ -1544,11 +1724,12 @@ def client_from_received_url(
         client_class = Client
 
     # Return a new session configured to refresh credentials
-    return client_class(
+    return _share_session(client_class(
         api_key,
         _new_session(session_class, api_key, app_secret, token,
                      oauth_client_update_token, transport),
-        token_metadata=metadata_manager, enforce_enums=enforce_enums)
+        token_metadata=metadata_manager, enforce_enums=enforce_enums),
+        shared_writer, metadata_manager)
 
 
 ################################################################################
@@ -1583,7 +1764,8 @@ def __running_in_notebook():
 def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False, 
                 enforce_enums=True, max_token_age=60*60*24*6.5,
                 callback_timeout=300.0, interactive=True,
-                requested_browser=None, *, transport=None):
+                requested_browser=None, *, shared=False, lock_path=None,
+                lock_timeout=10.0, transport=None):
     '''
     Convenient wrapper around :func:`client_from_login_flow` and
     :func:`client_from_token_file`. If ``token_path`` exists, loads the token
@@ -1637,6 +1819,12 @@ def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False,
     :param requested_browser: See the corresponding parameter to 
                               :func:`client_from_login_flow 
                               <client_from_login_flow>`.
+    :param shared: See the corresponding parameter to
+                   :func:`client_from_token_file`.
+    :param lock_path: See the corresponding parameter to
+                      :func:`client_from_token_file`.
+    :param lock_timeout: See the corresponding parameter to
+                         :func:`client_from_token_file`.
     :param transport: See the corresponding parameter to
                       :func:`client_from_access_functions`.
     '''
@@ -1655,6 +1843,8 @@ def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False,
         c = client_from_token_file(token_path, api_key, app_secret,
                                    asyncio=asyncio,
                                    enforce_enums=enforce_enums,
+                                   shared=shared, lock_path=lock_path,
+                                   lock_timeout=lock_timeout,
                                    transport=transport)
         logger.info('Loaded token from file \'%s\'', token_path)
 
@@ -1671,6 +1861,8 @@ def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False,
         c = client_from_manual_flow(api_key, app_secret, callback_url,
                                     token_path, asyncio=asyncio,
                                     enforce_enums=enforce_enums,
+                                    shared=shared, lock_path=lock_path,
+                                    lock_timeout=lock_timeout,
                                     transport=transport)
         logger.info(
             'Returning client fetched using manual flow, writing' +
@@ -1680,6 +1872,7 @@ def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False,
             api_key, app_secret, callback_url, token_path, asyncio=asyncio,
             enforce_enums=enforce_enums, callback_timeout=callback_timeout,
             requested_browser=requested_browser, interactive=interactive,
+            shared=shared, lock_path=lock_path, lock_timeout=lock_timeout,
             transport=transport)
 
         logger.info(

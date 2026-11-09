@@ -968,6 +968,8 @@ class DocCoverageTest(unittest.TestCase):
         'schwaby.contrib': 'a package with no contents of its own',
         'schwaby.orders': 'a package with no contents of its own',
         'schwaby._redact': 'private: the redaction every logger carries',
+        'schwaby._shared_token': 'private: the shared token file the auth '
+                                 'functions build on',
         'schwaby.version': 'holds the version string',
     }
 
