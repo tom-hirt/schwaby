@@ -5,6 +5,7 @@ not.'''
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -18,9 +19,30 @@ CHECK = os.path.join(ROOT, 'tools', 'light_check.py')
 HOOKS = os.path.join(ROOT, 'tools', 'hooks')
 
 
-#: The pieces of a blind kill, kept apart so that no tracked file carries
-#: one whole; the tree scan below would find it if one did.
-PARENT, KILL, UP = 'pp' + 'id', 'k' + 'ill', 'par' + 'ent'
+# The check refuses every commit without pyflakes, so each test that runs it
+# would fail on that alone; they skip where it is not installed, except in
+# CI.
+NEEDS_PYFLAKES = unittest.skipIf(
+    importlib.util.find_spec('pyflakes') is None
+    and os.environ.get('CI') != 'true',
+    'pyflakes not installed in this venv; [dev] installs it')
+
+
+#: The shapes the blind-kill check is held to, refused and let through,
+#: one line of code each: data, which the check does not judge.
+SHAPES = 'tests/testdata/blind_kill_shapes.txt'
+
+
+def blind_kill_shapes():
+    '''(the lines to refuse, the lines to let through), from SHAPES.'''
+    sections, current = {'refuse': [], 'pass': []}, None
+    with open(os.path.join(ROOT, SHAPES), encoding='utf-8') as f:
+        for line in f.read().splitlines():
+            if line in ('[refuse]', '[pass]'):
+                current = sections[line[1:-1]]
+            elif line.strip() and not line.startswith('#'):
+                current.append(line)
+    return sections['refuse'], sections['pass']
 
 #: A word for the tests to forbid, made up and spelled in pieces so that no
 #: tracked file carries it whole; the tree scan below would find it if one
@@ -149,6 +171,22 @@ class ForbiddenWordsTest(unittest.TestCase):
 
 class BlindKillTest(unittest.TestCase):
 
+    def test_each_shape_is_judged_as_listed(self):
+        judge = light_check().blind_kill
+        refuse, allow = blind_kill_shapes()
+        # Positive control: the list was read, both halves of it.
+        self.assertGreater(len(refuse), 50, 'the shapes to refuse were '
+                           'not read')
+        self.assertGreater(len(allow), 20, 'the shapes to let through were '
+                           'not read')
+        for line in refuse:
+            with self.subTest(refuse=line):
+                self.assertTrue(judge(line), 'a blind kill was let through')
+        for line in allow:
+            with self.subTest(allow=line):
+                self.assertIsNone(judge(line), 'a kill of what the code '
+                                  'started was refused')
+
     def test_no_file_in_the_tree_signals_what_it_did_not_start(self):
         # By the check's own function, so the two cannot disagree.
         lines = light_check().blind_kill_lines
@@ -160,10 +198,75 @@ class BlindKillTest(unittest.TestCase):
             seen += 1
             with open(path, 'rb') as f:
                 content = f.read()
-            found += [(rel, line) for line in lines(content)]
+            found += [(rel, line) for line in lines(content, rel)]
         # Positive control: the walk reached the files it is for.
         self.assertGreater(seen, 50, 'the walk read almost nothing')
         self.assertEqual([], found)
+
+
+# It runs a test of the check, which needs pyflakes to mean anything.
+@NEEDS_PYFLAKES
+class ScratchGitTest(unittest.TestCase):
+    '''A scratch repository's git never reaches the one around it.'''
+
+    def decoy(self, root):
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith('GIT_')}
+        env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
+
+        def git(*args):
+            return subprocess.run(['git', *args], cwd=root, env=env,
+                                  capture_output=True, check=True)
+        git('init', '-q')
+        git('config', 'user.name', 'test')
+        git('config', 'user.email', 'test@example.invalid')
+        with open(os.path.join(root, 'kept.txt'), 'w') as f:
+            f.write('kept\n')
+        git('add', 'kept.txt')
+        git('commit', '-q', '-m', 'decoy')
+        return {'GIT_DIR': os.path.join(root, '.git'),
+                'GIT_WORK_TREE': root,
+                'GIT_INDEX_FILE': os.path.join(root, '.git', 'index')}
+
+    def state(self, root):
+        with open(os.path.join(root, '.git', 'index'), 'rb') as f:
+            index = f.read()
+        head = subprocess.run(['git', '-C', root, 'rev-parse', 'HEAD'],
+                              env={k: v for k, v in os.environ.items()
+                                   if not k.startswith('GIT_')},
+                              capture_output=True, text=True).stdout
+        return head, index
+
+    def test_a_decoy_repository_named_around_it_is_left_alone(self):
+        from unittest import mock
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        decoy = self.decoy(tmp.name)
+        before = self.state(tmp.name)
+        # A test of the check, run as a hook would run it: with git's
+        # variables naming the repository around it.
+        case = LightCheckTest('test_a_new_warning_is_refused_and_named')
+        with mock.patch.dict(os.environ, decoy):
+            result = unittest.TestResult()
+            case.run(result)
+        self.assertEqual([], result.errors + result.failures,
+                         'the test itself failed with the decoy around it')
+        self.assertEqual(1, result.testsRun)
+        self.assertEqual(before, self.state(tmp.name),
+                         'a scratch repository\'s git reached the decoy')
+        # Positive control: the same variables, not removed, do reach it.
+        env = dict(os.environ, **decoy)
+        env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1',
+                   GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@example.invalid',
+                   GIT_COMMITTER_NAME='t',
+                   GIT_COMMITTER_EMAIL='t@example.invalid')
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        subprocess.run(['git', 'commit', '-q', '--allow-empty', '-m', 'x'],
+                       cwd=scratch.name, env=env, capture_output=True,
+                       check=True)
+        self.assertNotEqual(before, self.state(tmp.name),
+                            'the decoy could not be reached at all')
 
 
 class HooksTest(unittest.TestCase):
@@ -181,9 +284,7 @@ class HooksTest(unittest.TestCase):
 # fail on that alone. [dev] installs it, and a check that it does keeps
 # this skip from hiding anything where the suite is meant to run. In CI,
 # which sets CI=true, nothing skips: there a missing pyflakes fails.
-@unittest.skipIf(importlib.util.find_spec('pyflakes') is None
-                 and os.environ.get('CI') != 'true',
-                 'pyflakes not installed in this venv; [dev] installs it')
+@NEEDS_PYFLAKES
 class LightCheckTest(unittest.TestCase):
 
     def setUp(self):
@@ -276,91 +377,33 @@ class LightCheckTest(unittest.TestCase):
         self.assertEqual(0, code, out)
 
     def test_a_blind_kill_is_refused_and_named(self):
-        # Each on the third line, so the line named is the one carrying it.
-        cases = [('mod.py', 'os.get%s()' % PARENT),
-                 ('mod.py', 'psutil.Process().%s()' % PARENT),
-                 ('mod.py', 'psutil.Process().%s()' % UP),
-                 ('mod.py', "open('/proc/1/status')  # PP%s:" % PARENT[2:]),
-                 ('mod.py', 'os.%s(-1, signal.SIGKILL)' % KILL),
-                 ('mod.py', "subprocess.run('%s -9 -1', shell=True)" % KILL),
-                 ('mod.py', 'os.system("%s -9 -1")' % KILL),
-                 ('mod.py', "subprocess.run(['%s', '-9', '-1'])" % KILL),
-                 ('mod.py', 'subprocess.run(["%s", "--", "-1"])' % KILL),
-                 ('mod.py', 'os.%s(0, signal.SIGTERM)' % KILL),
-                 ('mod.py', 'os.%spg(0, 9)' % KILL),
-                 ('mod.py', 'os.%spg(os.getpgrp(), 9)' % KILL),
-                 ('mod.py', 'os.%spg(os.getpgid(0), 9)' % KILL),
-                 ('mod.py', 'os.%spg(os.getpgid(os.getpid()), 9)' % KILL),
-                 ('mod.py', 'os.%s(-os.getpgrp(), 9)' % KILL),
-                 ('mod.py', 'os.%s(-os.getpid(), 9)' % KILL),
-                 ('mod.py', "subprocess.run(['%s', '-s', 'TERM', '0'])" % KILL),
-                 ('mod.py', "subprocess.run(['%s', '-s', 'KILL', '-1'])"
-                  % KILL),
-                 ('mod.py', "subprocess.run(['/bin/%s', '-9', '0'])" % KILL),
-                 ('mod.py', "subprocess.run(['%s', '-9', '0'])" % KILL),
-                 ('mod.py', 'os.system("%s -9 0")' % KILL),
-                 ('mod.py', 'x = os.get%s() == 2' % PARENT),
-                 ('mod.py', 'x = 2 == os.get%s()' % PARENT),
-                 ('mod.py', 'x = 11 == os.get%s()' % PARENT),
-                 ('mod.py', 'x = os.get%s() == 1.5' % PARENT),
-                 ('mod.py', 'x = os.get%s() == 1 + n' % PARENT),
-                 ('mod.py', 'x = os.get%s() == 1 or os.%s(os.get%s(), 9)'
-                  % (PARENT, KILL, PARENT)),
-                 ('run.sh', '[ "$%s" -eq 2 ] && exit' % PARENT.upper()),
-                 ('run.sh', '%s -9 "$%s" = 1' % (KILL, PARENT.upper())),
-                 ('run.sh', 'echo $%s = 1' % PARENT.upper()),
-                 ('run.sh', '[[ $%s -eq 1+1 ]]' % PARENT.upper()),
-                 ('run.sh', '[ $%s -eq 1 ] || %s $%s'
-                  % (PARENT.upper(), KILL, PARENT.upper())),
-                 ('run.sh', 'echo $%s' % PARENT.upper()),
-                 ('run.sh', 'echo ${%s}' % PARENT.upper()),
-                 ('run.sh', 'ps -o %s= -p "$pid"' % PARENT),
-                 ('run.sh', '%s -9 -1' % KILL),
-                 ('run.sh', '%s -s KILL -1 2>/dev/null' % KILL),
-                 ('run.sh', '%s -9 -1>/dev/null' % KILL),
-                 ('run.sh', 'echo `%s -9 -1`' % KILL),
-                 ('run.sh', '%s 0' % KILL),
-                 ('run.sh', '%s -TERM 0 2>/dev/null' % KILL),
-                 ('run.sh', '%s -KILL 0  # all of it' % KILL),
-                 ('run.sh', "trap '%s -- -$$' EXIT" % KILL),
-                 ('run.sh', '%s -9 -$$' % KILL),
-                 ('run.sh', 'p%s -g 0' % KILL),
-                 ('run.sh', '%s -- -1' % KILL)]
-        for name, line in cases:
-            with self.subTest(line=line):
-                self.stage(name, 'import os\n\n%s\n' % line)
-                code, out = self.check()
-                self.assertEqual(1, code, 'a blind kill was let through: '
-                                 + out)
-                self.assertIn("%s:3: looks up its parent's pid" % name, out)
-                self.git('reset', '-q', '--hard')
-        # Positive control: a hangup sent to one pid, a kill of a group
-        # the caller started, one whose number only starts with 1, a probe
-        # of whether a pid exists, a list of the signals, a kill of itself
-        # alone, a parent pid read for a pid it recorded, an orphan's test
-        # of whether init adopted it, and another object's method of the
-        # same name are let through.
-        self.stage('run.sh', '%s -1 "$pid"\n%s -9 -"$pgid"\n%s -9 -12\n'
-                   '%s -0 "$pid"\n%s -s 0 "$pid"\n%s -0 0\n%s -l 0\n'
-                   '%s -9 $$\np%s -g 12\n'
-                   '[ "$%s" -eq 1 ] && exit\n[ $%s != 1 ] || exit\n'
-                   "test \"${%s}\" = '1'\n"
-                   % ((KILL,) * 9 + (PARENT.upper(),) * 3))
-        self.stage('mod.py', 'import os\nimport subprocess\n\n'
-                   '%s, pgid = 1, 2\nos.%s(-pgid, 9)\nos.%s(-12, 9)\n'
-                   "subprocess.run(['%s', '-1', str(pgid)])\n"
-                   "subprocess.run(['%s', '-9', '-12'])\n"
-                   'os.%s(pgid, 0)\nos.%spg(os.getpgid(pgid), 9)\n'
-                   'if os.get%s() == 1:\n    pass\n'
-                   'if os.get%s() != 1:\n    pass\n'
-                   'if 1 == os.get%s():\n    pass\n'
-                   'subprocess.%s(0, 1)\n'
-                   % (PARENT, KILL, KILL, KILL, KILL, KILL, KILL, PARENT,
-                      PARENT, PARENT, KILL))
+        # Every shape to refuse, one per line, in a file of their own: each
+        # line is named. The list's own path is not judged, so they are
+        # staged under another.
+        refuse, allow = blind_kill_shapes()
+        self.stage('shapes.txt', ''.join(line + '\n' for line in refuse))
+        code, out = self.check()
+        self.assertEqual(1, code, 'a blind kill was let through: ' + out)
+        named = sorted(int(n) for n in re.findall(
+            r'^light check: shapes\.txt:(\d+): signals a process', out,
+            re.M))
+        self.assertEqual(list(range(1, len(refuse) + 1)), named,
+                         'a blind kill was let through, or another line '
+                         'was blamed: ' + out)
+        self.git('reset', '-q', '--hard')
+        # Positive control: every shape to let through, together, is.
+        self.stage('shapes.txt', ''.join(line + '\n' for line in allow))
         code, out = self.check()
         self.assertEqual(0, code, out)
 
-    @unittest.skipIf(os.name == 'nt', 'no file name holds a colon there')
+    def test_the_list_of_shapes_is_not_judged_at_its_own_path(self):
+        refuse, _ = blind_kill_shapes()
+        content = ''.join(line + '\n' for line in refuse).encode()
+        lines = light_check().blind_kill_lines
+        self.assertEqual([], lines(content, SHAPES))
+        # Positive control: the same lines anywhere else are judged.
+        self.assertEqual(len(refuse), len(lines(content, 'other.txt')))
+
     def test_a_python_file_named_like_a_stage_is_checked(self):
         # ':0:x' is not ':x': read as the latter, '0:bad.py' would be stage 0
         # of 'bad.py', which does not exist, and pass unread.
@@ -713,6 +756,41 @@ class LightCheckTest(unittest.TestCase):
                     self.assertEqual(label, self.last_ran(),
                                      '%s ran another interpreter' % hook)
             env.pop('VIRTUAL_ENV', None)
+
+    def test_a_commit_of_named_paths_is_judged_on_its_own_index(self):
+        # `git commit -- PATH` commits PATH as the working tree has it,
+        # through an index of its own that git names to the hook: the
+        # check must read that one, not the clone's.
+        self.hook_checkout()
+        venv = tempfile.TemporaryDirectory()
+        self.addCleanup(venv.cleanup)
+        self.stand_in(venv.name, 'active')
+        self.env['VIRTUAL_ENV'] = venv.name
+        self.git('config', 'core.hooksPath', 'tools/hooks')
+        head = self.git('rev-parse', 'HEAD').stdout
+
+        def commit(*paths):
+            out = subprocess.run(['git', 'commit', '-q', '-m', 'x', '--',
+                                  *paths], cwd=self.repo, env=self.env,
+                                 capture_output=True, text=True)
+            return out.returncode, out.stdout + out.stderr
+
+        # Clean in the clone's index, a warning in the working tree.
+        self.write('mod.py', 'import os\nimport sys\n\n\ndef f():\n'
+                   '    return 1\n')
+        code, out = commit('mod.py')
+        self.assertNotEqual(0, code, 'a commit of a named path was judged '
+                            "on the clone's index: " + out)
+        self.assertIn("mod.py: 'sys' imported but unused", out)
+        self.assertEqual(head, self.git('rev-parse', 'HEAD').stdout)
+        # Positive control: a warning staged only in the clone's index is
+        # not in a commit that names another path, which goes through.
+        self.write('mod.py', 'import os\n\n\ndef f():\n    return 1\n')
+        self.stage('other.py', 'import sys\n')
+        self.write('mod.py', 'import os\n\n\ndef f():\n    return 2\n')
+        code, out = commit('mod.py')
+        self.assertEqual(0, code, 'a warning outside the commit was blamed '
+                         'on it: ' + out)
 
     def test_a_commit_or_merge_through_the_hooks_is_refused_and_named(self):
         # Through git itself: the check's answer is the commit's or the

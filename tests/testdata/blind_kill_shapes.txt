@@ -1,0 +1,129 @@
+# The shapes of a blind kill: one line of code each, judged alone by
+# tools/light_check.py. `$pid`, `pid`, `p` and `proc` are what the line's
+# code started and recorded; `$JOB` and `$PGID` a group it created and
+# recorded. Every line under "refuse" must be refused, and every line under
+# "pass" must pass. This file is data, not code, and the check does not
+# judge it.
+
+[refuse]
+# the parent, by getppid
+os.kill(os.getppid(), 9)
+os.kill(os.getppid(), signal.SIGTERM)
+os.kill(parent_pid, 9)
+# the parent, by $PPID
+kill -9 "$PPID"
+kill -KILL $PPID 2>/dev/null
+# the parent, by ps or /proc
+kill -9 "$(ps -o ppid= -p $$)"
+ps -o ppid= -p $$ | xargs kill
+kill -9 "$(awk '/PPid/ {print $2}' /proc/$$/status)"
+# the parent, by psutil
+os.kill(psutil.Process().ppid(), 9)
+psutil.Process().parent().kill()
+psutil.Process().parent().terminate()
+psutil.Process().parent().send_signal(9)
+# every process
+os.kill(-1, 15)
+kill -9 -1
+kill -- -1
+kill -n 9 -1
+kill -9 -01
+kill -9 -1>/dev/null
+# its own group, by number
+os.killpg(0, 9)
+os.kill(0, 9)
+kill 0
+kill -TERM 0
+kill -9 '0'
+kill 0 2>/dev/null
+kill -KILL -- 0 2>/dev/null
+kill -9 0 1234
+kill -9 0;
+trap 'kill 0' EXIT
+# its own group, by a call or the shell's pid
+os.killpg(os.getpgrp(), 9)
+os.killpg(os.getpgid(0), 9)
+os.killpg(os.getsid(0), 9)
+kill -- -$$
+kill -TERM -"$$"
+kill -TERM -${$}
+kill -TERM -- "-$(ps -o pgid= -p $$)"
+kill -- -$(ps -o pgrp= $$)
+# list and string forms
+subprocess.run(["kill", "0"])
+subprocess.run(["kill", "-9", "-1"])
+subprocess.run(["kill", "-9", str(pid), "0"])
+subprocess.run(["kill", str(os.getppid())])
+subprocess.run(("kill", "--", "-1"))
+subprocess.run(["kill -9 0"])
+subprocess.call("kill -9 -1", shell=True)
+run("kill -9 $pid"); run("kill 0")
+# a user or a group, by pkill or killall
+pkill -u "$USER"
+killall -u "$USER"
+pkill -U 1000
+pkill --uid 1000
+pkill --uid=1000
+pkill --euid 1000
+pkill --user "$USER"
+pkill -uroot
+pkill -fu "$USER" python
+pkill -xU 1000 sleep
+pkill -9fu "$USER"
+pkill -g 0
+pkill -g0
+pkill -fg 0 python
+pkill -s 0
+pkill -G 1000
+pkill --group 1000
+subprocess.run(["pkill", "-uroot"])
+pkill -P "$PPID"
+# a name shared with others
+pkill python
+killall sleep
+killall python3
+pkill -f pytest
+pkill -f a-name-no-other-process-has
+# a pid found by name
+kill "$(pgrep -f pytest)"
+kill $(pidof sleep)
+kill "$(cut -d' ' -f4 /proc/$pid/stat)"
+
+[pass]
+# a child it started
+os.kill(p.pid, signal.SIGKILL)
+proc.kill()
+kill -9 "$pid"
+subprocess.run(["kill", "-9", str(p.pid)])
+# a group it created and recorded
+os.killpg(p.pid, signal.SIGTERM)
+kill -TERM -- "-$JOB"
+kill -TERM -- "-$JOB" 2>/dev/null
+kill -TERM -- "-$PGID"
+# its own group, as its leader
+os.killpg(0, 9)  # own-group: setsid() above, getpgrp() == getpid()
+# live children of itself or of a process it started
+pkill -9 -P $$
+pkill -P "$pid"
+# itself
+os.kill(os.getpid(), signal.SIGTERM)
+# a recorded pid, verified by a helper
+kill_own "$pidfile"
+# the parent read, not signalled
+if os.getppid() == 1:
+parent = os.getppid()
+[ "$(ps -o ppid= -p $$)" = "$exec_pid" ]
+# a signal number, not a target
+kill -1 1234
+kill -1 "$pid"
+kill -s HUP "$pid"
+# a liveness check (signal 0)
+kill -0 "$pid"
+kill -s 0 "$pid"
+kill -0 0
+kill -0 -1
+os.kill(1234, 0)
+# not a process kill
+signal.pthread_kill(thread_id, signal.SIGUSR1)
+systemctl --user kill --signal=KILL "$unit"
+cmds = ["kill $pid", "kill -9 $child", "kill -TERM -- -$JOB"]

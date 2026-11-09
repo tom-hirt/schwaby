@@ -62,17 +62,16 @@ must parse and gain no pyflakes warning it did not already have, the diff
 must have no whitespace errors, and no staged file may carry, in its name or
 its content, a word on your clone's own forbidden list
 (``git config --add lightcheck.forbidden WORD``), which is kept in the clone's
-configuration so the repository never carries it. Nor may a staged file look
-up its parent's pid, or signal pid -1 or its own process group: an orphan's
-parent is whoever adopted it, often the session manager, so a kill aimed that
-way can end the desktop, and a script's own group can hold whatever started
-it, unless the script began a session of its own. Comparing the parent's
-pid with 1, the test of an orphan that exits, is let through as the whole
-comparison: in Python with ``==`` or ``!=``, either way round, and in a
-shell test (``[ "$PPID" -eq 1 ]``, ``[[ ]]`` or ``test``, with ``-ne``,
-``=`` or ``!=``). The whole file is read, so a line that only mentions such a
-lookup is refused too, and so is a ``ps`` walk down from a pid you recorded:
-keep the pids you start instead. Signal only a pid or a process group you
+configuration so the repository never carries it. Nor may a staged line
+signal a process it did not start and record: its parent, found by any
+lookup (an orphan's parent is whoever adopted it, often the session manager,
+so a kill aimed there can end the desktop), pid -1, its own process group
+(which can hold whatever started it) unless a comment on the line says
+``own-group:`` because it leads that group, a user's or a group's
+processes, or processes found by name. Reading the parent's pid without
+signalling it, and signal 0, are let through.
+``tests/testdata/blind_kill_shapes.txt`` lists every shape the check is
+tested on, refused and let through. Signal only a pid or a process group you
 started and recorded. A commit that changes a file under ``tests/`` is also
 told which red-proof entries test or mutate it; the release red-proof runs
 them (``RELEASING.md`` says more). Every commit is told its touched

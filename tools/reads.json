@@ -103,6 +103,7 @@
   "tests/conftest.py",
   "tests/light_check_test.py",
   "tests/test.py",
+  "tests/testdata/blind_kill_shapes.txt",
   "tests/utils.py",
   "tools/",
   "tools/hooks/",

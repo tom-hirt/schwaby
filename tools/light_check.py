@@ -17,19 +17,20 @@ commit will contain:
    fail every commit; requiring no new one catches the unused import or
    undefined name a change introduces;
  * `git diff --cached --check`: no whitespace errors or conflict markers;
- * no staged file signals a process it cannot have started: none looks up
-   its parent's pid (Python's os call, the shell's variable, ps's parent
-   column, the PPid line of /proc's status, psutil's methods), and none
-   sends a signal, in Python, in a shell line or as an argv, to pid -1,
-   which reaches every process the user owns, or to its own process group,
-   which holds the shell or test runner that started it unless it began a
-   session of its own. A parent found that way is whoever adopted an
-   orphan, often the session manager, whose children are the whole desktop.
-   Comparing the parent's pid with 1, the test of an orphan that exits, is
-   let through as the whole comparison: in Python with == or !=, either way
-   round, and in a shell test (`[ "$PPID" -eq 1 ]`, `[[ ]]` or `test`, with
-   -ne, = or !=). A kill names a pid or a process group its caller started
-   and recorded. Each line is named, by the whole file;
+ * no staged line signals a process it did not start and record: a pid
+   found rather than started (its parent's, by any lookup, or one found by
+   name or read from /proc), pid -1, which reaches every process the user
+   owns, its own process group, which can hold whatever started it, unless
+   the line says it leads that group (`own-group:` in a comment), or a
+   user's, a group's or a name's processes. A parent found that way is
+   whoever adopted an orphan, often the session manager, whose children are
+   the whole desktop. Reading the parent's pid without signalling it, a
+   signal to a pid or a group the code started and recorded, and signal 0,
+   which only asks whether a process exists, are let through. Each command
+   on a line is judged as the shell or Python would read it, every line of
+   the file is read, and each line refused is named. tests/testdata/
+   blind_kill_shapes.txt is the list of shapes the check is tested on, and
+   is not judged;
  * no staged file, by its name or its content, carries a word on this
    clone's forbidden list, `git config --add lightcheck.forbidden WORD`.
    The list lives in the clone's own configuration, so the repository
@@ -156,82 +157,250 @@ def forbidden_in(path, words):
             if word in name or word.encode('utf-8') in content]
 
 
-# Built from pieces so that this file, which names them, does not carry them.
-_PARENT, _KILL = 'pp' + 'id', 'k' + 'ill'
-# A call of os's kill, or of a bare one imported from it, not some other
-# object's method of the same name.
-_OS_KILL = r'(?:\bos\.|(?<![\w.]))' + _KILL
-# The shell's options before the target: `-s SIG` and `-n NUM` take a word.
-_OPTIONS = r'(?:\s+-[sn]\s+\S+|\s+-\S+)'
-# The same as argv words, each quoted.
-_Q = r'[\'"]'
-_ARGV = (_Q + r'(?:[^\'"\s]*/)?' + _KILL + _Q + r'\s*,\s*')
-_ARGV_OPTION = (r'(?:' + _Q + r'-[sn]' + _Q + r'\s*,\s*' + _Q + r'[^\'"]*'
-                + _Q + r'\s*,\s*|' + _Q + r'-[^\'"]*' + _Q + r'\s*,\s*)')
-_ARGV_END = _Q + r'\s*,?\s*[\])]'
-_GET_PARENT = r'(?:os\.)?get' + _PARENT + r'\(\)'
-# Where a Python comparison ends: nothing else is computed from it.
-_PY_END = r'(?=\s*(?:$|[):,;#]|\b(?:and|or|if|else)\b))'
-# A shell test of the variable: `[`, `[[` or `test`, then the variable,
-# then the comparison, then the end of the test.
-_SHELL_TEST = (r'(?:\[\[?|\btest)\s+["\']?\$\{?' + _PARENT.upper()
-               + r'\}?["\']?\s+(?:-eq|-ne|!?==?)\s+["\']?1(?![\w.$+*/-])'
-               r'["\']?(?=\s*(?:\]|;|&|\||\)|$))')
-BLIND_KILL = re.compile('|'.join([
-    # First, so that it takes the text before the lookups below can: a
-    # comparison of the parent's pid with init's, and with no other number,
-    # which only asks whether this process was orphaned. Matches of it are
-    # not refusals.
-    r'(?P<orphan_test>(?<![\w.])1\s*[=!]=\s*' + _GET_PARENT + _PY_END
-    + r'|' + _GET_PARENT + r'\s*[=!]=\s*1(?![\w.])' + _PY_END + r'|'
-    + _SHELL_TEST + r')',
-    # Python's os call for the parent's pid.
-    r'\bget' + _PARENT + r'\b',
-    # The shell's variable for it.
-    r'\$\{?' + _PARENT.upper() + r'\b',
-    # ps asked for the parent column, on the same line.
-    r'\bps\b.*\b' + _PARENT + r'\b',
-    # The status file's line for it.
-    r'\bPP' + _PARENT[2:] + r':',
-    # psutil's Process methods.
-    r'\.(?:' + _PARENT + r'|parent)\(\)',
-    # Python's kill of pid -1, of its own group as pid 0, or of the group
-    # its own pid or group number names.
-    _OS_KILL + r'(?:pg)?\(\s*(?:-1\b|0\b|-\s*(?:os\.)?get(?:pgrp|pid)\()',
-    _OS_KILL + r'pg\(\s*(?:os\.)?getpg(?:rp\(\)|id\(\s*(?:0|(?:os\.)?'
-    r'getpid\(\))\s*\))',
-    # The shell's kill of pid -1, after at least one option or `--`:
-    # `kill -1 PID` is a hangup sent to PID, not a kill of -1. It may sit
-    # in a quoted string or be followed by a redirection.
-    r'\b' + _KILL + _OPTIONS + r'+\s+-1(?![\w$-])',
-    # The shell's kill of its own group: the group its pid names, or 0 as
-    # the last word. `kill -0 PID` and `kill -s 0 PID` only ask whether PID
-    # exists, and `-l` and `-L` list signals. A quote straight after the 0
-    # closes the string the command sits in; one after a space opens the
-    # next word.
-    r'\b' + _KILL + _OPTIONS + r'*\s+[\'"]?-\$\$(?!\w)',
-    r'\b' + _KILL + r'(?:\s+-[sn]\s+\S+|\s+-(?![lL0]\b)\S+)*\s+0'
-    r'(?=[\'"`]|[ \t]*(?:$|[;&|)>#]|\d>))',
-    # pkill of the caller's own group.
-    r'\bp' + _KILL + r'\b.*\s-g\s*0\b',
-    # The same as an argv: -1 last after at least one option, or 0 last.
-    _ARGV + _ARGV_OPTION + r'+' + _Q + r'-1' + _ARGV_END,
-    _ARGV + _ARGV_OPTION + r'*' + _Q + r'0' + _ARGV_END,
-]).encode('ascii'), re.MULTILINE)
+# The words are built from pieces, so that this file, which names them,
+# does not read as using them.
+_K = 'k' + 'ill'
+_P = 'p' + _K
+_KA = _K + 'all'
+#: The lint's own list of shapes, for its tests: data, not code, and not
+#: judged.
+SHAPES = 'tests/testdata/blind_kill_shapes.txt'
+#: A line that signals its own group as that group's leader says so.
+OWN_GROUP_MARK = 'own-group' + ':'
+
+#: A word that sends a signal.
+_SENDS = re.compile(r'\b(?:%s(?:pg)?|%s|%s|terminate|send_signal)\b'
+                    % (_K, _P, _KA))
+#: A pid found other than by starting it: the parent's, in any spelling,
+#: a group number read back, or a pid looked up by name or from /proc.
+_FOUND = re.compile(
+    r'\bget' + 'pp' + r'id\b|\$\{?' + 'PP' + r'ID\b|\b' + 'pp' + r'id\b'
+    r'|\b' + 'PP' + r'id\b|\.parent\(\)|\bparent_pid\b|\bpg(?:id|rp)='
+    r'|\b(?:pgrep|pidof)\b|/proc/\S*/stat\b')
+#: The shell's three kill commands, by name or by path; not a method,
+#: an option, a variable, or part of a longer name.
+_SHELL = re.compile(r'(?<![\w.$-])(?:/[\w./-]*/)?(%s|%s|%s)(?![\w(-])'
+                    % (_KA, _P, _K))
+#: Python's kill and killpg, from os or imported bare: not another
+#: object's method.
+_PY = re.compile(r'(?:\bos\.|(?<![\w.]))%s(pg)?\(' % _K)
+#: An argv list or tuple naming the command first.
+_ARGV = re.compile(r'[\[(]\s*([\'"])(?:[^\'"\s]*/)?(%s|%s|%s)\1\s*,'
+                   % (_KA, _P, _K))
+#: What a target that names every process, or the caller's own group, is.
+_EVERY = re.compile(r'-0*1')
+_OWN = re.compile(r'-?0+|-\$\$|-\$\{\$\}')
+#: The caller's own group, as killpg's target; negated, as kill's.
+_OWN_CALL = (r'(?:os\.)?(?:getpgrp\(\)|getpid\(\)'
+             r'|getpgid\((?:0|(?:os\.)?getpid\(\))\)'
+             r'|getsid\((?:0|(?:os\.)?getpid\(\))\))')
+_OWN_GROUP_CALL = re.compile(_OWN_CALL)
+_OWN_NEGATED_CALL = re.compile('-' + _OWN_CALL)
+#: The signals the shell's commands take as an option, by number or name.
+_SIGNAL = re.compile(
+    r'-(?:\d+|(?:SIG)?(?:HUP|INT|QUIT|ILL|TRAP|ABRT|IOT|BUS|FPE|KILL|USR1'
+    r'|SEGV|USR2|PIPE|ALRM|TERM|STKFLT|CHLD|CONT|STOP|TSTP|TTIN|TTOU|URG'
+    r'|XCPU|XFSZ|VTALRM|PROF|WINCH|IO|POLL|PWR|SYS|RTMIN|RTMAX)(?:[+-]\d+)?)')
 
 
-def blind_kill_lines(content):
-    '''The line numbers at which content looks up its parent's pid, or
-    signals pid -1 or its own group.'''
-    return [content.count(b'\n', 0, m.start()) + 1
-            for m in BLIND_KILL.finditer(content)
-            if m.group('orphan_test') is None]
+def _words(text):
+    """The words of the command that starts text, as the shell would split
+    them, up to the end of the command: a separator, a closing quote, a
+    comment or the end of the line. Quotes are removed; a redirection is
+    left out."""
+    words, word, k = [], None, 0
+    while k < len(text):
+        c = text[k]
+        if c in ' \t':
+            if word is not None:
+                words.append(word)
+                word = None
+        elif c in ';&|)`\n' or (c == '#' and word is None):
+            break
+        elif c in '\'"':
+            opens = word is None or word.endswith(('-', '='))
+            end = text.find(c, k + 1) if opens else -1
+            if end < 0:
+                break
+            word = (word or '') + text[k + 1:end]
+            k = end
+        else:
+            word = (word or '') + c
+        k += 1
+    if word is not None:
+        words.append(word)
+    out = []
+    for w in words:
+        if re.match(r'\d*[<>]', w):
+            continue
+        out.append(re.split(r'[<>]', w)[0])
+    return out
+
+
+def _kill_words(words, marked):
+    """What a kill with these words reaches that it should not, or None."""
+    signal_set = zero = listing = False
+    targets, i = [], 0
+    while i < len(words):
+        w = words[i]
+        if w == '--' and not targets:
+            targets.extend(words[i + 1:])
+            break
+        if not signal_set and not targets and w in ('-s', '-n'):
+            zero = i + 1 < len(words) and words[i + 1] == '0'
+            signal_set, i = True, i + 2
+            continue
+        if not signal_set and not targets and w.startswith('--signal'):
+            value = (w.split('=', 1)[1] if '=' in w else
+                     words[i + 1] if i + 1 < len(words) else '')
+            zero, signal_set = value == '0', True
+            i += 1 if '=' in w else 2
+            continue
+        if not signal_set and not targets and w in ('-l', '-L', '--list',
+                                                    '--table'):
+            listing = True
+            break
+        if not signal_set and not targets and w.startswith('-') and len(w) > 1:
+            zero, signal_set = w == '-0', True
+        else:
+            targets.append(w)
+        i += 1
+    if zero or listing:
+        return None
+    for t in targets:
+        if _EVERY.fullmatch(t):
+            return 'every process'
+        if _OWN.fullmatch(t) and not marked:
+            return 'its own group'
+    return None
+
+
+def _pkill_words(words):
+    """What the pattern-matching kill with these words reaches that it
+    should not, or None: a user's or a group's processes, or processes
+    found by name. Only the children of a recorded parent (-P) are its
+    own."""
+    i = 0
+    while i < len(words):
+        w = words[i]
+        if w == '--':
+            return 'processes found by name' if words[i + 1:] else None
+        if w.startswith('--'):
+            name = w[2:].split('=', 1)[0]
+            if name in ('uid', 'euid', 'user', 'group', 'pgroup',
+                        'session'):
+                return "a user's or a group's processes"
+            if name in ('parent', 'signal') and '=' not in w:
+                i += 1
+        elif w.startswith('-') and len(w) > 1:
+            if _SIGNAL.fullmatch(w):
+                i += 1
+                continue
+            body = w[1:].lstrip('0123456789')
+            for j, c in enumerate(body):
+                if c in 'uUgGs':
+                    return "a user's or a group's processes"
+                if c == 'P':
+                    if not body[j + 1:]:
+                        i += 1
+                    break
+        else:
+            return 'processes found by name'
+        i += 1
+    return None
+
+
+def _argv_words(text):
+    """The words of an argv list or tuple that starts text, past its first:
+    a quoted word as it is, anything else as the expression it is."""
+    depth, items, item, k = 0, [], '', 0
+    quote = None
+    while k < len(text):
+        c = text[k]
+        if quote:
+            item += c
+            if c == quote:
+                quote = None
+        elif c in '\'"':
+            quote = c
+            item += c
+        elif c in '([{':
+            depth += 1
+            item += c
+        elif c in ')]}':
+            if depth == 0:
+                break
+            depth -= 1
+            item += c
+        elif c == ',' and depth == 0:
+            items.append(item.strip())
+            item = ''
+        else:
+            item += c
+        k += 1
+    if item.strip():
+        items.append(item.strip())
+    return [w[1:-1] if len(w) >= 2 and w[0] == w[-1] and w[0] in '\'"'
+            else w for w in items]
+
+
+def _py_args(text):
+    """The arguments of the call that starts text, split at its top-level
+    commas."""
+    return _argv_words(text)
+
+
+def blind_kill(line):
+    """Why a line of code signals what it did not start and record, or
+    None. A line that only reads its parent's pid, or signals a pid or a
+    group it started and recorded, is not one."""
+    marked = OWN_GROUP_MARK in line
+    if _SENDS.search(line) and _FOUND.search(line):
+        return 'a pid it did not start'
+    for m in _PY.finditer(line):
+        args = _py_args(line[m.end():])
+        target = args[0].replace(' ', '') if args else ''
+        if len(args) > 1 and args[1].strip() == '0':
+            continue
+        if _EVERY.fullmatch(target):
+            return 'every process'
+        own = (_OWN_GROUP_CALL if m.group(1) else _OWN_NEGATED_CALL)
+        if not marked and (target == '0' or own.fullmatch(target)):
+            return 'its own group'
+    for m in _ARGV.finditer(line):
+        words = _argv_words(line[m.end():])
+        why = (_kill_words(words, marked) if m.group(2) == _K else
+               "a user's or processes found by name" if m.group(2) == _KA
+               else _pkill_words(words))
+        if why:
+            return why
+    for m in _SHELL.finditer(line):
+        words = _words(line[m.end():])
+        if m.group(1) == _K:
+            why = _kill_words(words, marked)
+        elif m.group(1) == _KA:
+            why = "a user's processes or processes found by name"
+        else:
+            why = _pkill_words(words)
+        if why:
+            return why
+    return None
+
+
+def blind_kill_lines(content, path=None):
+    """The line numbers at which content signals what it did not start
+    and record. The lint's own list of shapes is not judged."""
+    if path == SHAPES:
+        return []
+    text = content.decode('utf-8', 'replace')
+    return [n for n, line in enumerate(text.splitlines(), 1)
+            if blind_kill(line)]
 
 
 def blind_kills_in(path):
-    '''The line numbers at which the staged file does what
-    blind_kill_lines finds.'''
-    return blind_kill_lines(blob(':0:' + path) or b'')
+    """The line numbers at which the staged file does what
+    blind_kill_lines finds."""
+    return blind_kill_lines(blob(':0:' + path) or b'', path)
 
 
 def compile_error(source, path):
@@ -348,9 +517,10 @@ def main():
                   'list' % (path, word))
             failed = True
         for line in blind_kills_in(path):
-            print("light check: %s:%d: looks up its parent's pid, or "
-                  'signals pid -1 or its own group; signal only a pid or '
-                  'group it started and recorded' % (path, line))
+            print('light check: %s:%d: signals a process it did not start '
+                  'and record (its parent, pid -1, its own group, a user\'s '
+                  'or a name\'s processes); signal only a pid or group it '
+                  'started and recorded' % (path, line))
             failed = True
     check = git('diff', '--cached', '--check', check=False)
     if check.returncode != 0:
