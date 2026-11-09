@@ -19,6 +19,7 @@ import os
 import socket
 import threading
 import time
+import types
 import urllib.parse
 
 import httpx2
@@ -129,9 +130,16 @@ def _unguarded(function):
     '''``function``, or, when it is a guard left from an earlier block, what
     the guards under it replaced. A block wraps that, so guards left one
     after another do not pile up into a chain that ends in RecursionError.'''
-    while hasattr(function, '_block_network_replaced'):
+    while _is_guard(function):
         function = function._block_network_replaced
     return function
+
+
+def _is_guard(function):
+    # Not hasattr: a Mock patched over the function answers that for any
+    # name, and the unwrapping would never end.
+    return (isinstance(function, types.FunctionType)
+            and '_block_network_replaced' in function.__dict__)
 
 
 def _install():

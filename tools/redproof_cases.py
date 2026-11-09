@@ -9084,6 +9084,15 @@ CASES += [
          'tests/testing_test.py::BlockNetworkTest::test_guards_left_one_after_another_do_not_pile_up',
          'the guards left piled up'),
 
+    # A guard is told by what it is, not by an attribute a Mock invents:
+    # a block over one would otherwise never start.
+    Case('block/a-mock-is-not-a-guard',
+         'schwaby/testing.py',
+         '    while _is_guard(function):\n',
+         "    while hasattr(function, '_block_network_replaced'):\n",
+         'tests/testing_test.py::BlockNetworkTest::test_a_block_over_a_mock_or_a_spy_starts_and_calls_it',
+         'a block over a mock never started'),
+
     Case('block/a-kept-connect-guard-refuses-nothing',
          'schwaby/testing.py',
          '    def guarded(self, address):\n'

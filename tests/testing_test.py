@@ -10,7 +10,9 @@ import inspect
 import json
 import os
 import socket
+import subprocess
 import sys
+import textwrap
 import tempfile
 import time
 import unittest
@@ -649,6 +651,40 @@ class BlockNetworkTest(unittest.TestCase):
                               wraps=socket.getaddrinfo):
                 with st.block_network():
                     self.assertTrue(socket.getaddrinfo('127.0.0.1', port))
+
+    @no_duplicates
+    def test_a_block_over_a_mock_or_a_spy_starts_and_calls_it(self):
+        # In a child process, so that a block which never starts fails this
+        # in seconds instead of hanging the suite. A mock patched over a
+        # guarded function, and a spy over a guard left from a block before.
+        code = textwrap.dedent("""
+            import socket, sys
+            from unittest.mock import patch
+            sys.path.insert(0, sys.argv[1])
+            import schwaby.testing as st
+            with patch.object(socket, 'getaddrinfo') as lookup:
+                with st.block_network():
+                    socket.getaddrinfo('127.0.0.1', 80)
+            with st.block_network():
+                held = patch.object(socket, 'getaddrinfo',
+                                    socket.getaddrinfo)
+                held.start()
+            held.stop()
+            with patch.object(socket, 'getaddrinfo',
+                              wraps=socket.getaddrinfo) as spy:
+                with st.block_network():
+                    socket.getaddrinfo('127.0.0.1', 80)
+            print(lookup.call_count, spy.call_count)
+        """)
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        try:
+            run = subprocess.run([sys.executable, '-I', '-c', code, root],
+                                 capture_output=True, text=True, timeout=20)
+        except subprocess.TimeoutExpired:
+            self.fail('a block over a mock never started')
+        self.assertEqual('', run.stderr)
+        self.assertEqual('1 1', run.stdout.strip(),
+                         'the mock or the spy was not called')
 
     @no_duplicates
     def test_it_decorates_a_test(self):
