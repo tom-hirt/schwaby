@@ -1,7 +1,8 @@
-# The shapes of a blind kill: one line of code each, judged alone by
+# The shapes of a blind kill, and of a blind delete: one line of code each, judged alone by
 # tools/light_check.py. `$pid`, `pid`, `p` and `proc` are what the line's
 # code started and recorded; `$JOB` and `$PGID` a group it created and
-# recorded. Every line under "refuse" must be refused, and every line under
+# recorded; `tmp_path`, `where` and a name given mkdtemp's or mktemp's
+# result are its own run's temp. Every line under "refuse" must be refused, and every line under
 # "pass" must pass. Under "refuse together" and "pass together", each block
 # between "---" lines is judged as a file of its own: a call or command
 # over several lines, or a pid kept in a name and signalled later. This
@@ -118,6 +119,30 @@ kill -9 1>&2 0
 kill -TERM 2>&1 -- -1
 kill -9 \-1
 kill -9 $'-1'
+# a list of parents holding init or the parent, or a pid read
+pkill -P $$,1
+pkill -P "$$,1"
+pkill -P "$pid,$PPID"
+pkill -P "$pid",1
+pkill -P $pid,$PPID
+pkill -P $1
+pkill -P $(cat pidfile)
+# a liveness check beside a blind kill
+os.kill(p.pid, 0); os.kill(-1, 9)
+os.kill(p.pid, 0); os.killpg(0, 9)
+os.kill(p.pid, 0); os.killpg(os.getpgrp(), 9)
+python3 -c "import os; os.kill($pid, 0); os.kill(os.getppid(), 9)"
+# Node
+process.kill(process.ppid, 'SIGTERM')
+process.kill(0)
+process.kill(-1, 'SIGKILL')
+# deletes in shared /tmp or the temp root
+shutil.rmtree("/tmp/ct-x")
+rm -rf /tmp/*
+find /tmp -name 'ct-*' -delete
+shutil.rmtree(tempfile.gettempdir())
+rm -rf "$TMPDIR"/*
+rm -rf "${TMPDIR:-/tmp}"/ct-*
 
 [pass]
 # a child it started
@@ -163,6 +188,17 @@ proc.kill()  # never the ppid
 os.killpg(pgid, signal.SIGTERM)  # pgid=proc.pid
 # a finder that kills nothing
 fuser -v 8080/tcp
+# the pid checked, then signalled
+if Path(f'/proc/{p.pid}').exists(): os.kill(p.pid, 9)
+# not code: a comment, a word in a string, a child terminated
+# never kill a pid you found with pgrep
+n = counts.get("kill", 0)
+if os.getppid() == 1: proc.terminate()
+# Node: a child's group, and its own as its leader
+process.kill(-child.pid, 'SIGTERM')
+process.kill(-process.pid)  // own-group: detached leader, checked
+# deletes of its own run's temp
+shutil.rmtree(tmp_path)
 
 [refuse together]
 parent = os.getppid()
@@ -189,6 +225,13 @@ subprocess.run([
 ---
 kill -9 \
   -1
+---
+gp=$(cut -d' ' -f4 /proc/$$/stat)
+pkill -P "$gp"
+---
+stale = [*where.glob("ct-*-*"), *Path("/tmp").glob("ct-*-*")]
+for p in stale:
+    shutil.rmtree(p)
 
 [pass together]
 parent = os.getppid()
@@ -205,3 +248,15 @@ os.killpg(
 ---
 me=$$
 kill -TERM $me
+---
+sleep 9 & pid=$!; pgrep -P $pid
+kill -9 "$pid"
+---
+d = tempfile.mkdtemp()
+shutil.rmtree(d)
+---
+work=$(mktemp -d)
+rm -rf "$work"
+---
+for p in where.glob("ct-*"):
+    shutil.rmtree(p)

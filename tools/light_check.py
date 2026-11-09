@@ -28,9 +28,11 @@ commit will contain:
    signal to a pid or a group the code started and recorded, and signal 0,
    which only asks whether a process exists, are let through. Each command
    on a line is judged as the shell or Python would read it, every line of
-   the file is read, and each line refused is named. tests/testdata/
+   the file is read, a pid kept in a name and a call over several lines
+   are judged too, and each line refused is named. Nor may a staged line
+   delete in shared /tmp or the temp root itself. tests/testdata/
    blind_kill_shapes.txt is the list of shapes the check is tested on, and
-   is not judged;
+   it and this file, whose patterns name every shape, are not judged;
  * no staged file, by its name or its content, carries a word on this
    clone's forbidden list, `git config --add lightcheck.forbidden WORD`.
    The list lives in the clone's own configuration, so the repository
@@ -165,6 +167,9 @@ _KA = _K + 'all'
 #: The lint's own list of shapes, for its tests: data, not code, and not
 #: judged.
 SHAPES = 'tests/testdata/blind_kill_shapes.txt'
+#: What the blind-kill check does not judge: that list, and this file, whose
+#: patterns and their docs name every shape and signal nothing.
+UNJUDGED = (SHAPES, 'tools/light_check.py')
 #: A line that signals its own group as that group's leader says so.
 OWN_GROUP_MARK = 'own-group' + ':'
 
@@ -193,7 +198,8 @@ _PY = re.compile(r'(?:\bos\.|(?<![\w.]))%s(pg)?\(' % _K)
 _NODE = re.compile(r'\bprocess\.%s\(\s*([^,)]*)' % _K)
 #: An argv list or tuple holding the command as a word, first or after a
 #: wrapper (sudo, env, ...).
-_ARGV = re.compile(r'(?:[\[(]|,)\s*([\'"])(?:[^\'"\s]*/)?(%s|%s|%s)\1\s*,'
+_ARGV = re.compile(r'(?:\[|(?<![\w)\]])\()\s*(?:([\'"])[^\'"]*\1\s*,\s*)*?'
+                   r'([\'"])(?:[^\'"\s]*/)?(%s|%s|%s)\2\s*,'
                    % (_KA, _P, _K))
 #: What a target that names every process, or the caller's own group, is.
 _EVERY = re.compile(r'-0*1')
@@ -341,9 +347,13 @@ def _pkill_words(words):
                     if not value:
                         value = words[i + 1] if i + 1 < len(words) else ''
                         i += 1
-                    # The children of init are every orphan on the machine.
-                    if value == '1':
+                    # The children of init are every orphan on the machine,
+                    # and a positional argument is a pid read, not started.
+                    parts = value.split(',')
+                    if '1' in parts:
                         return 'every orphan'
+                    if any(re.fullmatch(r'\$\{?\d+\}?', v) for v in parts):
+                        return 'a pid it did not start'
                     break
         else:
             return 'processes found by name'
@@ -406,6 +416,117 @@ def _code(line):
     return line
 
 
+def _balanced(text, k):
+    """The text inside the brackets that open at text[k], quotes kept."""
+    pairs = {'(': ')', '[': ']', '{': '}'}
+    depth, quote, j = 0, None, k
+    while j < len(text):
+        c = text[j]
+        if quote:
+            if c == quote:
+                quote = None
+        elif c in '\'"':
+            quote = c
+        elif c in pairs:
+            depth += 1
+        elif c in ')]}':
+            depth -= 1
+            if depth == 0:
+                return text[k + 1:j]
+        j += 1
+    return text[k + 1:]
+
+
+def _receiver(text, k):
+    """The expression a method is called on, ending just before text[k]."""
+    opens = {')': '(', ']': '['}
+    depth, j = 0, k - 1
+    while j >= 0:
+        c = text[j]
+        if c in opens:
+            depth += 1
+        elif c in '([':
+            if depth == 0:
+                break
+            depth -= 1
+        elif depth == 0 and not (c.isalnum() or c in '_.'):
+            break
+        j -= 1
+    return text[j + 1:k]
+
+
+def _command_text(text):
+    """A shell command's text up to the end of the command, with what is in
+    $(...) and quotes."""
+    depth, quote = 0, None
+    for j, c in enumerate(text[:_COMMAND_LIMIT]):
+        if quote:
+            if c == quote:
+                quote = None
+        elif c in '\'"':
+            quote = c
+        elif c == '(':
+            depth += 1
+        elif c == ')':
+            if depth == 0:
+                return text[:j]
+            depth -= 1
+        elif depth == 0 and c in ';|&\n':
+            return text[:j]
+    return text[:_COMMAND_LIMIT]
+
+
+def _signals_found(code, names):
+    """Whether code signals a pid found rather than started: the receiver
+    of a method that signals, the arguments of a call that does, a kill
+    command's own words, or what is piped into xargs kill."""
+    def found(text):
+        return bool(_FOUND.search(text) or names.uses_found(text))
+    for m in _SENDS.finditer(code):
+        start, end = m.span()
+        rest = code[end:]
+        args = _balanced(code, end) if rest[:1] == '(' else None
+        # Signal 0 only asks whether the pid exists.
+        if args is not None and _py_args(args + ')')[-1:] == ['0']:
+            continue
+        if start and code[start - 1] == '.':
+            if found(_receiver(code, start - 1)) or (args and found(args)):
+                return True
+            continue
+        if args is not None:
+            if found(args):
+                return True
+            continue
+        if found(_command_text(rest)):
+            return True
+        before = code[:start]
+        if re.search(r'\bxargs\b[^|]*$', before):
+            pipeline = re.split(r'[;&\n]', before)[-1]
+            if found(pipeline):
+                return True
+    return False
+
+
+#: A word that deletes.
+_DELETES = re.compile(r'\b(?:rmtree|remove|unlink|rmdir|removedirs)\('
+                      r'|(?<![\w.$/-])rm\s+-\w*[rRf]|\s-delete\b'
+                      r'|-exec\s+rm\b')
+#: A place every process shares: /tmp, or the temp root itself.
+_SHARED = re.compile(r'(?<![\w.~-])/tmp\b|\bgettempdir\(\)'
+                     r'|\$\{?TMPDIR\b')
+
+
+def _deletes_shared(code, names):
+    """Why code deletes in a place every process shares, or None: /tmp,
+    or the temp root itself, by path, by glob, or through a name holding
+    one. Its own run's temp directory is its own."""
+    if not _DELETES.search(code):
+        return None
+    if _SHARED.search(code) or names.uses_shared(code):
+        return 'a delete in shared /tmp or the temp root'
+    return None
+
+
 class Names:
     """The names a file assigns a found pid, or its own pid or group, to,
     so that a kill of one on a later line is judged as a kill of what it
@@ -417,18 +538,26 @@ class Names:
                          r'([A-Za-z_]\w*)=(\S*)')
     _OWN_PID = re.compile(r'["\']?\$(?:\$|\{\$\}|BASHPID)["\']?$')
 
+    _FOR = re.compile(r'\bfor\s+([A-Za-z_]\w*)\s+in\s+(.*)')
+
     def __init__(self, lines=()):
         self.found, self.own_pid, self.own_group = set(), set(), set()
+        self.shared = set()
         for line in lines:
             code = _code(line)
             for m in self._PY_SET.finditer(code):
-                self.note(m.group(1), m.group(2))
+                # One statement's value: a ; starts the next.
+                self.note(m.group(1), m.group(2).split(';', 1)[0])
             for m in self._SH_SET.finditer(code):
+                self.note(m.group(1), m.group(2).rstrip(';'))
+            for m in self._FOR.finditer(code):
                 self.note(m.group(1), m.group(2))
 
     def note(self, name, value):
         value = value.strip()
-        if _FOUND.search(value):
+        if _SHARED.search(value) or self.uses_shared(value):
+            self.shared.add(name)
+        if _FOUND.search(value) or self.uses_found(value):
             self.found.add(name)
         elif self._OWN_PID.match(value) or re.fullmatch(
                 r'(?:os\.)?getpid\(\)', value):
@@ -437,8 +566,12 @@ class Names:
             self.own_group.add(name)
 
     def uses_found(self, code):
-        return any(re.search(r'(?<![\w$])\$?\{?%s\b' % re.escape(n), code)
+        return any(re.search(r'(?<![\w.$])\$?\{?%s\b' % re.escape(n), code)
                    for n in self.found)
+
+    def uses_shared(self, code):
+        return any(re.search(r'(?<![\w.$])\$?\{?%s\b' % re.escape(n), code)
+                   for n in self.shared)
 
     def own(self, target, negated):
         """Whether target, a word or an expression, names the caller's own
@@ -458,12 +591,14 @@ def blind_kill(line, names=None):
     None. A line that only reads its parent's pid, or signals a pid or a
     group it started and recorded, is not one. names, from the rest of the
     file, says which names hold a found pid or its own pid or group."""
-    names = names or Names()
+    names = names or Names([line])
     marked = OWN_GROUP_MARK in line
     code = _code(line)
-    if _SENDS.search(code) and (_FOUND.search(code)
-                                or names.uses_found(code)):
+    if _signals_found(code, names):
         return 'a pid it did not start'
+    why = _deletes_shared(code, names)
+    if why:
+        return why
     for m in _FINDERS.finditer(line):
         if m.group(1) != 'fuser' or any(
                 w.startswith('-') and not w.startswith('--') and 'k' in w
@@ -488,8 +623,8 @@ def blind_kill(line, names=None):
             return 'its own group'
     for m in _ARGV.finditer(line):
         words = _argv_words(line[m.end():])
-        why = (_kill_words(words, marked) if m.group(2) == _K else
-               "a user's or processes found by name" if m.group(2) == _KA
+        why = (_kill_words(words, marked) if m.group(3) == _K else
+               "a user's or processes found by name" if m.group(3) == _KA
                else _pkill_words(words))
         if why:
             return why
@@ -552,7 +687,7 @@ def blind_kill_lines(content, path=None):
     and record: each line alone, each call or command that runs over
     several lines as one, and a kill of a name the file assigned a found
     pid to. The lint's own list of shapes is not judged."""
-    if path == SHAPES:
+    if path in UNJUDGED:
         return []
     lines = content.decode('utf-8', 'replace').split('\n')
     logical = _logical(lines)
@@ -685,8 +820,9 @@ def main():
         for line in blind_kills_in(path):
             print('light check: %s:%d: signals a process it did not start '
                   'and record (its parent, pid -1, its own group, a user\'s '
-                  'or a name\'s processes); signal only a pid or group it '
-                  'started and recorded' % (path, line))
+                  'or a name\'s processes), or deletes in shared /tmp or the '
+                  'temp root; signal only a pid or group it started and '
+                  'recorded, and delete only its own temp' % (path, line))
             failed = True
     check = git('diff', '--cached', '--check', check=False)
     if check.returncode != 0:

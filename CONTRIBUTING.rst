@@ -68,13 +68,16 @@ lookup (an orphan's parent is whoever adopted it, often the session manager,
 so a kill aimed there can end the desktop), pid -1, its own process group
 (which can hold whatever started it) unless a comment on the line says
 ``own-group:`` because it leads that group, a user's or a group's
-processes, or processes found by name. Reading the parent's pid without
-signalling it, and signal 0, are let through.
-``tests/testdata/blind_kill_shapes.txt`` lists every shape the check is
-tested on, refused and let through. Signal only a pid or a process group you
-started and recorded. A commit that changes a file under ``tests/`` is also
-told which red-proof entries test or mutate it; the release red-proof runs
-them (``RELEASING.md`` says more). Every commit is told its touched
+processes, or processes found by name. A pid kept in a name and signalled
+later, and a call or command over several lines, are judged too. Reading the
+parent's pid without signalling it, and signal 0, are let through. Nor may a
+staged line delete in shared ``/tmp`` or the temp root itself; delete only
+your own run's temp directory. ``tests/testdata/blind_kill_shapes.txt``
+lists every shape the check is tested on, refused and let through. Signal
+only a pid or a process group you started and recorded. A commit that
+changes a file under ``tests/`` is also told which red-proof entries test or
+mutate it; the release red-proof runs them (``RELEASING.md`` says more).
+Every commit is told its touched
 sentinels, the test modules that read a file it changes, from
 ``tools/reads.json``, and ``python -I -B tools/reads.py --touching main``
 names the whole branch's: run those before the branch merges. When a test's
