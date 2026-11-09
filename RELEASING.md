@@ -159,6 +159,17 @@ and the tag all happen there, and only fixes the release needs are added;
 then the branch merges back into `main`, and only after that is the release
 created and published.
 
+**Every release has a tier, named when it is asked for, and the tier sets
+its proof.** It is FULL when anything it ships changes sign-in, tokens or
+credentials (`schwaby/auth.py`), the order path (`schwaby/orders/`,
+`schwaby/client/`, and the order ids `schwaby/utils.py` reads), the data
+callers trade on (`schwaby/streaming.py`, the Decimal decoding in
+`schwaby/contrib/util.py`), secret redaction (`schwaby/_redact.py`), or how
+the package installs. Everything else, words, docs, tooling and tests, is
+LIGHT. No proof runs until the maintainer has called the release, and at
+most one batched release goes out a week; a FULL fix to trading or security
+may go any day.
+
 1. **The release branch**, from the base the release is of:
 
    ```shell
@@ -274,9 +285,13 @@ created and published.
    git push -u origin release/vX.Y.Z
    ```
 
-8. The release gate, on the release branch's head, on **3.11, 3.12 and
-   3.14**, one pass on each — 3.14 is the newest Python supported, and
-   `asyncio` semantics differ below 3.12 as well as above it:
+8. **The proof, by tier.** A LIGHT release runs no release gate and no
+   release red-proof: one pass of the suite on 3.14 and the build, `twine`
+   and docs checks below, on the release branch's head, with CI's run for
+   that commit. A FULL release runs the release gate, on the release
+   branch's head, on **3.11, 3.12 and 3.14**, one pass on each — 3.14 is the
+   newest Python supported, and `asyncio` semantics differ below 3.12 as
+   well as above it:
 
    ```shell
    pytest tests/ -q -n auto
@@ -301,15 +316,19 @@ created and published.
    it to pass: it is the only run on Windows and macOS before the release,
    since the publish workflow tests on Linux alone.
 
-   Then the release red-proof, at the commit you will tag:
+   Then, for a FULL release, the release red-proof at the commit you will
+   tag, of only the entries whose code changed since the last proven
+   release:
 
    ```shell
-   python -I -B tools/redproof.py
+   python -I -B tools/redproof.py --touching vPREV
    ```
 
-   It runs every entry: no verdict is kept from one run to the next. Every
-   entry must be RED, GREEN (declared), RED (declared GREEN) or REMOVED, and
-   no run may write to a tracked file or go unchecked for one.
+   Every entry it runs must be RED, GREEN (declared), RED (declared GREEN)
+   or REMOVED, and no run may write to a tracked file or go unchecked for
+   one. A change to the red-proof itself (`tools/redproof*.py`) is proven on
+   a sample of about twenty entries (`--shard 1/44`) and its own entries,
+   never by running them all again.
 
    **Nothing is tagged until the release is signed off.** The maintainer, or
    whoever they have delegated release approval to, approves it having seen the results above for the exact commit that will be tagged. A result from
@@ -320,9 +339,10 @@ created and published.
 
    **A fix the release needs goes onto the release branch, and nothing
    else does.** Push it at once, so CI's full matrix runs on the new head.
-   Re-prove only the fix's own scope there: the sentinels it touches and the
-   red-proof entries whose reads it changes, and, if it changes anything
-   under `schwaby/`, the release gate once more. The new head, with its CI
+   Re-prove only the fix's own scope there: the sentinels it touches and,
+   for a FULL release, the red-proof entries whose reads it changes and the
+   release gate once more if it changes anything under `schwaby/`. A proof
+   that fails re-proves only what failed, never the whole run. The new head, with its CI
    run passed, is the commit that is signed off and tagged. Work on `main`
    goes on meanwhile and is not taken in: the base stays fixed.
 
