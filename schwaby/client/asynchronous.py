@@ -1,8 +1,10 @@
-from .base import BaseClient
+from .base import BaseClient, TOKEN_PATH
 from ..debug import register_redactions_from_response
 from ..utils import LazyLog, TokenFreshness, TokenRefreshError
 
+import inspect
 import json
+import time
 from asyncio import sleep as _sleep
 
 
@@ -38,19 +40,10 @@ class AsyncClient(BaseClient):
         margin = self._check_margin(margin)
         if self._token_is_fresh(margin):
             return TokenFreshness.FRESH
-        # The session's own lock, which its refresh on the way past a
-        # request holds, so the two never send a refresh each; checked again
-        # inside it, since one may have just finished.
-        lock = getattr(self.session, '_token_refresh_lock', None)
-        if not hasattr(lock, '__aenter__'):
-            lock = _NoLock()
-        async with lock:
-            if self._token_is_fresh(margin):
-                return TokenFreshness.FRESH
-            with self._translate_token_errors():
-                await self.session.refresh_token(
-                        refresh_token=self._refresh_token_to_send())
-        return TokenFreshness.REFRESHED
+        _, refreshed = await _refresh_unless(
+                self, lambda: self._token_is_fresh(margin), attempt=1)
+        return (TokenFreshness.REFRESHED if refreshed
+                else TokenFreshness.FRESH)
 
     async def _get_request(self, path, params):
         dest = 'https://api.schwabapi.com' + path
@@ -59,7 +52,7 @@ class AsyncClient(BaseClient):
         self.logger.debug('Req %s: GET to %s, params=%s',
                 req_num, dest, LazyLog(lambda: json.dumps(params, indent=4)))
 
-        return await _send(self, req_num,
+        return await _send(self, req_num, 'GET', path,
                            lambda: self.session.get(dest, params=params),
                            safe=True)
 
@@ -70,7 +63,7 @@ class AsyncClient(BaseClient):
         self.logger.debug('Req %s: POST to %s, json=%s',
                 req_num, dest, LazyLog(lambda: json.dumps(data, indent=4)))
 
-        return await _send(self, req_num,
+        return await _send(self, req_num, 'POST', path,
                            lambda: self.session.post(dest, json=data),
                            safe=False)
 
@@ -81,7 +74,7 @@ class AsyncClient(BaseClient):
         self.logger.debug('Req %s: PUT to %s, json=%s',
                 req_num, dest, LazyLog(lambda: json.dumps(data, indent=4)))
 
-        return await _send(self, req_num,
+        return await _send(self, req_num, 'PUT', path,
                            lambda: self.session.put(dest, json=data),
                            safe=False)
 
@@ -91,41 +84,92 @@ class AsyncClient(BaseClient):
         req_num = self._req_num()
         self.logger.debug('Req %s: DELETE to %s', req_num, dest)
 
-        return await _send(self, req_num,
+        return await _send(self, req_num, 'DELETE', path,
                            lambda: self.session.delete(dest), safe=False)
 
 
 # A function, not a method: every coroutine method of the client is one a
 # caller awaits, and this is only ever awaited by them.
-async def _send(client, req_num, send, *, safe):
-    '''Sends ``client``'s request with ``send()``, and, for a ``safe``
-    request (a GET), again after a rate limit when
-    :meth:`~schwaby.client.Client.set_rate_limit_retry` asked for it: after
-    a 429 response, and after a token refresh answered with 429, which sent
-    nothing.'''
-    attempt = 0
+async def _send(client, req_num, method, path, send, *, safe):
+    '''Sends ``client``'s request with ``send()``, through the pace when
+    there is one, and, for a ``safe`` request (a GET), again after a rate
+    limit when :meth:`~schwaby.client.Client.set_rate_limit_retry` asked for
+    it: after a 429 response, and after a token refresh answered with 429,
+    which sent nothing.'''
+    attempt, waited = 0, 0.0
     while True:
         attempt += 1
+        waited += await _call_pace(client, 'api', method, path, attempt)
         try:
+            # With a pace, the refresh the session would make is made here,
+            # through it, just before the session would.
+            if client._pace is not None and client._token_due():
+                paced, _ = await _refresh_unless(
+                        client, lambda: not client._token_due(),
+                        attempt=attempt)
+                waited += paced
             with client._translate_token_errors():
                 resp = await send()
         except TokenRefreshError as e:
             # An order is never held back: one sent late could fill at a
             # price its caller never saw, or after it was placed again.
-            wait = client._refresh_retry_wait(e, attempt) if safe else None
+            wait = (client._refresh_retry_wait(e, attempt, waited) if safe
+                    else None)
             if wait is None:
                 raise
             client._log_retry(req_num, 'its token refresh was', wait,
                               attempt)
             await _sleep(wait)
+            waited += wait
             continue
         client._log_response(resp, req_num)
         register_redactions_from_response(resp)
-        wait = client._response_retry_wait(resp, attempt) if safe else None
+        wait = (client._response_retry_wait(resp, attempt, waited) if safe
+                else None)
         if wait is None:
             return resp
         client._log_retry(req_num, 'it was', wait, attempt)
         await _sleep(wait)
+        waited += wait
+
+
+async def _refresh_unless(client, fresh, *, attempt):
+    '''Refreshes ``client``'s token through the pace, unless ``fresh()``
+    finds it fresh once the lock is held. Returns the seconds the pace took,
+    and whether it refreshed.'''
+    # A token with no refresh token is dead before the pace is asked.
+    with client._translate_token_errors():
+        client._refresh_token_to_send()
+    # Paced before the lock: the session takes it for every request, so a
+    # pace that waits inside it would hold every call up, orders included.
+    paced = await _call_pace(client, 'token_refresh', 'POST', TOKEN_PATH,
+                             attempt)
+    # The session's own lock, which its refresh on the way past a request
+    # holds, so the two never send a refresh each; checked again inside it,
+    # since one may have just finished.
+    lock = getattr(client.session, '_token_refresh_lock', None)
+    if not hasattr(lock, '__aenter__'):
+        lock = _NoLock()
+    async with lock:
+        if fresh():
+            return paced, False
+        with client._translate_token_errors():
+            await client.session.refresh_token(
+                    refresh_token=client._refresh_token_to_send())
+    return paced, True
+
+
+async def _call_pace(client, purpose, method, path, attempt):
+    '''Calls ``client``'s pace, when there is one, waiting for what it
+    returns when that is awaitable, and returns the seconds it took.'''
+    pace = client._pace
+    if pace is None:
+        return 0.0
+    started = time.monotonic()
+    result = pace(client._pace_request(purpose, method, path, attempt))
+    if inspect.isawaitable(result):
+        await result
+    return time.monotonic() - started
 
 
 class _NoLock:

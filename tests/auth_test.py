@@ -3333,3 +3333,72 @@ class EnsureTokenFreshSessionTest(unittest.TestCase):
             asyncio.run(both())
         self.assertEqual([self.TOKEN_URL], self.posts,
                          'two calls at once each sent a refresh')
+
+
+class PacedSessionTest(unittest.TestCase):
+    """A pace on a real session: the refresh the session would have made is
+    made through the pace, once, and the session does not make another."""
+
+    QUOTES = '/marketdata/v1/AAPL/quotes'
+
+    # The helpers alone; inheriting would run that class's tests again.
+    TOKEN_URL = EnsureTokenFreshSessionTest.TOKEN_URL
+    setUp = EnsureTokenFreshSessionTest.setUp
+    stored = EnsureTokenFreshSessionTest.stored
+    answer = EnsureTokenFreshSessionTest.answer
+    client = EnsureTokenFreshSessionTest.client
+
+    def test_a_due_token_is_refreshed_once_through_the_pace(self):
+        import httpx2
+        told = []
+        with patch.object(httpx2.HTTPTransport, 'handle_request',
+                          lambda transport, request: self.answer(request)):
+            c = self.client()
+            c.set_pace(told.append)
+            self.assertEqual(200, c.get_quote('AAPL').status_code)
+        self.assertEqual([self.TOKEN_URL, self.QUOTES], self.posts,
+                         'the session refreshed again, past the pace')
+        self.assertEqual(['api', 'token_refresh'],
+                         [r.purpose for r in told])
+        self.assertEqual('NEW', self.written[0]['token']['access_token'])
+
+    def test_an_async_pace_paces_an_async_session(self):
+        import httpx2
+        told = []
+
+        async def answer(transport, request):
+            await asyncio.sleep(0)
+            return self.answer(request)
+
+        async def pace(request):
+            await asyncio.sleep(0)
+            told.append(request.purpose)
+
+        async def run():
+            c = self.client(asyncio_=True)
+            c.set_pace(pace)
+            return (await c.get_quote('AAPL')).status_code
+        with patch.object(httpx2.AsyncHTTPTransport, 'handle_async_request',
+                          answer):
+            self.assertEqual(200, asyncio.run(run()))
+        self.assertEqual([self.TOKEN_URL, self.QUOTES], self.posts,
+                         'the session refreshed again, past the pace')
+        self.assertEqual(['api', 'token_refresh'], told)
+
+    def test_a_rate_limited_paced_refresh_is_retried_for_a_get(self):
+        import httpx2
+        self.answers = [(429, None)]
+        told = []
+        with patch.object(httpx2.HTTPTransport, 'handle_request',
+                          lambda transport, request: self.answer(request)), \
+                patch('schwaby.client.synchronous._sleep') as sleep:
+            c = self.client()
+            c.set_pace(told.append)
+            c.set_rate_limit_retry(2)
+            self.assertEqual(200, c.get_quote('AAPL').status_code)
+        self.assertEqual([self.TOKEN_URL, self.TOKEN_URL, self.QUOTES],
+                         self.posts)
+        self.assertEqual([('api', 1), ('token_refresh', 1), ('api', 2),
+                          ('token_refresh', 2)],
+                         [(r.purpose, r.attempt) for r in told])
+        sleep.assert_called_once_with(1.0)

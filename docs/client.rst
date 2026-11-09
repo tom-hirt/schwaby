@@ -278,11 +278,49 @@ without this.
 
    **The wait blocks.** The synchronous client's thread, or the
    :class:`~schwaby.client.AsyncClient` coroutine making the call, waits
-   through each retry, up to ``max_wait`` seconds a time and ``retries``
-   times a call. Code with a deadline of its own should set ``max_wait``
-   and ``retries`` inside it, or leave this off and handle the 429.
+   through each retry, up to ``max_wait`` seconds a time and ``max_sleep``
+   in all. A read that must not wait, such as one on an order path, is made
+   inside ``no_rate_limit_retry()``, and is then not retried at all:
+
+   .. code-block:: python
+
+     with client.no_rate_limit_retry():
+         client.get_orders_for_account(account_hash)
+
+Retries are one layer. Code that turns this on removes its own retry of a
+429, or the attempts multiply.
 
 .. automethod:: schwaby.client.Client.set_rate_limit_retry
+.. automethod:: schwaby.client.Client.no_rate_limit_retry
+
+A client can also be paced by the caller's own rate limiter, one shared
+across its threads or clients, with lanes or priorities of its own. The
+client calls it before every request it sends, a retry or a token refresh
+included, and tells it what is about to go:
+
+.. code-block:: python
+
+  def pace(request):            # a schwaby.PaceRequest
+      limiter.wait(lane=request.tag or request.purpose)
+
+  client.set_pace(pace)
+
+  with client.pace_tag('urgent'):
+      client.get_quotes(symbols)
+
+An :class:`~schwaby.client.AsyncClient` awaits what the pace returns when it
+is awaitable, so an ``async def`` pace works there.
+
+.. note::
+
+   The pace is called with the token's refresh lock held by no one, so a
+   pace that waits holds up only the call it was asked about. Code that
+   sets a pace stops pacing those calls itself, or each is paced twice.
+
+.. automethod:: schwaby.client.Client.set_pace
+.. automethod:: schwaby.client.Client.pace_tag
+.. autoclass:: schwaby.utils.PaceRequest
+  :members: method, path, purpose, attempt, tag
 
 
 +++++++++

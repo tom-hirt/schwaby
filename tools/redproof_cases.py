@@ -8906,18 +8906,18 @@ CASES += [
     Case('fresh/a-second-call-finds-the-token-fresh',
          'schwaby/client/synchronous.py',
          '        with self._refresh_lock:\n'
-         '            if self._token_is_fresh(margin):\n'
-         '                return TokenFreshness.FRESH\n',
+         '            if fresh():\n'
+         '                return paced, False\n',
          '        with self._refresh_lock:\n'
          '            if False:\n'
-         '                return TokenFreshness.FRESH\n',
+         '                return paced, False\n',
          'tests/auth_test.py::EnsureTokenFreshSessionTest'
          '::test_two_calls_at_once_refresh_once',
          'two calls at once each sent a refresh'),
     Case('fresh/the-async-client-holds-the-sessions-lock',
          'schwaby/client/asynchronous.py',
-         "        lock = getattr(self.session, '_token_refresh_lock', None)\n",
-         "        lock = None\n",
+         "    lock = getattr(client.session, '_token_refresh_lock', None)\n",
+         "    lock = None\n",
          'tests/auth_test.py::EnsureTokenFreshSessionTest'
          '::test_two_async_calls_at_once_refresh_once',
          'two calls at once each sent a refresh'),
@@ -9160,17 +9160,19 @@ CASES += [
 CASES += [
     Case('rate-limit/an-order-answered-429-is-never-sent-again',
          'schwaby/client/synchronous.py',
-         '            wait = self._response_retry_wait(resp, attempt) if safe '
-         'else None\n',
-         '            wait = self._response_retry_wait(resp, attempt)\n',
+         '            wait = (self._response_retry_wait(resp, attempt, waited) '
+         'if safe\n'
+         '                    else None)\n',
+         '            wait = self._response_retry_wait(resp, attempt, waited)\n',
          'tests/client_test.py::ClientTest'
          '::test_an_order_answered_429_is_never_sent_again',
          'an order Schwab answered was sent again'),
     Case('rate-limit/an-async-order-answered-429-is-never-sent-again',
          'schwaby/client/asynchronous.py',
-         '        wait = client._response_retry_wait(resp, attempt) if safe '
-         'else None\n',
-         '        wait = client._response_retry_wait(resp, attempt)\n',
+         '        wait = (client._response_retry_wait(resp, attempt, waited) '
+         'if safe\n'
+         '                else None)\n',
+         '        wait = client._response_retry_wait(resp, attempt, waited)\n',
          'tests/client_test.py::AsyncClientTest'
          '::test_an_order_answered_429_is_never_sent_again',
          'an order Schwab answered was sent again'),
@@ -9183,9 +9185,9 @@ CASES += [
          'a 429 was retried when no retry was asked'),
     Case('rate-limit/a-retry-after-beyond-max-wait-is-not-retried',
          'schwaby/client/base.py',
-         '        if asked > self._rate_limit_max_wait:\n'
+         '        elif asked > self._rate_limit_max_wait:\n'
          '            return None\n',
-         '        if False:\n'
+         '        elif False:\n'
          '            return None\n',
          'tests/client_test.py::ClientTest'
          '::test_a_retry_after_beyond_max_wait_returns_the_429',
@@ -9206,17 +9208,19 @@ CASES += [
          'the retries did not stop where asked'),
     Case('rate-limit/an-order-is-not-held-back-for-a-refresh',
          'schwaby/client/synchronous.py',
-         '                wait = self._refresh_retry_wait(e, attempt) if safe '
-         'else None\n',
-         '                wait = self._refresh_retry_wait(e, attempt)\n',
+         '                wait = (self._refresh_retry_wait(e, attempt, waited) '
+         'if safe\n'
+         '                        else None)\n',
+         '                wait = self._refresh_retry_wait(e, attempt, waited)\n',
          'tests/client_test.py::ClientTest'
          '::test_an_order_whose_refresh_is_rate_limited_is_not_held_back',
          'an order was held back for a rate-limited refresh'),
     Case('rate-limit/an-async-order-is-not-held-back-for-a-refresh',
          'schwaby/client/asynchronous.py',
-         '            wait = client._refresh_retry_wait(e, attempt) if safe '
-         'else None\n',
-         '            wait = client._refresh_retry_wait(e, attempt)\n',
+         '            wait = (client._refresh_retry_wait(e, attempt, waited) '
+         'if safe\n'
+         '                    else None)\n',
+         '            wait = client._refresh_retry_wait(e, attempt, waited)\n',
          'tests/client_test.py::AsyncClientTest'
          '::test_an_order_whose_refresh_is_rate_limited_is_not_held_back',
          'an order was held back for a rate-limited refresh'),
@@ -9236,4 +9240,80 @@ CASES += [
          'tests/client_test.py::ClientTest'
          '::test_a_refresh_refused_otherwise_is_raised_at_once',
          'refused other than by a rate limit was retried'),
+]
+
+# The pace and the limits on the retry. What must hold: no call waits past
+# max_sleep, the pace's time included; a call inside no_rate_limit_retry is
+# never retried, and the scope is the one client's; a refresh with a pace is
+# made through it, on either client; a dead token is found before the pace
+# is asked; an awaitable from the pace is waited for, and the synchronous
+# client refuses one rather than sending unpaced.
+CASES += [
+    Case('pace/no-call-waits-past-max-sleep',
+         'schwaby/client/base.py',
+         '        if waited + wait > self._rate_limit_max_sleep:\n',
+         '        if False:\n',
+         'tests/client_test.py::ClientTest::test_a_call_never_waits_past_max_sleep',
+         'a call waited past max_sleep'),
+    Case('pace/the-paces-time-counts-toward-max-sleep',
+         'schwaby/client/synchronous.py',
+         "            waited += self._call_pace('api', method, path, attempt)\n",
+         "            self._call_pace('api', method, path, attempt)\n",
+         'tests/client_test.py::ClientTest::test_the_paces_time_counts_toward_max_sleep',
+         "the pace's time was not counted"),
+    Case('pace/the-async-paces-time-counts-toward-max-sleep',
+         'schwaby/client/asynchronous.py',
+         "        waited += await _call_pace(client, 'api', method, path, attempt)\n",
+         "        await _call_pace(client, 'api', method, path, attempt)\n",
+         'tests/client_test.py::AsyncClientTest::test_the_paces_time_counts_toward_max_sleep',
+         "the pace's time was not counted"),
+    Case('pace/no-rate-limit-retry-turns-the-retry-off',
+         'schwaby/client/base.py',
+         '        return (self._rate_limit_retries > 0\n'
+         '                and self._scope_key not in _retry_off.get())\n',
+         '        return self._rate_limit_retries > 0\n',
+         'tests/client_test.py::ClientTest::test_no_rate_limit_retry_turns_the_retry_off_inside_it',
+         'a call inside no_rate_limit_retry was retried'),
+    Case('pace/no-rate-limit-retry-is-the-one-clients',
+         'schwaby/client/base.py',
+         '                and self._scope_key not in _retry_off.get())\n',
+         '                and not _retry_off.get())\n',
+         'tests/client_test.py::ClientTest::test_no_rate_limit_retry_is_this_clients_alone',
+         '200 != 429'),
+    Case('pace/a-due-token-is-refreshed-through-the-pace',
+         'schwaby/client/synchronous.py',
+         '                if self._pace is not None and self._token_due():\n',
+         '                if False:\n',
+         'tests/client_test.py::ClientTest::test_with_a_pace_a_due_token_is_refreshed_through_it',
+         'a refresh was not paced'),
+    Case('pace/an-async-due-token-is-refreshed-through-the-pace',
+         'schwaby/client/asynchronous.py',
+         '            if client._pace is not None and client._token_due():\n',
+         '            if False:\n',
+         'tests/client_test.py::AsyncClientTest::test_with_a_pace_a_due_token_is_refreshed_through_it',
+         'a refresh was not paced'),
+    Case('pace/a-dead-token-is-found-before-the-pace',
+         'schwaby/client/synchronous.py',
+         '        # A token with no refresh token is dead before the pace is asked.\n'
+         '        with self._translate_token_errors():\n'
+         '            self._refresh_token_to_send()\n',
+         '        # A token with no refresh token is dead before the pace is asked.\n',
+         'tests/client_test.py::ClientTest::test_a_due_token_with_no_refresh_token_is_dead_before_the_pace',
+         "'token_refresh'"),
+    Case('pace/an-awaitable-from-the-pace-is-awaited',
+         'schwaby/client/asynchronous.py',
+         '    if inspect.isawaitable(result):\n'
+         '        await result\n',
+         '    if False:\n'
+         '        await result\n',
+         'tests/client_test.py::AsyncClientTest::test_an_awaitable_from_the_pace_is_awaited',
+         'the request went before the pace let it'),
+    Case('pace/client-refuses-a-coroutine-pace',
+         'schwaby/client/synchronous.py',
+         '        if inspect.isawaitable(result):\n'
+         '            if inspect.iscoroutine(result):\n',
+         '        if False:\n'
+         '            if inspect.iscoroutine(result):\n',
+         'tests/client_test.py::ClientTest::test_a_coroutine_pace_is_refused_and_sends_nothing',
+         'TypeError not raised'),
 ]

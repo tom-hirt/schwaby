@@ -8,6 +8,7 @@ from authlib.integrations.base_client.errors import (
 from enum import Enum
 
 import contextlib
+import contextvars
 import datetime
 import email.utils
 import inspect
@@ -22,7 +23,7 @@ import warnings
 
 from schwaby.orders.generic import OrderBuilder
 
-from ..utils import (EnumEnforcer, TokenRefreshError, _expiry_authlib_acts_on,
+from ..utils import (EnumEnforcer, PaceRequest, TokenRefreshError, _expiry_authlib_acts_on,
                      _format_iso_instant, _is_instance, _qualified_type_name,
                      _refresh_kind, _refusal_text, _sent_code,
                      _token_endpoint_answer)
@@ -55,6 +56,20 @@ def _retry_after_seconds(value):
     now = datetime.datetime.now(datetime.timezone.utc)
     return max(0.0, (when - now).total_seconds())
 
+
+# The token endpoint's path, as a pace is told it.
+TOKEN_PATH = '/v1/oauth/token'
+
+# The clients whose retry no_rate_limit_retry() has turned off, and the tag
+# each pace_tag() has set, in this thread or asyncio task. Module level, as
+# a ContextVar must be; each client is a key in them.
+_retry_off = contextvars.ContextVar('schwaby_retry_off', default=frozenset())
+_pace_tags = contextvars.ContextVar('schwaby_pace_tags', default=None)
+
+# With a pace, the client refreshes a token itself this long before the
+# session would, so that the session never finds one to refresh in the
+# moment between the client's check and the request.
+_REFRESH_AHEAD = 1.0
 
 
 ##########################################################################
@@ -95,6 +110,10 @@ class BaseClient(EnumEnforcer):
         # A rate-limited request is not retried unless asked for.
         self._rate_limit_retries = 0
         self._rate_limit_max_wait = 60.0
+        self._rate_limit_max_sleep = 120.0
+        # The caller's rate limiter, and this client's key in the scopes.
+        self._pace = None
+        self._scope_key = object()
 
     # XXX: This class's tests perform monkey patching to inject synthetic values
     # of utcnow(). To avoid being confused by this, these are the values
@@ -453,15 +472,32 @@ class BaseClient(EnumEnforcer):
         left, by an expiry authlib reads, and longer than the leeway within
         which the session refreshes it itself. One whose expiry cannot be
         read is not.'''
-        leeway = getattr(self.session, 'leeway', 0)
-        if not isinstance(leeway, (int, float)) or isinstance(leeway, bool):
-            leeway = 0
+        leeway = self._leeway()
         try:
             expires_at = self.session.token.get('expires_at')
         except Exception:
             return False
         return bool(_expiry_authlib_acts_on(expires_at)
                     and expires_at - time.time() > max(margin, leeway))
+
+    def _leeway(self):
+        leeway = getattr(self.session, 'leeway', 0)
+        if not isinstance(leeway, (int, float)) or isinstance(leeway, bool):
+            return 0
+        return leeway
+
+    def _token_due(self):
+        '''Whether the session would refresh the token before a request sent
+        now, by authlib's rule, or will within ``_REFRESH_AHEAD`` seconds.
+        authlib refreshes only a token whose ``expires_at`` is an int, and
+        this does too.'''
+        try:
+            expires_at = self.session.token.get('expires_at')
+        except Exception:
+            return False
+        if not isinstance(expires_at, int):
+            return False
+        return expires_at - self._leeway() < time.time() + _REFRESH_AHEAD
 
     def _refresh_token_to_send(self):
         '''The refresh token to refresh with. A stored token with none is
@@ -475,7 +511,8 @@ class BaseClient(EnumEnforcer):
             raise MissingTokenError()
         return refresh_token
 
-    def set_rate_limit_retry(self, retries, *, max_wait=60.0):
+    def set_rate_limit_retry(self, retries, *, max_wait=60.0,
+                             max_sleep=120.0):
         '''Retries a request Schwab rate-limits, up to ``retries`` times. Off
         until this is called with ``retries`` above zero, and off again with
         zero.
@@ -500,9 +537,20 @@ class BaseClient(EnumEnforcer):
         logged as a warning, and the thread or, for :class:`AsyncClient`,
         the coroutine waits through it.
 
+        A call never waits longer than ``max_sleep`` in all, the time its
+        pace took (see :meth:`set_pace`) included: a wait that would pass it
+        returns the 429, or raises the refresh's error, without waiting.
+        :meth:`no_rate_limit_retry` turns this off for the calls made inside
+        it.
+
+        Retries are one layer: code that turns this on removes its own retry
+        of a 429, or the attempts multiply. Retrying anything else, a 503
+        say, or an order, stays the caller's choice.
+
         :param retries: how many times to send again after a 429; ``0``
                         turns this off.
-        :param max_wait: the longest single wait, in seconds.'''
+        :param max_wait: the longest single wait, in seconds.
+        :param max_sleep: the longest one call waits in all, in seconds.'''
         if not isinstance(retries, int) or isinstance(retries, bool):
             raise TypeError('retries must be an int, got {}'.format(
                 _qualified_type_name(retries)))
@@ -516,39 +564,117 @@ class BaseClient(EnumEnforcer):
         if not math.isfinite(max_wait) or max_wait <= 0:
             raise ValueError('max_wait must be a finite number of seconds '
                              'above zero, got {!r}'.format(max_wait))
+        if (not isinstance(max_sleep, (int, float))
+                or isinstance(max_sleep, bool)):
+            raise TypeError('max_sleep must be a number of seconds, got '
+                            '{}'.format(_qualified_type_name(max_sleep)))
+        if not math.isfinite(max_sleep) or max_sleep < 0:
+            raise ValueError('max_sleep must be a finite number of seconds, '
+                             'zero or more, got {!r}'.format(max_sleep))
         self._rate_limit_retries = retries
         self._rate_limit_max_wait = float(max_wait)
+        self._rate_limit_max_sleep = float(max_sleep)
 
-    def _retry_wait(self, attempt, retry_after=None):
+    @contextlib.contextmanager
+    def no_rate_limit_retry(self):
+        '''A context manager inside which this client's calls are not retried
+        after a rate limit, their token refreshes included, whatever
+        :meth:`set_rate_limit_retry` set: for reads that must not wait, such
+        as those on an order path. It holds for the calls made in this
+        thread or, for :class:`AsyncClient`, this asyncio task, inside the
+        ``with``, and nowhere else.'''
+        token = _retry_off.set(_retry_off.get() | {self._scope_key})
+        try:
+            yield
+        finally:
+            _retry_off.reset(token)
+
+    def _retrying(self):
+        return (self._rate_limit_retries > 0
+                and self._scope_key not in _retry_off.get())
+
+    def set_pace(self, pace):
+        '''Has the client call ``pace`` before every request it sends: each
+        attempt of a call, a retry included, and each refresh of the access
+        token. ``None`` removes it.
+
+        ``pace`` is the caller's own rate limiter, one it may share across
+        threads, clients or processes, with lanes or priorities of its own.
+        It is called with a :class:`~schwaby.utils.PaceRequest` saying what
+        is about to be sent, and returns when it may be: :class:`Client`
+        calls ``pace(request)``, and :class:`AsyncClient` awaits what it
+        returns when that is awaitable. An exception from it reaches the
+        caller unchanged, and nothing is sent. Code that sets one paces its
+        calls only here, or each is paced twice.
+
+        With a pace, the client refreshes the access token itself, through
+        the pace, just before the session would have, so that the refresh is
+        paced too.
+
+        :param pace: a callable taking a
+                     :class:`~schwaby.utils.PaceRequest`, or ``None``.'''
+        if pace is not None and not callable(pace):
+            raise TypeError('pace must be callable or None, got {}'.format(
+                _qualified_type_name(pace)))
+        self._pace = pace
+
+    @contextlib.contextmanager
+    def pace_tag(self, tag):
+        '''A context manager that gives the pace ``tag`` as the
+        :class:`~schwaby.utils.PaceRequest`'s ``tag`` for this client's calls
+        inside it, in this thread or asyncio task: a lane or a priority, for
+        the pace to tell its callers apart. Nested, the innermost holds.'''
+        tags = dict(_pace_tags.get() or {})
+        tags[self._scope_key] = tag
+        token = _pace_tags.set(tags)
+        try:
+            yield
+        finally:
+            _pace_tags.reset(token)
+
+    def _pace_request(self, purpose, method, path, attempt):
+        tags = _pace_tags.get() or {}
+        return PaceRequest(method, path, purpose, attempt,
+                           tags.get(self._scope_key))
+
+    def _retry_wait(self, attempt, waited, retry_after=None):
         '''The seconds to wait before sending again after the 429 that ended
-        send number ``attempt``, or None not to send again.'''
+        send number ``attempt``, having waited ``waited`` already, or None
+        not to send again.'''
         if attempt > self._rate_limit_retries:
             return None
         backoff = min(self._rate_limit_max_wait, 2.0 ** (attempt - 1))
         asked = _retry_after_seconds(retry_after)
         if asked is None:
-            return backoff
-        if asked > self._rate_limit_max_wait:
+            wait = backoff
+        elif asked > self._rate_limit_max_wait:
             return None
-        # Never less than the backoff: a Retry-After of 0, or a date already
-        # past, would otherwise send every retry back to back.
-        return max(float(asked), backoff)
+        else:
+            # Never less than the backoff: a Retry-After of 0, or a date
+            # already past, would otherwise send every retry back to back.
+            wait = max(float(asked), backoff)
+        if waited + wait > self._rate_limit_max_sleep:
+            return None
+        return wait
 
-    def _response_retry_wait(self, resp, attempt):
+    def _response_retry_wait(self, resp, attempt, waited):
         '''The wait before sending a GET again, or None: only after a 429,
-        and only when retries were asked for. The response is not read when
-        they were not.'''
-        if not self._rate_limit_retries or resp.status_code != 429:
+        and only when retries were asked for and not turned off here. The
+        response is not read when they were not.'''
+        if not self._retrying() or resp.status_code != 429:
             return None
-        return self._retry_wait(attempt, resp.headers.get('Retry-After'))
+        return self._retry_wait(attempt, waited,
+                                resp.headers.get('Retry-After'))
 
-    def _refresh_retry_wait(self, error, attempt):
+    def _refresh_retry_wait(self, error, attempt, waited):
         '''The wait before sending again after a token refresh the token
         endpoint answered with 429, or None. A refresh that failed any other
         way is not retried here.'''
+        if not self._retrying():
+            return None
         if not (error.rate_limited and error.endpoint_answered):
             return None
-        return self._retry_wait(attempt)
+        return self._retry_wait(attempt, waited)
 
     def _log_retry(self, req_num, what, wait, attempt):
         self.logger.warning(

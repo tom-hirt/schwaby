@@ -3,6 +3,7 @@ module.'''
 
 import collections
 import enum
+import typing
 import json
 # Aliased so `from schwaby.utils import *` cannot rebind a caller's own
 # `datetime`, which is most often the class rather than the module.
@@ -882,6 +883,27 @@ class NoBrowserAvailable(SchwabError, webbrowser.Error):
 
     It cannot see a browser that reports it opened the page when it did not,
     such as a text-mode one on a machine with no display.'''
+
+
+class PaceRequest(typing.NamedTuple):
+    '''What a client is about to send, as the pace given to
+    :meth:`~schwaby.client.Client.set_pace` is told it. Never the request's
+    query, body or headers.'''
+
+    #: ``'GET'``, ``'POST'``, ``'PUT'`` or ``'DELETE'``.
+    method: str
+    #: The path, such as ``'/marketdata/v1/quotes'``, or the token
+    #: endpoint's, ``'/v1/oauth/token'``.
+    path: str
+    #: ``'api'`` for a call to the API, ``'token_refresh'`` for the refresh
+    #: of the access token, which is sent before the call that needs it.
+    purpose: str
+    #: ``1`` for a call's first send, ``2`` for its first retry, and so on. A
+    #: refresh has the attempt of the call it is sent for.
+    attempt: int
+    #: What :meth:`~schwaby.client.Client.pace_tag` set around the call, or
+    #: ``None``.
+    tag: object = None
 
 
 class TokenFreshness(str, enum.Enum):

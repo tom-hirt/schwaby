@@ -471,7 +471,8 @@ class _TestClient:
             def status_code(self):
                 raise AssertionError('the status was read with the retry '
                                      'off')
-        self.assertIsNone(self.client._response_retry_wait(Unreadable(), 1))
+        self.assertIsNone(
+                self.client._response_retry_wait(Unreadable(), 1, 0.0))
 
     @no_duplicates
     def test_a_refresh_refused_otherwise_is_raised_at_once(self):
@@ -530,6 +531,245 @@ class _TestClient:
         self.assertIn('rate limited (HTTP 429); sending again in 1.0 s, '
                       'retry 1 of 2', logs.output[0])
 
+    # max_sleep, no_rate_limit_retry, and the pace.
+
+    @no_duplicates
+    def test_a_call_never_waits_past_max_sleep(self):
+        sleep = self.patch_sleep()
+        self.client.set_rate_limit_retry(5, max_sleep=2.5)
+        limited = self.answer(429)
+        self.mock_session.get.side_effect = [self.answer(429), limited,
+                                             self.answer(200)]
+        # 1 s, then 2 s would make 3: the second 429 is returned instead.
+        self.assertIs(limited, self.client.get_quote(SYMBOL),
+                      'a call waited past max_sleep')
+        self.assertEqual([1.0], self.waits(sleep))
+        self.assertEqual(2, self.mock_session.get.call_count)
+
+    @no_duplicates
+    def test_a_refresh_is_not_waited_for_past_max_sleep(self):
+        sleep = self.patch_sleep()
+        self.client.set_rate_limit_retry(5, max_sleep=0.5)
+        self.mock_session.get.side_effect = [self.refresh_refused(429),
+                                             self.answer(200)]
+        with self.assertRaises(TokenRefreshError):
+            self.client.get_quote(SYMBOL)
+        self.assertEqual([], self.waits(sleep))
+
+    @no_duplicates
+    def test_the_paces_time_counts_toward_max_sleep(self):
+        import time as real_time
+        sleep = self.patch_sleep()
+        # Exactly max_sleep is allowed, so the first backoff of 1 s alone
+        # would be waited; the pace's time on top of it is not.
+        self.client.set_rate_limit_retry(5, max_sleep=1.0)
+        self.client.set_pace(lambda request: real_time.sleep(0.05))
+        limited = self.answer(429)
+        self.mock_session.get.side_effect = [limited, self.answer(200)]
+        self.assertIs(limited, self.client.get_quote(SYMBOL),
+                      "the pace's time was not counted")
+        self.assertEqual([], self.waits(sleep))
+        # Positive control: without the pace, the one wait fits.
+        self.client.set_pace(None)
+        self.mock_session.get.side_effect = [self.answer(429),
+                                             self.answer(200)]
+        self.assertEqual(200, self.client.get_quote(SYMBOL).status_code)
+        self.assertEqual([1.0], self.waits(sleep))
+
+    @no_duplicates
+    def test_no_rate_limit_retry_turns_the_retry_off_inside_it(self):
+        sleep = self.patch_sleep()
+        self.client.set_rate_limit_retry(3)
+        limited = self.answer(429)
+        with self.client.no_rate_limit_retry():
+            self.mock_session.get.side_effect = [limited, self.answer(200)]
+            self.assertIs(limited, self.client.get_quote(SYMBOL),
+                          'a call inside no_rate_limit_retry was retried')
+            # The refresh a call makes too.
+            self.mock_session.get.side_effect = [self.refresh_refused(429),
+                                                 self.answer(200)]
+            with self.assertRaises(TokenRefreshError):
+                self.client.get_quote(SYMBOL)
+        self.assertEqual([], self.waits(sleep))
+        # Outside it, as before.
+        self.mock_session.get.side_effect = [self.answer(429),
+                                             self.answer(200)]
+        self.assertEqual(200, self.client.get_quote(SYMBOL).status_code)
+        self.assertEqual([1.0], self.waits(sleep))
+
+    @no_duplicates
+    def test_no_rate_limit_retry_is_this_clients_alone(self):
+        sleep = self.patch_sleep()
+        other = self.client_class(API_KEY, self.magicmock_class())
+        for client in (self.client, other):
+            client.set_rate_limit_retry(3)
+        other.session.get.side_effect = [self.answer(429), self.answer(200)]
+        with self.client.no_rate_limit_retry():
+            self.assertEqual(200, other.get_quote(SYMBOL).status_code)
+        self.assertEqual([1.0], self.waits(sleep))
+
+    def paced(self):
+        """Sets a pace that records what it is told, and returns the
+        record."""
+        told = []
+        self.client.set_pace(told.append)
+        return told
+
+    @no_duplicates
+    def test_the_pace_is_told_each_attempt(self):
+        from schwaby import PaceRequest
+        self.patch_sleep()
+        told = self.paced()
+        self.client.set_rate_limit_retry(2)
+        self.mock_session.get.side_effect = [self.answer(429),
+                                             self.answer(200)]
+        self.client.get_quote(SYMBOL)
+        path = '/marketdata/v1/{}/quotes'.format(SYMBOL)
+        self.assertEqual([PaceRequest('GET', path, 'api', 1, None),
+                          PaceRequest('GET', path, 'api', 2, None)], told)
+
+    @no_duplicates
+    def test_the_pace_is_told_each_kind_of_request(self):
+        told = self.paced()
+        self.client.place_order(ACCOUNT_HASH, {})
+        self.client.replace_order(ACCOUNT_HASH, ORDER_ID, {})
+        self.client.cancel_order(ORDER_ID, ACCOUNT_HASH)
+        self.assertEqual(['POST', 'PUT', 'DELETE'],
+                         [request.method for request in told])
+        self.assertEqual({'api'}, {request.purpose for request in told})
+
+    @no_duplicates
+    def test_a_pace_that_raises_sends_nothing(self):
+        mine = RuntimeError('mine')
+
+        def pace(request):
+            raise mine
+        self.client.set_pace(pace)
+        for name, call, method in (
+                ('get', lambda: self.client.get_quote(SYMBOL), 'get'),
+                ('place', lambda: self.client.place_order(ACCOUNT_HASH, {}),
+                 'post')):
+            with self.subTest(call=name):
+                with self.assertRaises(RuntimeError) as cm:
+                    call()
+                self.assertIs(mine, cm.exception)
+                getattr(self.mock_session, method).assert_not_called()
+
+    @no_duplicates
+    def test_pace_tag_reaches_the_pace(self):
+        told = self.paced()
+        other = self.client_class(API_KEY, self.magicmock_class())
+        with self.client.pace_tag('urgent'):
+            self.client.get_quote(SYMBOL)
+            with self.client.pace_tag('inner'):
+                self.client.get_quote(SYMBOL)
+            # Another client's tag is not this one's.
+            with other.pace_tag('theirs'):
+                self.client.get_quote(SYMBOL)
+        self.client.get_quote(SYMBOL)
+        self.assertEqual(['urgent', 'inner', 'urgent', None],
+                         [request.tag for request in told])
+
+    @no_duplicates
+    def test_set_pace_takes_a_callable_or_none(self):
+        for bad in ('pace', 5, object()):
+            with self.subTest(pace=repr(bad)):
+                with self.assertRaises(TypeError):
+                    self.client.set_pace(bad)
+        told = self.paced()
+        self.client.set_pace(None)
+        self.client.get_quote(SYMBOL)
+        self.assertEqual([], told)
+
+    def due_token(self, refresh_token='r'):
+        self.mock_session.leeway = 300
+        self.mock_session.token = {
+                'access_token': 'a', 'refresh_token': refresh_token,
+                'expires_at': int(time.time()) + 100}
+
+    @no_duplicates
+    def test_with_a_pace_a_due_token_is_refreshed_through_it(self):
+        told = self.paced()
+        self.due_token()
+        self.client.get_quote(SYMBOL)
+        self.assertEqual([('api', 'GET'), ('token_refresh', 'POST')],
+                         [(r.purpose, r.method) for r in told],
+                         'a refresh was not paced')
+        self.assertEqual('/v1/oauth/token', told[1].path)
+        self.mock_session.refresh_token.assert_called_once_with(
+                refresh_token='r')
+
+    @no_duplicates
+    def test_with_a_pace_a_fresh_token_is_left_to_the_session(self):
+        told = self.paced()
+        self.mock_session.leeway = 300
+        for expires_at in (int(time.time()) + 3600, None, 'soon',
+                           float(time.time())):
+            with self.subTest(expires_at=expires_at):
+                told.clear()
+                self.mock_session.refresh_token.reset_mock()
+                self.mock_session.token = {'refresh_token': 'r',
+                                           'expires_at': expires_at}
+                self.client.get_quote(SYMBOL)
+                self.assertEqual(['api'], [r.purpose for r in told])
+                self.mock_session.refresh_token.assert_not_called()
+
+    @no_duplicates
+    def test_without_a_pace_the_client_does_not_refresh_itself(self):
+        self.due_token()
+        self.client.get_quote(SYMBOL)
+        self.mock_session.refresh_token.assert_not_called()
+
+    @no_duplicates
+    def test_a_paced_refresh_rate_limited_is_retried_for_a_get(self):
+        sleep = self.patch_sleep()
+        told = self.paced()
+        self.due_token()
+        self.client.set_rate_limit_retry(2)
+        self.mock_session.refresh_token.side_effect = [
+                self.refresh_refused(429), None]
+        self.client.get_quote(SYMBOL)
+        self.assertEqual([('api', 1), ('token_refresh', 1), ('api', 2),
+                          ('token_refresh', 2)],
+                         [(r.purpose, r.attempt) for r in told])
+        self.assertEqual([1.0], self.waits(sleep))
+        self.assertEqual(1, self.mock_session.get.call_count)
+
+    @no_duplicates
+    def test_an_order_whose_paced_refresh_is_rate_limited_is_not_held(self):
+        sleep = self.patch_sleep()
+        self.paced()
+        self.due_token()
+        self.client.set_rate_limit_retry(3)
+        self.mock_session.refresh_token.side_effect = [
+                self.refresh_refused(429), None]
+        with self.assertRaises(TokenRefreshError):
+            self.client.place_order(ACCOUNT_HASH, {})
+        self.mock_session.post.assert_not_called()
+        self.assertEqual([], self.waits(sleep),
+                         'an order was held back for a rate-limited refresh')
+
+    @no_duplicates
+    def test_a_due_token_with_no_refresh_token_is_dead_before_the_pace(self):
+        from schwaby import TokenErrorKind
+        told = self.paced()
+        self.due_token(refresh_token=None)
+        with self.assertRaises(TokenRefreshError) as cm:
+            self.client.get_quote(SYMBOL)
+        self.assertIs(TokenErrorKind.DEAD_TOKEN, cm.exception.kind)
+        self.assertEqual(['api'], [r.purpose for r in told])
+        self.mock_session.get.assert_not_called()
+
+    @no_duplicates
+    def test_ensure_token_fresh_refreshes_through_the_pace(self):
+        from schwaby import PaceRequest
+        told = self.paced()
+        self.due_token()
+        with self.client.pace_tag('warm'):
+            self.client.ensure_token_fresh()
+        self.assertEqual([PaceRequest('POST', '/v1/oauth/token',
+                                      'token_refresh', 1, 'warm')], told)
+
     @no_duplicates
     def test_set_rate_limit_retry_refuses_what_it_cannot_use(self):
         for kwargs, error in (({'retries': -1}, ValueError),
@@ -543,15 +783,22 @@ class _TestClient:
                               ({'retries': 1, 'max_wait': float('nan')},
                                ValueError),
                               ({'retries': 1, 'max_wait': '5'}, TypeError),
-                              ({'retries': 1, 'max_wait': True}, TypeError)):
+                              ({'retries': 1, 'max_wait': True}, TypeError),
+                              ({'retries': 1, 'max_sleep': -1}, ValueError),
+                              ({'retries': 1, 'max_sleep': float('inf')},
+                               ValueError),
+                              ({'retries': 1, 'max_sleep': '5'}, TypeError),
+                              ({'retries': 1, 'max_sleep': False},
+                               TypeError)):
             with self.subTest(**{k: repr(v) for k, v in kwargs.items()}):
                 with self.assertRaises(error):
                     self.client.set_rate_limit_retry(**kwargs)
         # Positive control: a sound setting is taken, and what was refused
         # left the retry as it was.
-        self.client.set_rate_limit_retry(4, max_wait=2.5)
-        self.assertEqual((4, 2.5), (self.client._rate_limit_retries,
-                                    self.client._rate_limit_max_wait))
+        self.client.set_rate_limit_retry(4, max_wait=2.5, max_sleep=0)
+        self.assertEqual((4, 2.5, 0.0), (self.client._rate_limit_retries,
+                                         self.client._rate_limit_max_wait,
+                                         self.client._rate_limit_max_sleep))
 
 
     def test_token_age(self):
@@ -3610,12 +3857,79 @@ class ClientTest(_TestClient, unittest.TestCase):
         self.client.close_session()
         self.mock_session.close.assert_called_once_with()
 
+    @no_duplicates
+    def test_a_coroutine_pace_is_refused_and_sends_nothing(self):
+        import warnings
+        async def pace(request):
+            pass
+        self.client.set_pace(pace)
+        with warnings.catch_warnings():
+            # The coroutine is closed, not left to warn it was never awaited.
+            warnings.simplefilter('error')
+            with self.assertRaises(TypeError) as cm:
+                self.client.get_quote(SYMBOL)
+        self.assertIn('AsyncClient', str(cm.exception))
+        self.mock_session.get.assert_not_called()
+
 class AsyncClientTest(_TestClient, unittest.TestCase):
     """
     Subclass set to resync AsyncClient and use AsyncMagicMock
     """
     client_class    = ResyncProxy(AsyncClient)
     magicmock_class = AsyncMagicMock
+
+    @no_duplicates
+    def test_an_awaitable_from_the_pace_is_awaited(self):
+        # A function returning an awaitable: this proxy runs a coroutine
+        # attribute of the client itself, so an async def pace is tested on
+        # a real client, in auth_test.
+        order = []
+
+        async def wait(request):
+            await asyncio.sleep(0)
+            order.append(request.purpose)
+
+        def pace(request):
+            return wait(request)
+        self.client.set_pace(pace)
+        self.mock_session.get.side_effect = (
+                lambda *a, **k: order.append('sent') or MockResponse({}, 200))
+        self.client.get_quote(SYMBOL)
+        self.assertEqual(['api', 'sent'], order,
+                         'the request went before the pace let it')
+
+    @no_duplicates
+    def test_no_rate_limit_retry_holds_in_its_own_task_alone(self):
+        # Two tasks at once on one client: the scope one opens is not the
+        # other's.
+        from unittest.mock import AsyncMock
+        session = AsyncMagicMock()
+        client = AsyncClient(API_KEY, session)
+        client.set_rate_limit_retry(3)
+        sends = {}
+
+        async def get(url, **kwargs):
+            task = asyncio.current_task().get_name()
+            sends[task] = sends.get(task, 0) + 1
+            await asyncio.sleep(0)
+            return MockResponse({}, 429 if sends[task] == 1 else 200)
+        session.get = get
+
+        async def scoped():
+            with client.no_rate_limit_retry():
+                await asyncio.sleep(0)
+                return (await client.get_quote(SYMBOL)).status_code
+
+        async def plain():
+            return (await client.get_quote(SYMBOL)).status_code
+
+        async def both():
+            return await asyncio.gather(
+                    asyncio.create_task(scoped(), name='scoped'),
+                    asyncio.create_task(plain(), name='plain'))
+        with patch('schwaby.client.asynchronous._sleep', new=AsyncMock()):
+            self.assertEqual([429, 200], asyncio.run(both()))
+        self.assertEqual({'scoped': 1, 'plain': 2}, sends)
 
     def test_async_close(self):
         self.client.close_async_session()
