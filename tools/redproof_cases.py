@@ -9444,10 +9444,38 @@ CASES += [
          'TokenRefreshError', subtest='asyncio=False'),
     Case('shared/a-cancelled-wait-gives-the-lock-back',
          'schwaby/_shared_token.py',
-         '            taking.add_done_callback(give_back)\n',
-         '            pass\n',
+         '            if fd is not None:\n'
+         '                self._release(key, fd)\n'
+         '            raise\n',
+         '            raise\n',
          'tests/shared_token_test.py::LockTest::test_an_async_wait_cancelled_gives_the_lock_back',
+         'TokenFileLockTimeout',
+         superseded='The test cancels before the worker takes the lock, and '
+                    'the worker gives a lock it takes for an abandoned wait '
+                    'back itself (shared/a-wait-whose-loop-has-closed-gives-'
+                    'the-lock-back). The release here is for a lock taken in '
+                    'the instant before the cancel, which no test reaches '
+                    'deterministically.'),
+    # A task that gave up, whose event loop has closed, cannot give the
+    # lock back: the worker that took it does.
+    Case('shared/a-wait-whose-loop-has-closed-gives-the-lock-back',
+         'schwaby/_shared_token.py',
+         '            if claim.abandoned:\n'
+         '                self._release(key, fd)\n'
+         '                return None\n',
+         '            if claim.abandoned:\n'
+         '                return None\n',
+         'tests/shared_token_test.py::LockTest::test_a_wait_whose_event_loop_has_closed_gives_the_lock_back',
          'TokenFileLockTimeout'),
+    # The client's own view of the token, which a stream logs in with, is
+    # the one taken.
+    Case('shared/the-token-taken-is-the-clients-own',
+         'schwaby/auth.py',
+         '        metadata.creation_timestamp = loaded.creation_timestamp\n'
+         '        metadata.token = token\n',
+         '        metadata.creation_timestamp = loaded.creation_timestamp\n',
+         'tests/shared_token_test.py::AdoptTest::test_a_client_takes_the_token_another_refreshed',
+         "the client's own view kept the old token", subtest='asyncio=False'),
     Case('shared/a-lock-timeout-is-transient',
          'schwaby/_shared_token.py',
          "            'was sent.', kind=TokenErrorKind.TRANSIENT)\n",

@@ -332,8 +332,13 @@ library's.
    The lock works where the operating system's file lock does: on a local
    disk, ``flock`` on Linux and macOS, ``msvcrt.locking`` on Windows. On a
    network file system it may lock nothing. Every client that shares the
-   file must pass ``shared=True``; one that does not neither takes the lock
-   nor waits for it.
+   file must pass ``shared=True``, and the same ``lock_path`` if any: one
+   that does not neither takes the lock nor waits for it. A relative
+   ``lock_path`` is resolved against each process's own working directory.
+
+   An ``asyncio`` client waits for the lock in a worker thread. A task that
+   stops waiting leaves that thread to take the lock and give it back, and
+   ``asyncio.run`` waits for it, up to ``lock_timeout``, before it returns.
 
 .. autofunction:: schwaby.auth.shared_token_file
 .. autoexception:: schwaby.utils.TokenFileLockTimeout

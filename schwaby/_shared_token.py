@@ -1,9 +1,12 @@
 '''A token file several clients share, in one process or several.
 
 A write, or a refresh with the write it makes, holds an exclusive lock: a
-process-wide lock keyed by the token file's real path, since ``flock`` does
-not exclude the threads of one process, and an ``flock`` on a lock file
-opened afresh (``msvcrt.locking`` on Windows). A load takes no lock.
+process-wide lock keyed by the token file's real path, and an ``flock`` on
+a lock file opened afresh (``msvcrt.locking`` on Windows). On a local disk
+an ``flock`` on a second open of the file excludes another thread of the
+same process too; the process-wide lock is for where it does not, as over
+NFS, where ``flock`` becomes a POSIX lock, which a process holds for all
+its threads. A load takes no lock.
 
 Under the lock the file is read first, and a token is written only if it is
 at least as new as the file's, so a fresh sign-in is never overwritten by a
@@ -129,6 +132,16 @@ def _default_read_bytes(path):
         return f.read()
 
 
+class _Claim:
+    '''An asyncio task's wait for the lock, shared with the worker thread
+    that takes it.'''
+
+    def __init__(self):
+        self.guard = threading.Lock()
+        self.abandoned = False
+        self.fd = None
+
+
 class SharedTokenFile:
     '''One client's view of a shared token file: how it is read, written
     and locked.'''
@@ -189,6 +202,18 @@ class SharedTokenFile:
             raise
         return fd
 
+    def _acquire_for(self, key, claim):
+        '''Takes the lock for an asyncio task, in a worker thread: when the
+        task has given up waiting by then, gives it back here, since the
+        task's event loop may be gone and nothing there would.'''
+        fd = self._acquire(key)
+        with claim.guard:
+            if claim.abandoned:
+                self._release(key, fd)
+                return None
+            claim.fd = fd
+        return fd
+
     def _release(self, key, fd):
         try:
             _unlock_fd(fd)
@@ -229,14 +254,20 @@ class SharedTokenFile:
         if key in held:
             yield
             return
-        taking = asyncio.ensure_future(asyncio.to_thread(self._acquire, key))
+        claim = _Claim()
+        taking = asyncio.ensure_future(
+                asyncio.to_thread(self._acquire_for, key, claim))
         try:
             fd = await asyncio.shield(taking)
         except asyncio.CancelledError:
-            def give_back(future):
-                if not future.cancelled() and future.exception() is None:
-                    self._release(key, future.result())
-            taking.add_done_callback(give_back)
+            # Whichever of the two comes second gives the lock back: the
+            # worker, if it takes the lock after this, or this, if the
+            # worker took it already.
+            with claim.guard:
+                claim.abandoned = True
+                fd, claim.fd = claim.fd, None
+            if fd is not None:
+                self._release(key, fd)
             raise
         token = _held.set(held | {key})
         try:

@@ -31,9 +31,20 @@ APP_SECRET = 'b' * 16
 CALLBACK_URL = 'https://127.0.0.1:8182'
 QUOTES = '/marketdata/v1/AAPL/quotes'
 HOLD = textwrap.dedent('''
-    import fcntl, os, sys
+    import fcntl, os, sys, time
     fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600)
-    fcntl.flock(fd, fcntl.LOCK_EX)
+    # Polled, with a deadline, so a child that never gets the lock ends
+    # by itself rather than waiting for it forever.
+    deadline = time.monotonic() + 20
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.monotonic() > deadline:
+                print('never held', flush=True)
+                sys.exit(1)
+            time.sleep(0.01)
     print('held', flush=True)
     sys.stdin.read()
 ''')
@@ -75,9 +86,12 @@ class SharedTokenTestCase(unittest.TestCase):
     def hold_the_lock(self, path=None):
         '''A child process holding the lock, until the returned function
         lets it go.'''
+        import select
         child = subprocess.Popen(
                 [sys.executable, '-I', '-c', HOLD, path or self.lock],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        ready, _, _ = select.select([child.stdout], [], [], 30)
+        self.assertTrue(ready, 'the child never said whether it held the lock')
         self.assertEqual('held', child.stdout.readline().strip())
 
         def release():
@@ -153,10 +167,12 @@ class LockTest(SharedTokenTestCase):
                 self.endpoint.on_api(lambda request: {'ok': True})
                 st.write_token_file(self.path, expires_in=-60)
                 release = self.hold_the_lock()
-                client = self.client(asyncio_, lock_timeout=0.2)
-                with self.assertRaises(schwaby.TokenRefreshError) as cm:
-                    self.quote(client)
-                release()
+                try:
+                    client = self.client(asyncio_, lock_timeout=0.2)
+                    with self.assertRaises(schwaby.TokenRefreshError) as cm:
+                        self.quote(client)
+                finally:
+                    release()
                 self.assertIs(schwaby.TokenErrorKind.TRANSIENT,
                               cm.exception.kind)
                 self.assertIsInstance(cm.exception.__cause__,
@@ -216,6 +232,37 @@ class LockTest(SharedTokenTestCase):
             # back for the cancelled task.
             await asyncio.sleep(0.3)
         asyncio.run(wait_and_cancel())
+        holder.join(10)
+        other = _shared_token.SharedTokenFile(self.path, lock_timeout=1)
+        with other.lock():
+            pass
+
+    @no_duplicates
+    def test_a_wait_whose_event_loop_has_closed_gives_the_lock_back(self):
+        # The task gives up, and its event loop closes, before the worker
+        # thread gets the lock: the worker gives it back itself.
+        st.write_token_file(self.path)
+        shared = _shared_token.SharedTokenFile(self.path, lock_timeout=5)
+        inside, leave = threading.Event(), threading.Event()
+
+        def hold():
+            with shared.lock():
+                inside.set()
+                leave.wait(10)
+        holder = threading.Thread(target=hold)
+        holder.start()
+        self.assertTrue(inside.wait(10))
+        threading.Timer(0.3, leave.set).start()
+
+        async def give_up():
+            async def take():
+                async with shared.alock():
+                    pass
+            with self.assertRaises(asyncio.TimeoutError):
+                await asyncio.wait_for(take(), 0.1)
+        # asyncio.run waits for the worker as it shuts down, so the lock is
+        # taken, by a task long gone, before this returns.
+        asyncio.run(give_up())
         holder.join(10)
         other = _shared_token.SharedTokenFile(self.path, lock_timeout=1)
         with other.lock():
@@ -317,6 +364,10 @@ class AdoptTest(SharedTokenTestCase):
                 self.assertEqual('Bearer FIRST',
                                  endpoint.requests[-1].headers[
                                      'Authorization'])
+                # The token a stream logs in with is the one taken too.
+                self.assertEqual('FIRST',
+                                 two.token_metadata.token['access_token'],
+                                 "the client's own view kept the old token")
 
     @no_duplicates
     def test_a_token_taken_that_is_still_due_is_refreshed_with_its_own(self):
