@@ -33,15 +33,30 @@ NEEDS_PYFLAKES = unittest.skipIf(
 SHAPES = 'tests/testdata/blind_kill_shapes.txt'
 
 
+def read_shapes():
+    '''Each section of SHAPES: a list of lines for "refuse" and "pass", a
+    list of blocks of lines for "refuse together" and "pass together".'''
+    sections, current, name = {}, None, None
+    with open(os.path.join(ROOT, SHAPES), encoding='utf-8') as f:
+        for line in f.read().split('\n'):
+            if re.fullmatch(r'\[[a-z ]+\]', line):
+                name = line[1:-1]
+                current = sections[name] = [[]] if 'together' in name else []
+            elif name is None or line.startswith('#'):
+                continue
+            elif 'together' in name:
+                if line == '---':
+                    current.append([])
+                elif line.strip():
+                    current[-1].append(line)
+            elif line.strip():
+                current.append(line)
+    return sections
+
+
 def blind_kill_shapes():
     '''(the lines to refuse, the lines to let through), from SHAPES.'''
-    sections, current = {'refuse': [], 'pass': []}, None
-    with open(os.path.join(ROOT, SHAPES), encoding='utf-8') as f:
-        for line in f.read().splitlines():
-            if line in ('[refuse]', '[pass]'):
-                current = sections[line[1:-1]]
-            elif line.strip() and not line.startswith('#'):
-                current.append(line)
+    sections = read_shapes()
     return sections['refuse'], sections['pass']
 
 #: A word for the tests to forbid, made up and spelled in pieces so that no
@@ -187,6 +202,25 @@ class BlindKillTest(unittest.TestCase):
                 self.assertIsNone(judge(line), 'a kill of what the code '
                                   'started was refused')
 
+    def test_each_block_is_judged_as_listed(self):
+        lines = light_check().blind_kill_lines
+        sections = read_shapes()
+        refuse, allow = sections['refuse together'], sections['pass together']
+        # Positive control: the blocks were read.
+        self.assertGreater(len(refuse), 5, 'the blocks to refuse were not '
+                           'read')
+        self.assertGreater(len(allow), 3, 'the blocks to let through were '
+                           'not read')
+        for block in refuse:
+            with self.subTest(refuse=block):
+                self.assertTrue(lines('\n'.join(block).encode()),
+                                'a blind kill was let through')
+        for block in allow:
+            with self.subTest(allow=block):
+                self.assertEqual([], lines('\n'.join(block).encode()),
+                                 'a kill of what the code started was '
+                                 'refused')
+
     def test_no_file_in_the_tree_signals_what_it_did_not_start(self):
         # By the check's own function, so the two cannot disagree.
         lines = light_check().blind_kill_lines
@@ -231,6 +265,8 @@ class ScratchGitTest(unittest.TestCase):
     def state(self, root):
         with open(os.path.join(root, '.git', 'index'), 'rb') as f:
             index = f.read()
+        with open(os.path.join(root, '.git', 'config'), 'rb') as f:
+            index += f.read()
         head = subprocess.run(['git', '-C', root, 'rev-parse', 'HEAD'],
                               env={k: v for k, v in os.environ.items()
                                    if not k.startswith('GIT_')},
@@ -251,6 +287,7 @@ class ScratchGitTest(unittest.TestCase):
             case.run(result)
         self.assertEqual([], result.errors + result.failures,
                          'the test itself failed with the decoy around it')
+        self.assertEqual([], result.skipped, 'the test did not run')
         self.assertEqual(1, result.testsRun)
         self.assertEqual(before, self.state(tmp.name),
                          'a scratch repository\'s git reached the decoy')

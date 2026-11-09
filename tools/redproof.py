@@ -282,14 +282,29 @@ def load_cases(snapshot):
 SIGNALLING = ('tests/redproof_tool_test.py::WorkerTest',)
 
 
+def runs_signalling(test):
+    '''Whether pytest, given test, runs one of SIGNALLING: the class or a
+    test in it, its module whole, or a directory holding the module.'''
+    test = test[2:] if test.startswith('./') else test
+    path, _, inner = test.partition('::')
+    for s in SIGNALLING:
+        s_path, _, s_class = s.partition('::')
+        if path == s_path and (not inner or inner == s_class
+                               or inner.startswith(s_class + '::')):
+            return True
+        if not inner and s_path.startswith(path.rstrip('/') + '/'):
+            return True
+        if not inner and path in ('', '.'):
+            return True
+    return False
+
+
 def queued_only(cases, environ=os.environ):
     '''The names of the entries among cases that signal processes, when
     this is not a queued job; none when it is.'''
     if environ.get('REDPROOF_JOBS_ALL') == '1':
         return []
-    return [c.name for c in cases
-            if any(t == s or t.startswith(s + '::') for t in tests_of(c)
-                   for s in SIGNALLING)]
+    return [c.name for c in cases if any(map(runs_signalling, tests_of(c)))]
 
 
 def tests_of(case):

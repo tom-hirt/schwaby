@@ -176,18 +176,24 @@ _SENDS = re.compile(r'\b(?:%s(?:pg)?|%s|%s|terminate|send_signal)\b'
 _FOUND = re.compile(
     r'\bget' + 'pp' + r'id\b|\$\{?' + 'PP' + r'ID\b|\b' + 'pp' + r'id\b'
     r'|\b' + 'PP' + r'id\b|\.parent\(\)|\bparent_pid\b|\bpg(?:id|rp)='
-    r'|\b(?:pgrep|pidof)\b|/proc/\S*/stat\b')
+    r'|\b(?:pgrep|pidof|ps|lsof|fuser)\b|\bprocess_iter\b'
+    r'|/proc/\S*/stat(?:us)?\b')
 #: The shell's three kill commands, by name or by path; not a method,
 #: an option, a variable, or part of a longer name.
 _SHELL = re.compile(r'(?<![\w.$-])(?:/[\w./-]*/)?(%s|%s|%s)(?![\w(-])'
                     % (_KA, _P, _K))
+#: The shell's commands that kill by what they find, never by a recorded
+#: pid: every process, and those using a file or a port.
+_FINDERS = re.compile(r'(?<![\w.$-])(?:/[\w./-]*/)?(%s5|fuser)(?![\w(-])'
+                      % _KA)
 #: Python's kill and killpg, from os or imported bare: not another
 #: object's method.
 _PY = re.compile(r'(?:\bos\.|(?<![\w.]))%s(pg)?\(' % _K)
 #: Node's process.kill, whose first argument is the target.
 _NODE = re.compile(r'\bprocess\.%s\(\s*([^,)]*)' % _K)
-#: An argv list or tuple naming the command first.
-_ARGV = re.compile(r'[\[(]\s*([\'"])(?:[^\'"\s]*/)?(%s|%s|%s)\1\s*,'
+#: An argv list or tuple holding the command as a word, first or after a
+#: wrapper (sudo, env, ...).
+_ARGV = re.compile(r'(?:[\[(]|,)\s*([\'"])(?:[^\'"\s]*/)?(%s|%s|%s)\1\s*,'
                    % (_KA, _P, _K))
 #: What a target that names every process, or the caller's own group, is.
 _EVERY = re.compile(r'-0*1')
@@ -205,22 +211,35 @@ _SIGNAL = re.compile(
     r'|XCPU|XFSZ|VTALRM|PROF|WINCH|IO|POLL|PWR|SYS|RTMIN|RTMAX)(?:[+-]\d+)?)')
 
 
+#: How far a command's words are read: past this, a line is not one command.
+_COMMAND_LIMIT = 500
+
+
 def _words(text):
     """The words of the command that starts text, as the shell would split
     them, up to the end of the command: a separator, a closing quote, a
-    comment or the end of the line. Quotes are removed; a redirection is
-    left out."""
+    comment or the end of the line. Quotes and backslashes are removed;
+    a redirection is left out."""
     words, word, k = [], None, 0
+    text = text[:_COMMAND_LIMIT]
     while k < len(text):
         c = text[k]
         if c in ' \t':
             if word is not None:
                 words.append(word)
                 word = None
+        elif c == '\\' and k + 1 < len(text):
+            word = (word or '') + text[k + 1]
+            k += 1
+        elif c == '&' and word and word[-1] in '<>':
+            word += c
         elif c in ';&|)`\n' or (c == '#' and word is None):
             break
         elif c in '\'"':
-            opens = word is None or word.endswith(('-', '='))
+            # $'...' is a quoted word too.
+            if word == '$':
+                word = ''
+            opens = not word or word.endswith(('-', '='))
             end = text.find(c, k + 1) if opens else -1
             if end < 0:
                 break
@@ -270,11 +289,26 @@ def _kill_words(words, marked):
     if zero or listing:
         return None
     for t in targets:
+        t = _computed(t)
         if _EVERY.fullmatch(t):
             return 'every process'
-        if _OWN.fullmatch(t) and not marked:
+        if not marked and (_OWN.fullmatch(t)
+                           or _OWN_NEGATED_CALL.fullmatch(t)):
             return 'its own group'
     return None
+
+
+def _computed(word):
+    """A word as the target it computes to, for an argv word that is an
+    expression: str(-1) is -1, and an f-string or a sum giving '-' and the
+    caller's own pid or group is that call negated."""
+    w = re.sub(r'^[fF]?([\'"])(.*)\1$', r'\2', word.strip())
+    w = re.sub(r'[\'"{}+\s]', '', w)
+    while True:
+        unwrapped = re.sub(r'^(-?)(?:str|int)\((.*)\)$', r'\1\2', w)
+        if unwrapped == w:
+            return w
+        w = unwrapped
 
 
 def _pkill_words(words):
@@ -303,8 +337,13 @@ def _pkill_words(words):
                 if c in 'uUgGs':
                     return "a user's or a group's processes"
                 if c == 'P':
-                    if not body[j + 1:]:
+                    value = body[j + 1:]
+                    if not value:
+                        value = words[i + 1] if i + 1 < len(words) else ''
                         i += 1
+                    # The children of init are every orphan on the machine.
+                    if value == '1':
+                        return 'every orphan'
                     break
         else:
             return 'processes found by name'
@@ -352,13 +391,84 @@ def _py_args(text):
     return _argv_words(text)
 
 
-def blind_kill(line):
+def _code(line):
+    """The line without a trailing comment: a # at the start of a word,
+    outside quotes."""
+    quote = None
+    for k, c in enumerate(line):
+        if quote:
+            if c == quote:
+                quote = None
+        elif c in '\'"':
+            quote = c
+        elif c == '#' and (k == 0 or line[k - 1] in ' \t'):
+            return line[:k]
+    return line
+
+
+class Names:
+    """The names a file assigns a found pid, or its own pid or group, to,
+    so that a kill of one on a later line is judged as a kill of what it
+    holds."""
+
+    _PY_SET = re.compile(r'(?:^|[\s;(])(?:[\w.]+\.)?([A-Za-z_]\w*)\s*'
+                         r'(?::[^=]*)?(?<![=!<>])=(?!=)(.*)')
+    _SH_SET = re.compile(r'(?:^|[\s;])(?:export\s+|local\s+|readonly\s+)?'
+                         r'([A-Za-z_]\w*)=(\S*)')
+    _OWN_PID = re.compile(r'["\']?\$(?:\$|\{\$\}|BASHPID)["\']?$')
+
+    def __init__(self, lines=()):
+        self.found, self.own_pid, self.own_group = set(), set(), set()
+        for line in lines:
+            code = _code(line)
+            for m in self._PY_SET.finditer(code):
+                self.note(m.group(1), m.group(2))
+            for m in self._SH_SET.finditer(code):
+                self.note(m.group(1), m.group(2))
+
+    def note(self, name, value):
+        value = value.strip()
+        if _FOUND.search(value):
+            self.found.add(name)
+        elif self._OWN_PID.match(value) or re.fullmatch(
+                r'(?:os\.)?getpid\(\)', value):
+            self.own_pid.add(name)
+        elif _OWN_GROUP_CALL.fullmatch(value.replace(' ', '')):
+            self.own_group.add(name)
+
+    def uses_found(self, code):
+        return any(re.search(r'(?<![\w$])\$?\{?%s\b' % re.escape(n), code)
+                   for n in self.found)
+
+    def own(self, target, negated):
+        """Whether target, a word or an expression, names the caller's own
+        group through a name: its group, or its own pid negated."""
+        t = target.replace(' ', '').replace('"', '').replace("'", '')
+        name = re.fullmatch(r'(-?)\$?\{?([A-Za-z_]\w*)\}?', t)
+        if not name:
+            return False
+        minus, n = name.groups()
+        if n in self.own_group:
+            return bool(minus) == negated
+        return n in self.own_pid and bool(minus)
+
+
+def blind_kill(line, names=None):
     """Why a line of code signals what it did not start and record, or
     None. A line that only reads its parent's pid, or signals a pid or a
-    group it started and recorded, is not one."""
+    group it started and recorded, is not one. names, from the rest of the
+    file, says which names hold a found pid or its own pid or group."""
+    names = names or Names()
     marked = OWN_GROUP_MARK in line
-    if _SENDS.search(line) and _FOUND.search(line):
+    code = _code(line)
+    if _SENDS.search(code) and (_FOUND.search(code)
+                                or names.uses_found(code)):
         return 'a pid it did not start'
+    for m in _FINDERS.finditer(line):
+        if m.group(1) != 'fuser' or any(
+                w.startswith('-') and not w.startswith('--') and 'k' in w
+                for w in _words(line[m.end():])):
+            return 'processes found by what they use'
     for m in _PY.finditer(line):
         args = _py_args(line[m.end():])
         target = args[0].replace(' ', '') if args else ''
@@ -367,7 +477,8 @@ def blind_kill(line):
         if _EVERY.fullmatch(target):
             return 'every process'
         own = (_OWN_GROUP_CALL if m.group(1) else _OWN_NEGATED_CALL)
-        if not marked and (target == '0' or own.fullmatch(target)):
+        if not marked and (target == '0' or own.fullmatch(target)
+                           or names.own(target, negated=not m.group(1))):
             return 'its own group'
     for m in _NODE.finditer(line):
         target = m.group(1).replace(' ', '')
@@ -386,6 +497,9 @@ def blind_kill(line):
         words = _words(line[m.end():])
         if m.group(1) == _K:
             why = _kill_words(words, marked)
+            if not why and not marked and any(
+                    names.own(w, negated=True) for w in words):
+                why = 'its own group'
         elif m.group(1) == _KA:
             why = "a user's processes or processes found by name"
         else:
@@ -395,14 +509,58 @@ def blind_kill(line):
     return None
 
 
+#: How many lines one call or command may run over and still be read as one.
+_JOIN_LIMIT = 30
+
+
+def _depth(line):
+    """How many brackets the line leaves open, outside quotes."""
+    depth, quote = 0, None
+    for c in _code(line):
+        if quote:
+            if c == quote:
+                quote = None
+        elif c in '\'"':
+            quote = c
+        elif c in '([{':
+            depth += 1
+        elif c in ')]}':
+            depth -= 1
+    return depth
+
+
+def _logical(lines):
+    """(first line number, the text) of each call or command that runs
+    over more than one line: one left open by a bracket, or continued by a
+    backslash."""
+    out, n = [], 0
+    while n < len(lines):
+        depth, joined, k = _depth(lines[n]), lines[n], n
+        while (k + 1 < len(lines) and k - n < _JOIN_LIMIT
+               and (depth > 0 or lines[k].rstrip().endswith('\\'))):
+            k += 1
+            joined = joined.rstrip().rstrip('\\') + ' ' + lines[k].strip()
+            depth += _depth(lines[k])
+        if k > n:
+            out.append((n + 1, joined))
+        n = k + 1
+    return out
+
+
 def blind_kill_lines(content, path=None):
     """The line numbers at which content signals what it did not start
-    and record. The lint's own list of shapes is not judged."""
+    and record: each line alone, each call or command that runs over
+    several lines as one, and a kill of a name the file assigned a found
+    pid to. The lint's own list of shapes is not judged."""
     if path == SHAPES:
         return []
-    text = content.decode('utf-8', 'replace')
-    return [n for n, line in enumerate(text.splitlines(), 1)
-            if blind_kill(line)]
+    lines = content.decode('utf-8', 'replace').split('\n')
+    logical = _logical(lines)
+    names = Names(lines + [text for _, text in logical])
+    found = {n for n, line in enumerate(lines, 1)
+             if blind_kill(line, names)}
+    found |= {n for n, text in logical if blind_kill(text, names)}
+    return sorted(found)
 
 
 def blind_kills_in(path):

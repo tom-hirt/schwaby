@@ -2,8 +2,10 @@
 # tools/light_check.py. `$pid`, `pid`, `p` and `proc` are what the line's
 # code started and recorded; `$JOB` and `$PGID` a group it created and
 # recorded. Every line under "refuse" must be refused, and every line under
-# "pass" must pass. This file is data, not code, and the check does not
-# judge it.
+# "pass" must pass. Under "refuse together" and "pass together", each block
+# between "---" lines is judged as a file of its own: a call or command
+# over several lines, or a pid kept in a name and signalled later. This
+# file is data, not code, and the check does not judge it.
 
 [refuse]
 # the parent, by getppid
@@ -97,6 +99,25 @@ kill $(pidof sleep)
 pgrep -f pytest | xargs kill
 pidof sleep | xargs kill -9
 kill "$(cut -d' ' -f4 /proc/$pid/stat)"
+kill -9 $(ps -eo pid,comm | grep sleep | awk '{print $1}')
+kill -9 $(lsof -ti tcp:8000)
+os.kill(int(open(f'/proc/{pid}/status').read()), 9)
+for p in psutil.process_iter(): p.kill()
+# every process, or every orphan, or what uses a file or a port
+killall5 -9
+pkill -P 1
+fuser -k 8080/tcp
+# wrapped, computed or escaped
+sudo kill -9 -1
+subprocess.run(['sudo', 'kill', '-9', '-1'])
+subprocess.run(['env', 'kill', '0'])
+subprocess.run(['kill', f'-{os.getpgrp()}'])
+subprocess.run(['kill', '-9', '-' + str(os.getpid())])
+subprocess.run(['kill', str(-1)])
+kill -9 1>&2 0
+kill -TERM 2>&1 -- -1
+kill -9 \-1
+kill -9 $'-1'
 
 [pass]
 # a child it started
@@ -137,3 +158,50 @@ os.kill(1234, 0)
 signal.pthread_kill(thread_id, signal.SIGUSR1)
 systemctl --user kill --signal=KILL "$unit"
 cmds = ["kill $pid", "kill -9 $child", "kill -TERM -- -$JOB"]
+# a comment that names a found pid
+proc.kill()  # never the ppid
+os.killpg(pgid, signal.SIGTERM)  # pgid=proc.pid
+# a finder that kills nothing
+fuser -v 8080/tcp
+
+[refuse together]
+parent = os.getppid()
+os.kill(parent, signal.SIGKILL)
+---
+p=$PPID
+kill -9 "$p"
+---
+pids=$(pgrep -f pytest)
+kill $pids
+---
+me=$$
+kill -- -$me
+---
+pg = os.getpgrp()
+os.killpg(pg, 9)
+---
+os.kill(
+    -1, signal.SIGKILL)
+---
+subprocess.run([
+    'kill', '-9', '-1',
+])
+---
+kill -9 \
+  -1
+
+[pass together]
+parent = os.getppid()
+if parent == 1:
+    sys.exit(0)
+---
+sleep 60 &
+pid=$!
+kill -9 "$pid"
+---
+p = subprocess.Popen(cmd, start_new_session=True)
+os.killpg(
+    p.pid, signal.SIGTERM)
+---
+me=$$
+kill -TERM $me

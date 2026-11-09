@@ -89,12 +89,9 @@ class EntrypointTest(unittest.TestCase):
                                  name, by,
                                  'is skipped' if skipped else 'runs'))
 
-    @unittest.skipIf(os.name == 'nt', 'redproof.py runs on POSIX only')
-    def test_redproof_runs_as_a_script(self):
-        # From a checkout of its own, since it snapshots the git checkout it
-        # sits in: a red-proof's copy of this one is not a checkout. Past its
-        # imports, the snapshot and the cases file, to the first thing it
-        # can refuse without running an entry.
+    def redproof_checkout(self):
+        '''A checkout holding only the red-proof and its entries, and the
+        environment to run it in.'''
         checkout = os.path.join(self.cwd, 'checkout')
         os.makedirs(os.path.join(checkout, 'tools'))
         for name in ('redproof.py', 'redproof_cases.py'):
@@ -111,11 +108,35 @@ class EntrypointTest(unittest.TestCase):
                      ['add', 'tools']):
             subprocess.run(['git', *args], cwd=checkout, env=env,
                            capture_output=True, check=True)
+        return checkout, env
+
+    @unittest.skipIf(os.name == 'nt', 'redproof.py runs on POSIX only')
+    def test_redproof_runs_as_a_script(self):
+        # From a checkout of its own, since it snapshots the git checkout it
+        # sits in: a red-proof's copy of this one is not a checkout. Past its
+        # imports, the snapshot and the cases file, to the first thing it
+        # can refuse without running an entry.
+        checkout, env = self.redproof_checkout()
         run = self.run_tool(os.path.join(checkout, 'tools', 'redproof.py'),
                             '--name', 'no-entry-is-called-this', env=env)
         self.assertEqual(2, run.returncode, run.stdout + run.stderr)
         self.assertIn("no entry name contains 'no-entry-is-called-this'",
                       run.stdout, run.stderr)
+
+    @unittest.skipIf(os.name == 'nt', 'redproof.py runs on POSIX only')
+    def test_redproof_refuses_a_signalling_entry_run_directly(self):
+        # Refused before anything runs. The checkout holds no schwaby, so
+        # were the refusal gone the run would stop at the copy's import
+        # check, exit 1, and still run no entry.
+        checkout, env = self.redproof_checkout()
+        env.pop('REDPROOF_JOBS_ALL', None)
+        run = self.run_tool(os.path.join(checkout, 'tools', 'redproof.py'),
+                            '--name', 'harness/a-dead-workers-tests-are-killed',
+                            env=env)
+        self.assertEqual(2, run.returncode, run.stdout + run.stderr)
+        self.assertIn('signal processes, so they run only as a queued job',
+                      run.stdout, run.stderr)
+        self.assertIn('harness/a-dead-workers-tests-are-killed', run.stdout)
 
     def test_redproof_audit_runs_as_a_script(self):
         # Run from the root of a copy, as the harness runs it: the copy's

@@ -550,6 +550,19 @@ class QueuedOnlyTest(unittest.TestCase):
         # Positive control: one that signals nothing runs either way.
         self.assertEqual([], redproof.queued_only([quiet], {}))
 
+    def test_a_test_that_runs_the_signalling_class_is_one(self):
+        for test, runs in (
+                ('tests/redproof_tool_test.py::WorkerTest', True),
+                ('tests/redproof_tool_test.py::WorkerTest::test_x', True),
+                ('./tests/redproof_tool_test.py::WorkerTest', True),
+                ('tests/redproof_tool_test.py', True),
+                ('tests/', True), ('tests', True), ('.', True),
+                ('tests/redproof_tool_test.py::JudgeTest', False),
+                ('tests/redproof_tool_test.py::WorkerTestX', False),
+                ('tests/light_check_test.py', False)):
+            with self.subTest(test=test):
+                self.assertEqual(runs, redproof.runs_signalling(test))
+
 
 class ReportTest(unittest.TestCase):
 
@@ -805,7 +818,11 @@ def task(item):
         time.sleep(0.5)
         found = siblings()
         for fd in found:
-            signal.pidfd_send_signal(fd, signal.SIGKILL)
+            try:
+                signal.pidfd_send_signal(fd, signal.SIGKILL)
+            except ProcessLookupError:
+                # Gone already: nothing to signal, which is the point.
+                pass
             os.close(fd)
         # Whether it killed any: a search that finds none proves nothing.
         return ('done', item, bool(found))
@@ -857,6 +874,8 @@ for items, size in ((['a', 'b'], 2), (['dies', 'slow'], 2),
                     (['stopped', 'after'], 1), (['kills-idle', 'x'], 3),
                     (['raises', 'a'], 1), (['unpicklable'], 1),
                     (['reaps-then-dies'], 1)):
+    # Each pool's own workers only: the last pool's are gone.
+    open(MARK + 'workers', 'w').close()
     got = sorted(rp.parallel(task, items, size, failed))
     print(items[0], got, flush=True)
 print('killed', killed, flush=True)
