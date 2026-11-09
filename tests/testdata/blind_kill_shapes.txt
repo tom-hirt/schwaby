@@ -17,11 +17,13 @@ kill -KILL $PPID 2>/dev/null
 kill -9 "$(ps -o ppid= -p $$)"
 ps -o ppid= -p $$ | xargs kill
 kill -9 "$(awk '/PPid/ {print $2}' /proc/$$/status)"
+echo $PPID | xargs kill
 # the parent, by psutil
 os.kill(psutil.Process().ppid(), 9)
 psutil.Process().parent().kill()
 psutil.Process().parent().terminate()
 psutil.Process().parent().send_signal(9)
+psutil.Process(os.getppid()).kill()
 # every process
 os.kill(-1, 15)
 kill -9 -1
@@ -44,6 +46,9 @@ trap 'kill 0' EXIT
 os.killpg(os.getpgrp(), 9)
 os.killpg(os.getpgid(0), 9)
 os.killpg(os.getsid(0), 9)
+os.killpg(os.getpgid(os.getpid()), 9)
+os.kill(-os.getpgrp(), 9)
+process.kill(-process.pid)
 kill -- -$$
 kill -TERM -"$$"
 kill -TERM -${$}
@@ -57,6 +62,8 @@ subprocess.run(["kill", str(os.getppid())])
 subprocess.run(("kill", "--", "-1"))
 subprocess.run(["kill -9 0"])
 subprocess.call("kill -9 -1", shell=True)
+subprocess.run(["/bin/kill", "-9", "-1"])
+subprocess.run(["/usr/bin/kill", "0"])
 run("kill -9 $pid"); run("kill 0")
 # a user or a group, by pkill or killall
 pkill -u "$USER"
@@ -87,11 +94,14 @@ pkill -f a-name-no-other-process-has
 # a pid found by name
 kill "$(pgrep -f pytest)"
 kill $(pidof sleep)
+pgrep -f pytest | xargs kill
+pidof sleep | xargs kill -9
 kill "$(cut -d' ' -f4 /proc/$pid/stat)"
 
 [pass]
 # a child it started
 os.kill(p.pid, signal.SIGKILL)
+process.kill(child.pid)
 proc.kill()
 kill -9 "$pid"
 subprocess.run(["kill", "-9", str(p.pid)])

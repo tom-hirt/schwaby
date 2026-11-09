@@ -184,6 +184,8 @@ _SHELL = re.compile(r'(?<![\w.$-])(?:/[\w./-]*/)?(%s|%s|%s)(?![\w(-])'
 #: Python's kill and killpg, from os or imported bare: not another
 #: object's method.
 _PY = re.compile(r'(?:\bos\.|(?<![\w.]))%s(pg)?\(' % _K)
+#: Node's process.kill, whose first argument is the target.
+_NODE = re.compile(r'\bprocess\.%s\(\s*([^,)]*)' % _K)
 #: An argv list or tuple naming the command first.
 _ARGV = re.compile(r'[\[(]\s*([\'"])(?:[^\'"\s]*/)?(%s|%s|%s)\1\s*,'
                    % (_KA, _P, _K))
@@ -366,6 +368,12 @@ def blind_kill(line):
             return 'every process'
         own = (_OWN_GROUP_CALL if m.group(1) else _OWN_NEGATED_CALL)
         if not marked and (target == '0' or own.fullmatch(target)):
+            return 'its own group'
+    for m in _NODE.finditer(line):
+        target = m.group(1).replace(' ', '')
+        if _EVERY.fullmatch(target):
+            return 'every process'
+        if not marked and target in ('0', '-process.pid'):
             return 'its own group'
     for m in _ARGV.finditer(line):
         words = _argv_words(line[m.end():])
