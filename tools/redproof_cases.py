@@ -8923,9 +8923,12 @@ CASES += [
          'schwaby/client/asynchronous.py',
          "    lock = getattr(client.session, '_token_refresh_lock', None)\n",
          "    lock = None\n",
+         # Two ensure_token_fresh calls refresh once by the client's own
+         # single flight now; the session's lock is what keeps one apart
+         # from a request's own refresh inside the session.
          'tests/auth_test.py::EnsureTokenFreshSessionTest'
-         '::test_two_async_calls_at_once_refresh_once',
-         'two calls at once each sent a refresh'),
+         '::test_a_request_and_ensure_token_fresh_refresh_once',
+         'a request and ensure_token_fresh each sent a refresh'),
 
     # transport=: every request a client sends goes through the transport it
     # was given, the token endpoint's included. A path that drops it sends
