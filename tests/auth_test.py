@@ -3250,24 +3250,70 @@ class EnsureTokenFreshSessionTest(unittest.TestCase):
         self.assertEqual([], self.written)
 
     def test_two_calls_at_once_refresh_once(self):
+        # The second call is let through only once the first is inside its
+        # refresh and the second is waiting on the lock, so the two
+        # overlap every time, not by chance.
         import threading
         import httpx2
-        gate = threading.Event()
+        inside, gate = threading.Event(), threading.Event()
+        attempts = []
+
+        class WatchedLock:
+            def __init__(self):
+                self.lock = threading.Lock()
+
+            def __enter__(self):
+                attempts.append(threading.get_ident())
+                self.lock.acquire()
+                return self
+
+            def __exit__(self, *exc):
+                self.lock.release()
+                return False
 
         def slow(transport, request):
-            gate.wait(5)
+            inside.set()
+            self.assertTrue(gate.wait(10), 'the second call never waited')
             return self.answer(request)
         with patch.object(httpx2.HTTPTransport, 'handle_request', slow):
             c = self.client()
-            threads = [threading.Thread(target=c.ensure_token_fresh)
-                       for _ in range(2)]
-            for t in threads:
-                t.start()
+            c._refresh_lock = WatchedLock()
+            first = threading.Thread(target=c.ensure_token_fresh)
+            first.start()
+            self.assertTrue(inside.wait(10), 'the first call never refreshed')
+            second = threading.Thread(target=c.ensure_token_fresh)
+            second.start()
+            deadline = time.monotonic() + 10
+            while len(attempts) < 2:
+                self.assertLess(time.monotonic(), deadline,
+                                'the second call never reached the lock')
+                time.sleep(0.01)
             gate.set()
-            for t in threads:
+            for t in (first, second):
                 t.join(10)
+                self.assertFalse(t.is_alive())
         self.assertEqual([self.TOKEN_URL], self.posts,
                          'two calls at once each sent a refresh')
+
+    def test_a_request_and_ensure_token_fresh_refresh_once(self):
+        # A request's own refresh on the way past, and this, at once.
+        import httpx2
+
+        async def answer(transport, request):
+            await asyncio.sleep(0)
+            if request.url.path == self.TOKEN_URL:
+                return self.answer(request)
+            return httpx2.Response(200, json={}, request=request)
+
+        async def both():
+            c = self.client(asyncio_=True, seconds_left=-10)
+            await asyncio.gather(c.get_quote('AAPL'), c.ensure_token_fresh())
+        with patch.object(httpx2.AsyncHTTPTransport, 'handle_async_request',
+                          answer):
+            asyncio.run(both())
+        self.assertEqual([self.TOKEN_URL], self.posts,
+                         'a request and ensure_token_fresh each sent a '
+                         'refresh')
 
     def test_two_async_calls_at_once_refresh_once(self):
         import httpx2

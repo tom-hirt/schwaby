@@ -2805,9 +2805,11 @@ CASES = [
     # defaults.
     Case('auth/a-login-exchange-error-defaults-to-not-answered',
          'schwaby/utils.py',
-         "                 status_code=None, endpoint_answered=False):\n"
+         "                 status_code=None, endpoint_answered=False,\n"
+         "                 kind=None, server_error_code=None):\n"
          "        super().__init__(error, description, uri)\n",
-         "                 status_code=None, endpoint_answered=True):\n"
+         "                 status_code=None, endpoint_answered=True,\n"
+         "                 kind=None, server_error_code=None):\n"
          "        super().__init__(error, description, uri)\n",
          'tests/auth_test.py::LoginExchangeErrorTest'
          '::test_a_login_refused_before_the_code_is_sent_says_so',
@@ -2823,8 +2825,10 @@ CASES = [
 
     Case('refresh/answered-reaches-the-refresh-error',
          'schwaby/client/base.py',
-         '                    endpoint_answered=answered) from e',
-         '                    endpoint_answered=False) from e',
+         '                    endpoint_answered=answered,\n'
+         '                    kind=_refresh_kind(',
+         '                    endpoint_answered=False,\n'
+         '                    kind=_refresh_kind(',
          'tests/utils_test.py::TokenEndpointStatusTest'
          '::test_a_refusal_without_a_json_body_carries_its_status',
          'False is not true'),
@@ -2839,8 +2843,10 @@ CASES = [
 
     Case('auth/answered-reaches-the-login-error',
          'schwaby/auth.py',
-         '                endpoint_answered=answered) from None',
-         '                endpoint_answered=False) from None',
+         '                endpoint_answered=answered,\n'
+         '                kind=_exchange_kind(',
+         '                endpoint_answered=False,\n'
+         '                kind=_exchange_kind(',
          'tests/auth_test.py::LoginExchangeErrorTest'
          '::test_a_refused_exchange_carries_the_endpoints_status',
          'False is not true'),
@@ -4459,8 +4465,10 @@ CASES = [
 
     Case('auth/login-exchange-error-is-not-chained',
          'schwaby/auth.py',
-         '                endpoint_answered=answered) from None',
-         '                endpoint_answered=answered) from e',
+         '                server_error_code=_sent_code(e) if answered else None\n'
+         '                ) from None',
+         '                server_error_code=_sent_code(e) if answered else None\n'
+         '                ) from e',
          'tests/auth_test.py::LoginExchangeErrorTest::test_refusal_text_is_escaped_and_cut',
          'unexpectedly found'),
 
