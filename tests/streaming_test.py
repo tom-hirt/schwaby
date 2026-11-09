@@ -6079,6 +6079,155 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         self.assert_handler_called_once_with(async_handler, expected_item)
 
     ##########################################################################
+    # Keys: refused when empty or one string, and batched when asked
+
+    def sent_requests(self, socket):
+        return [json.loads(call[0][0])['requests'][0]
+                for call in socket.send.call_args_list]
+
+    def record_requests(self, client):
+        # What the client would send, each request's command and keys,
+        # without a socket: a request that should never be made shows up
+        # here instead of waiting on a reply nobody gives.
+        sent = []
+
+        async def one(symbols, service, command, field_type, *, fields=None):
+            sent.append((command, ','.join(symbols)))
+        client._one_service_op = one
+        return sent
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_empty_keys_or_one_string_are_refused_before_sending(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        socket.send.reset_mock()
+        sent = self.record_requests(self.client)
+        for name in ('level_one_equity_subs', 'level_one_equity_add',
+                     'level_one_equity_unsubs', 'news_headline_subs',
+                     'screener_equity_unsubs'):
+            method = getattr(self.client, name)
+            for symbols, error in (([], ValueError), ((), ValueError),
+                                   ('AAPL', TypeError), (b'AAPL', TypeError),
+                                   (5, TypeError)):
+                with self.subTest(method=name, symbols=symbols):
+                    with self.assertRaises(error):
+                        await method(symbols)
+        self.assertEqual([], sent, 'a request was made with no keys')
+        socket.send.assert_not_called()
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_tuple_of_keys_and_of_fields_is_taken_and_kept(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        socket.recv.side_effect = [json.dumps(self.success_response(
+            1, 'LEVELONE_EQUITIES', 'SUBS')), json.dumps(
+            self.success_response(2, 'LEVELONE_EQUITIES', 'SUBS'))]
+        F = StreamClient.LevelOneEquityFields
+        socket.send.reset_mock()
+        await self.client.level_one_equity_subs(
+                ('AAPL', 'MSFT'), fields=(F.BID_PRICE,))
+        mine = [F.BID_PRICE]
+        await self.client.level_one_equity_subs(['GOOG'], fields=mine)
+        first, second = self.sent_requests(socket)
+        self.assertEqual('AAPL,MSFT', first['parameters']['keys'])
+        self.assertEqual('0,1', first['parameters']['fields'])
+        self.assertEqual([F.BID_PRICE], mine,
+                         "the caller's fields were changed")
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_keys_go_in_batches_when_asked(self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        socket.recv.side_effect = [
+                json.dumps(self.success_response(1, 'NEWS_HEADLINE', 'SUBS')),
+                json.dumps(self.success_response(2, 'NEWS_HEADLINE', 'ADD')),
+                json.dumps(self.success_response(3, 'NEWS_HEADLINE', 'ADD')),
+                json.dumps(self.success_response(
+                    4, 'NEWS_HEADLINE', 'UNSUBS')),
+                json.dumps(self.success_response(
+                    5, 'NEWS_HEADLINE', 'UNSUBS'))]
+        socket.send.reset_mock()
+        await self.client.news_headline_subs(
+                ['A', 'B', 'C', 'D', 'E'], keys_per_request=2)
+        await self.client.news_headline_unsubs(
+                ['A', 'B', 'C'], keys_per_request=2)
+        self.assertEqual(
+                [('SUBS', 'A,B'), ('ADD', 'C,D'), ('ADD', 'E'),
+                 ('UNSUBS', 'A,B'), ('UNSUBS', 'C')],
+                [(r['command'], r['parameters']['keys'])
+                 for r in self.sent_requests(socket)],
+                'a SUBS was not sent as one SUBS and then ADDs')
+
+    @no_duplicates
+    async def test_a_subs_in_batches_is_one_subs_and_then_adds(self):
+        sent = self.record_requests(self.client)
+        await self.client.level_one_equity_subs(
+                ['A', 'B', 'C', 'D', 'E'], keys_per_request=2)
+        await self.client.level_one_equity_add(
+                ['F', 'G', 'H'], keys_per_request=2)
+        self.assertEqual(
+                [('SUBS', 'A,B'), ('ADD', 'C,D'), ('ADD', 'E'),
+                 ('ADD', 'F,G'), ('ADD', 'H')], sent,
+                'a SUBS was not sent as one SUBS and then ADDs')
+
+    @no_duplicates
+    async def test_a_calls_batch_size_overrides_the_clients(self):
+        client = StreamClient(self.http_client, keys_per_request=1)
+        sent = self.record_requests(client)
+        await client.news_headline_add(['A', 'B'])
+        await client.news_headline_add(['C', 'D'], keys_per_request=5)
+        self.assertEqual([('ADD', 'A'), ('ADD', 'B'), ('ADD', 'C,D')], sent,
+                         "a call's own batch size did not win")
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_the_clients_batch_size_is_the_default(self, ws_connect):
+        self.client = StreamClient(self.http_client, keys_per_request=1)
+        socket = await self.login_and_get_socket(ws_connect)
+        socket.recv.side_effect = [
+                json.dumps(self.success_response(1, 'NEWS_HEADLINE', 'ADD')),
+                json.dumps(self.success_response(2, 'NEWS_HEADLINE', 'ADD')),
+                json.dumps(self.success_response(3, 'NEWS_HEADLINE', 'ADD'))]
+        socket.send.reset_mock()
+        await self.client.news_headline_add(['A', 'B'])
+        # A call's own size wins.
+        await self.client.news_headline_add(['C', 'D'], keys_per_request=5)
+        self.assertEqual(['A', 'B', 'C,D'],
+                         [r['parameters']['keys']
+                          for r in self.sent_requests(socket)])
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_refusal_part_way_says_what_was_sent(self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        refused = self.success_response(2, 'NEWS_HEADLINE', 'ADD')
+        refused['response'][0]['content'] = {
+                'code': 19, 'msg': 'REACHED_SYMBOL_LIMIT'}
+        socket.recv.side_effect = [
+                json.dumps(self.success_response(1, 'NEWS_HEADLINE', 'SUBS')),
+                json.dumps(refused)]
+        with self.assertRaises(schwaby.streaming.UnexpectedResponseCode) as cm:
+            await self.client.news_headline_subs(
+                    ['A', 'B', 'C', 'D', 'E'], keys_per_request=2)
+        self.assertEqual(['A', 'B'], cm.exception.sent_keys,
+                         'the batches that stand were not said')
+        self.assertEqual(['C', 'D', 'E'], cm.exception.unsent_keys)
+
+    @no_duplicates
+    async def test_a_batch_size_it_cannot_use_is_refused(self):
+        for size, error in ((0, ValueError), (-1, ValueError),
+                            (True, TypeError), (2.0, TypeError),
+                            ('3', TypeError)):
+            with self.subTest(size=size):
+                with self.assertRaises(error):
+                    StreamClient(self.http_client, keys_per_request=size)
+                with self.assertRaises(error):
+                    await self.client.news_headline_add(
+                            ['A'], keys_per_request=size)
+
+    ##########################################################################
     # NEWS_HEADLINE
 
     @no_duplicates

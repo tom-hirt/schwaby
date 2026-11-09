@@ -159,6 +159,31 @@ class SetupPyTest(unittest.TestCase):
                  'psutil', 'websockets'], names)
 
     @no_duplicates
+    def test_the_three_core_dependencies_are_bounded_and_locked_inside(self):
+        # A floor and a ceiling on each, and the lock inside both: a lock
+        # outside them would test versions no install can get.
+        from packaging.requirements import Requirement
+        declared = {Requirement(r).name.lower(): Requirement(r).specifier
+                    for r in self.kwargs['install_requires']}
+        locked = {}
+        with open(os.path.join(REPO_ROOT, 'requirements.lock')) as f:
+            for line in f:
+                m = re.match(r'^([A-Za-z0-9_.-]+)==([^\s;]+)', line)
+                if m:
+                    locked.setdefault(m.group(1).lower(), []).append(
+                            m.group(2))
+        for name in ('authlib', 'httpx2', 'websockets'):
+            with self.subTest(name=name):
+                operators = {s.operator for s in declared[name]}
+                self.assertIn('>=', operators, name + ' has no floor')
+                self.assertIn('<', operators, name + ' has no ceiling')
+                self.assertTrue(locked.get(name), name + ' is not locked')
+                for version in locked[name]:
+                    self.assertIn(version, declared[name],
+                                  '%s %s is locked outside %s'
+                                  % (name, version, declared[name]))
+
+    @no_duplicates
     def test_dev_is_the_only_extra(self):
         # No `login` or `codegen` shim: pip treats an unknown extra as a
         # warning rather than an error, so an old pin naming one still

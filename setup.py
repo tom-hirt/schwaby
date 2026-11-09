@@ -61,9 +61,12 @@ setuptools.setup(
     ],
     python_requires='>=3.10',
     install_requires=[
-        'authlib>=1.8',
-        'httpx2>=2.12.0',
-        'websockets>=14.0',
+        # Each bounded below by the oldest the suite passes on, and above by
+        # its next major: authlib's choice between httpx and httpx2 is the
+        # kind of change a major can make silently.
+        'authlib>=1.8,<2',
+        'httpx2>=2.12.0,<3',
+        'websockets>=14.0,<18',
 
         # The interactive login flow runs a callback server in a separate
         # process. These are hard dependencies rather than an optional extra.

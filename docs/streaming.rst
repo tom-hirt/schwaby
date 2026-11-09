@@ -172,11 +172,32 @@ is reading the socket hands the response to whoever is waiting for it, so a
 subscription made against a quiet stream is sent immediately rather than waiting
 for a message to arrive first.
 
+.. _stream_keys:
+
+**The keys.** Each ``subs``, ``add`` and ``unsubs`` takes a list or a tuple of
+keys. An empty one raises ``ValueError`` before anything is sent: Schwab was
+measured refusing an empty ``NEWS_HEADLINE`` subscription with code 22, and
+what it does on other services is unmeasured. A single string raises
+``TypeError``, since it would otherwise be sent a letter at a time. A
+``fields`` you pass is copied, never changed.
+
+.. note::
+
+  **Batching is off unless you ask.** ``keys_per_request=N``, on the
+  :class:`StreamClient` or on one call, sends at most ``N`` keys a request,
+  one request after another. A ``subs`` becomes a ``subs`` of the first batch
+  and ``add``\ s of the rest, since a second ``subs`` would replace the
+  first. A refusal part-way raises with ``sent_keys`` and ``unsent_keys`` on
+  the error, and the batches sent before it stand. Schwab documents no limit
+  on keys per request; the limits measured are totals per service (ten keys
+  on each screener service), which batching does not lift.
+
 .. _subs_vs_add:
 
-Schwab documents nothing about what a second ``subs`` does to the first. Three
-rules account for every frame in a capture made by subscribing repeatedly and
-grouping the results by subscription key:
+Schwab's streamer documentation says a ``subs`` overwrites everything
+subscribed before on that service, and an ``add`` adds to it. Three rules
+account for every frame in a capture made by subscribing repeatedly and
+grouping the results by subscription key, and they agree with that:
 
 **A** ``subs`` **replaces the subscription for its service.** The keys named in
 the previous call stop delivering. There is no acknowledgement of the

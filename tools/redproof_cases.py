@@ -5027,8 +5027,8 @@ CASES = [
 
     Case('news-headline/subscribes-with-every-field',
          'schwaby/streaming.py',
-         "            symbols, 'NEWS_HEADLINE', 'SUBS', self.NewsHeadlineFields)\n",
-         "            symbols, 'NEWS_HEADLINE', 'SUBS')\n",
+         "            symbols, 'NEWS_HEADLINE', 'SUBS', self.NewsHeadlineFields,\n",
+         "            symbols, 'NEWS_HEADLINE', 'SUBS',\n",
          'tests/streaming_test.py::StreamClientTest'
          '::test_news_headline_subs_and_add_success_all_fields',
          # The request as sent, keys then a closing brace and no fields. The
@@ -9534,6 +9534,57 @@ CASES += [
          '        if held is not None:\n',
          'tests/auth_test.py::PacedSessionTest::test_a_flight_left_by_an_abandoned_loop_holds_nothing_up',
          'TimeoutError'),
+]
+
+# Stream keys (5.5.0): refused before sending when empty or one string; the
+# caller's fields never changed; batches only when asked, a SUBS's later
+# batches sent as ADDs, a call's size over the client's, and a refusal
+# part-way saying what stands.
+CASES += [
+    Case('stream-keys/empty-keys-are-refused',
+         'schwaby/streaming.py',
+         '    if not symbols:\n'
+         '        # Measured: Schwab refuses an empty NEWS_HEADLINE SUBS with code 22.\n',
+         '    if False:\n'
+         '        # Measured: Schwab refuses an empty NEWS_HEADLINE SUBS with code 22.\n',
+         'tests/streaming_test.py::StreamClientTest::test_empty_keys_or_one_string_are_refused_before_sending',
+         'ValueError not raised'),
+    Case('stream-keys/one-string-is-refused',
+         'schwaby/streaming.py',
+         '    if isinstance(symbols, (str, bytes)):\n',
+         '    if False:\n',
+         'tests/streaming_test.py::StreamClientTest::test_empty_keys_or_one_string_are_refused_before_sending',
+         'TypeError not raised'),
+    Case('stream-keys/the-callers-fields-are-copied',
+         'schwaby/streaming.py',
+         '            fields = list(fields) + [self.LevelOneEquityFields.SYMBOL]\n'
+         '        await self._service_op(\n'
+         "            symbols, 'LEVELONE_EQUITIES', 'SUBS', self.LevelOneEquityFields,\n",
+         '            fields.append(self.LevelOneEquityFields.SYMBOL)\n'
+         '        await self._service_op(\n'
+         "            symbols, 'LEVELONE_EQUITIES', 'SUBS', self.LevelOneEquityFields,\n",
+         'tests/streaming_test.py::StreamClientTest::test_a_tuple_of_keys_and_of_fields_is_taken_and_kept',
+         'AttributeError'),
+    Case('stream-keys/a-subs-later-batches-are-adds',
+         'schwaby/streaming.py',
+         "            batch_command = ('ADD' if command == 'SUBS' and start\n"
+         '                             else command)\n',
+         '            batch_command = command\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_subs_in_batches_is_one_subs_and_then_adds',
+         'a SUBS was not sent as one SUBS and then ADDs'),
+    Case('stream-keys/a-calls-size-overrides-the-clients',
+         'schwaby/streaming.py',
+         '                self._keys_per_request if keys_per_request is None\n'
+         '                else keys_per_request)\n',
+         '                self._keys_per_request)\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_calls_batch_size_overrides_the_clients',
+         "a call's own batch size did not win"),
+    Case('stream-keys/a-refusal-part-way-says-what-stands',
+         'schwaby/streaming.py',
+         '                e.sent_keys = list(sent)\n',
+         '                e.sent_keys = list(symbols)\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_refusal_part_way_says_what_was_sent',
+         'the batches that stand were not said'),
 ]
 
 # Out of the release red-proof (2026-11-09): entries on tooling, test

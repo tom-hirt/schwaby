@@ -598,6 +598,38 @@ class ResponseTimeoutError(SchwabError):
 ROUTED = object()
 
 
+def _checked_keys(symbols):
+    """The keys of a SUBS, ADD or UNSUBS, as a list: refused before anything
+    is sent when there are none, or when they are one string, which would be
+    sent a letter at a time."""
+    if isinstance(symbols, (str, bytes)):
+        raise TypeError('symbols must be a list or tuple of keys, not one '
+                        'string: {!r} would be sent a letter at a '
+                        'time'.format(symbols))
+    try:
+        symbols = list(symbols)
+    except TypeError:
+        raise TypeError('symbols must be a list or tuple of keys, got '
+                        '{}'.format(_type_name(symbols))) from None
+    if not symbols:
+        # Measured: Schwab refuses an empty NEWS_HEADLINE SUBS with code 22.
+        raise ValueError('symbols is empty: there is nothing to subscribe '
+                         'to, add or remove')
+    return symbols
+
+
+def _checked_batch_size(size):
+    if size is None:
+        return None
+    if isinstance(size, bool) or not isinstance(size, int):
+        raise TypeError('keys_per_request must be an int or None, got '
+                        '{}'.format(_type_name(size)))
+    if size < 1:
+        raise ValueError('keys_per_request must be one or more, got '
+                         '{}'.format(size))
+    return size
+
+
 def _is_mapping(obj):
     '''Whether ``obj`` can be read the way a decoded JSON object is read.
 
@@ -659,6 +691,17 @@ class StreamClient(EnumEnforcer):
                              request before raising
                              :class:`ResponseTimeoutError`. ``None`` waits
                              indefinitely.
+    :param keys_per_request: the most keys one SUBS, ADD or UNSUBS sends, or
+                             ``None`` (the default) for all of them in one.
+                             With a number, more keys go in batches, each
+                             awaited in turn, and a SUBS's batches after the
+                             first are sent as ADDs. A refusal part-way raises
+                             with ``sent_keys`` and ``unsent_keys`` on the
+                             error: the batches before it stand. Each
+                             subscribe method takes ``keys_per_request`` too,
+                             which overrides this. Schwab documents no limit
+                             per request; the limits measured are totals per
+                             service.
     '''
 
     #: Seconds to wait for the streaming server to respond to a request before
@@ -669,8 +712,11 @@ class StreamClient(EnumEnforcer):
 
     def __init__(self, client, *,
                  enforce_enums=True, ssl_context=None,
-                 response_timeout=DEFAULT_RESPONSE_TIMEOUT):
+                 response_timeout=DEFAULT_RESPONSE_TIMEOUT,
+                 keys_per_request=None):
         super().__init__(enforce_enums)
+
+        self._keys_per_request = _checked_batch_size(keys_per_request)
 
         self._ssl_context = ssl_context
         self._client = client
@@ -1621,7 +1667,34 @@ class StreamClient(EnumEnforcer):
                             'carried alongside a response. Ignoring it.')
 
     async def _service_op(self, symbols, service, command, field_type=None,
-                          *, fields=None):
+                          *, fields=None, keys_per_request=None):
+        symbols = _checked_keys(symbols)
+        size = _checked_batch_size(
+                self._keys_per_request if keys_per_request is None
+                else keys_per_request)
+        if size is None or len(symbols) <= size:
+            await self._one_service_op(symbols, service, command, field_type,
+                                       fields=fields)
+            return
+        # A SUBS replaces the service's subscriptions, so only the first
+        # batch is one; the rest are added to it.
+        sent = []
+        for start in range(0, len(symbols), size):
+            batch = symbols[start:start + size]
+            batch_command = ('ADD' if command == 'SUBS' and start
+                             else command)
+            try:
+                await self._one_service_op(batch, service, batch_command,
+                                           field_type, fields=fields)
+            except (UnexpectedResponseCode, ResponseTimeoutError) as e:
+                # The earlier batches stand.
+                e.sent_keys = list(sent)
+                e.unsent_keys = list(symbols[start:])
+                raise
+            sent.extend(batch)
+
+    async def _one_service_op(self, symbols, service, command, field_type,
+                              *, fields=None):
         parameters = {
             'keys': ','.join(symbols)
         }
@@ -2550,7 +2623,7 @@ class StreamClient(EnumEnforcer):
         #: many days after 1 January 1970.
         CHART_DAY = 8
 
-    async def chart_equity_subs(self, symbols):
+    async def chart_equity_subs(self, symbols, *, keys_per_request=None):
         '''
 
         Subscribe to equity charts. Behavior is undefined if called multiple
@@ -2559,18 +2632,20 @@ class StreamClient(EnumEnforcer):
         :param symbols: Equity symbols to subscribe to.'''
         await self._service_op(
             symbols, 'CHART_EQUITY', 'SUBS', self.ChartEquityFields,
-            fields=self.ChartEquityFields.all_fields())
+            fields=self.ChartEquityFields.all_fields(),
+            keys_per_request=keys_per_request)
 
-    async def chart_equity_unsubs(self, symbols):
+    async def chart_equity_unsubs(self, symbols, *, keys_per_request=None):
         '''
 
         Un-Subscribe to equity charts. Behavior is undefined if called multiple
         times.
 
         :param symbols: Equity symbols to subscribe to.'''
-        await self._service_op(symbols, 'CHART_EQUITY', 'UNSUBS')
+        await self._service_op(symbols, 'CHART_EQUITY', 'UNSUBS',
+            keys_per_request=keys_per_request)
 
-    async def chart_equity_add(self, symbols):
+    async def chart_equity_add(self, symbols, *, keys_per_request=None):
         '''
 
         Add a symbol to the equity charts subscription. Behavior is undefined
@@ -2580,7 +2655,8 @@ class StreamClient(EnumEnforcer):
         '''
         await self._service_op(
             symbols, 'CHART_EQUITY', 'ADD', self.ChartEquityFields,
-            fields=self.ChartEquityFields.all_fields())
+            fields=self.ChartEquityFields.all_fields(),
+            keys_per_request=keys_per_request)
 
     def add_chart_equity_handler(self, handler):
         '''
@@ -2622,7 +2698,7 @@ class StreamClient(EnumEnforcer):
         #: Total volume for the minute
         VOLUME = 6
 
-    async def chart_futures_subs(self, symbols):
+    async def chart_futures_subs(self, symbols, *, keys_per_request=None):
         '''
 
         Subscribe to futures charts. Behavior is undefined if called multiple
@@ -2632,9 +2708,10 @@ class StreamClient(EnumEnforcer):
         '''
         await self._service_op(
             symbols, 'CHART_FUTURES', 'SUBS', self.ChartFuturesFields,
-            fields=self.ChartFuturesFields.all_fields())
+            fields=self.ChartFuturesFields.all_fields(),
+            keys_per_request=keys_per_request)
 
-    async def chart_futures_unsubs(self, symbols):
+    async def chart_futures_unsubs(self, symbols, *, keys_per_request=None):
         '''
 
         Un-Subscribe to futures charts. Behavior is undefined if called multiple
@@ -2642,9 +2719,10 @@ class StreamClient(EnumEnforcer):
 
         :param symbols: Futures symbols to subscribe to.
         '''
-        await self._service_op(symbols, 'CHART_FUTURES', 'UNSUBS')
+        await self._service_op(symbols, 'CHART_FUTURES', 'UNSUBS',
+            keys_per_request=keys_per_request)
 
-    async def chart_futures_add(self, symbols):
+    async def chart_futures_add(self, symbols, *, keys_per_request=None):
         '''
 
         Add a symbol to the futures chart subscription. Behavior is undefined
@@ -2654,7 +2732,8 @@ class StreamClient(EnumEnforcer):
         '''
         await self._service_op(
             symbols, 'CHART_FUTURES', 'ADD', self.ChartFuturesFields,
-            fields=self.ChartFuturesFields.all_fields())
+            fields=self.ChartFuturesFields.all_fields(),
+            keys_per_request=keys_per_request)
 
     def add_chart_futures_handler(self, handler):
         '''
@@ -2868,7 +2947,8 @@ class StreamClient(EnumEnforcer):
         #: given on ``BID_SIZE_FRACTIONAL``.
         ASK_SIZE_FRACTIONAL = 56
 
-    async def level_one_equity_subs(self, symbols, *, fields=None):
+    async def level_one_equity_subs(self, symbols, *, fields=None,
+                                    keys_per_request=None):
         '''
 
         Subscribe to level one equity quote data.
@@ -2879,12 +2959,13 @@ class StreamClient(EnumEnforcer):
                        fields will be requested.
         '''
         if fields and self.LevelOneEquityFields.SYMBOL not in fields:
-            fields.append(self.LevelOneEquityFields.SYMBOL)
+            fields = list(fields) + [self.LevelOneEquityFields.SYMBOL]
         await self._service_op(
             symbols, 'LEVELONE_EQUITIES', 'SUBS', self.LevelOneEquityFields,
-            fields=fields)
+            fields=fields,
+            keys_per_request=keys_per_request)
 
-    async def level_one_equity_unsubs(self, symbols):
+    async def level_one_equity_unsubs(self, symbols, *, keys_per_request=None):
         '''
 
         Un-Subscribe to level one equity quote data.
@@ -2892,9 +2973,11 @@ class StreamClient(EnumEnforcer):
         :param symbols: Equity symbols to receive quotes for
         '''
 
-        await self._service_op(symbols, 'LEVELONE_EQUITIES', 'UNSUBS')
+        await self._service_op(symbols, 'LEVELONE_EQUITIES', 'UNSUBS',
+            keys_per_request=keys_per_request)
 
-    async def level_one_equity_add(self, symbols, *, fields=None):
+    async def level_one_equity_add(self, symbols, *, fields=None,
+                                   keys_per_request=None):
         '''
 
         Add symbols to the list to receive quotes for.
@@ -2905,10 +2988,11 @@ class StreamClient(EnumEnforcer):
                        fields will be requested.
         '''
         if fields and self.LevelOneEquityFields.SYMBOL not in fields:
-            fields.append(self.LevelOneEquityFields.SYMBOL)
+            fields = list(fields) + [self.LevelOneEquityFields.SYMBOL]
         await self._service_op(
             symbols, 'LEVELONE_EQUITIES', 'ADD',
-            self.LevelOneEquityFields, fields=fields)
+            self.LevelOneEquityFields, fields=fields,
+            keys_per_request=keys_per_request)
 
     async def level_one_equity_view(self, fields):
         '''
@@ -3111,7 +3195,8 @@ class StreamClient(EnumEnforcer):
         #: Exercise type
         EXERCISE_TYPE = 55
 
-    async def level_one_option_subs(self, symbols, *, fields=None):
+    async def level_one_option_subs(self, symbols, *, fields=None,
+                                    keys_per_request=None):
         '''
 
         Subscribe to level one option quote data.
@@ -3122,21 +3207,24 @@ class StreamClient(EnumEnforcer):
                        fields will be requested.
         '''
         if fields and self.LevelOneOptionFields.SYMBOL not in fields:
-            fields.append(self.LevelOneOptionFields.SYMBOL)
+            fields = list(fields) + [self.LevelOneOptionFields.SYMBOL]
         await self._service_op(
             symbols, 'LEVELONE_OPTIONS', 'SUBS', self.LevelOneOptionFields,
-            fields=fields)
+            fields=fields,
+            keys_per_request=keys_per_request)
 
-    async def level_one_option_unsubs(self, symbols):
+    async def level_one_option_unsubs(self, symbols, *, keys_per_request=None):
         '''
 
         Un-Subscribe to level one option quote data.
 
         :param symbols: Option symbols to receive quotes for
         '''
-        await self._service_op(symbols, 'LEVELONE_OPTIONS', 'UNSUBS')
+        await self._service_op(symbols, 'LEVELONE_OPTIONS', 'UNSUBS',
+            keys_per_request=keys_per_request)
 
-    async def level_one_option_add(self, symbols, *, fields=None):
+    async def level_one_option_add(self, symbols, *, fields=None,
+                                   keys_per_request=None):
         '''
 
         Add symbols to the list to receive quotes for.
@@ -3147,10 +3235,11 @@ class StreamClient(EnumEnforcer):
                        fields will be requested.
         '''
         if fields and self.LevelOneOptionFields.SYMBOL not in fields:
-            fields.append(self.LevelOneOptionFields.SYMBOL)
+            fields = list(fields) + [self.LevelOneOptionFields.SYMBOL]
         await self._service_op(
             symbols, 'LEVELONE_OPTIONS', 'ADD',
-            self.LevelOneOptionFields, fields=fields)
+            self.LevelOneOptionFields, fields=fields,
+            keys_per_request=keys_per_request)
 
     async def level_one_option_view(self, fields):
         '''
@@ -3308,7 +3397,8 @@ class StreamClient(EnumEnforcer):
         #: Expiration date of this contract
         SETTLEMENT_DATE = 40
 
-    async def level_one_futures_subs(self, symbols, *, fields=None):
+    async def level_one_futures_subs(self, symbols, *, fields=None,
+                                     keys_per_request=None):
         '''
 
         Subscribe to level one futures quote data.
@@ -3319,12 +3409,14 @@ class StreamClient(EnumEnforcer):
                        fields will be requested.
         '''
         if fields and self.LevelOneFuturesFields.SYMBOL not in fields:
-            fields.append(self.LevelOneFuturesFields.SYMBOL)
+            fields = list(fields) + [self.LevelOneFuturesFields.SYMBOL]
         await self._service_op(
             symbols, 'LEVELONE_FUTURES', 'SUBS', self.LevelOneFuturesFields,
-            fields=fields)
+            fields=fields,
+            keys_per_request=keys_per_request)
 
-    async def level_one_futures_unsubs(self, symbols):
+    async def level_one_futures_unsubs(self, symbols, *,
+                                       keys_per_request=None):
         '''
 
         Un-Subscribe to level one futures quote data.
@@ -3332,9 +3424,11 @@ class StreamClient(EnumEnforcer):
         :param symbols: Futures symbols to receive quotes for
         '''
 
-        await self._service_op(symbols, 'LEVELONE_FUTURES', 'UNSUBS')
+        await self._service_op(symbols, 'LEVELONE_FUTURES', 'UNSUBS',
+            keys_per_request=keys_per_request)
 
-    async def level_one_futures_add(self, symbols, *, fields=None):
+    async def level_one_futures_add(self, symbols, *, fields=None,
+                                    keys_per_request=None):
         '''
 
         Add symbols to the list to receive quotes for.
@@ -3345,10 +3439,11 @@ class StreamClient(EnumEnforcer):
                        fields will be requested.
         '''
         if fields and self.LevelOneFuturesFields.SYMBOL not in fields:
-            fields.append(self.LevelOneFuturesFields.SYMBOL)
+            fields = list(fields) + [self.LevelOneFuturesFields.SYMBOL]
         await self._service_op(
             symbols, 'LEVELONE_FUTURES', 'ADD',
-            self.LevelOneFuturesFields, fields=fields)
+            self.LevelOneFuturesFields, fields=fields,
+            keys_per_request=keys_per_request)
 
     async def level_one_futures_view(self, fields):
         '''
@@ -3473,7 +3568,8 @@ class StreamClient(EnumEnforcer):
         #: Mark-to-Market value is calculated daily using current prices to determine profit/loss
         MARK = 29
 
-    async def level_one_forex_subs(self, symbols, *, fields=None):
+    async def level_one_forex_subs(self, symbols, *, fields=None,
+                                   keys_per_request=None):
         '''
 
         Subscribe to level one forex quote data.
@@ -3484,12 +3580,13 @@ class StreamClient(EnumEnforcer):
                        fields will be requested.
         '''
         if fields and self.LevelOneForexFields.SYMBOL not in fields:
-            fields.append(self.LevelOneForexFields.SYMBOL)
+            fields = list(fields) + [self.LevelOneForexFields.SYMBOL]
         await self._service_op(
             symbols, 'LEVELONE_FOREX', 'SUBS', self.LevelOneForexFields,
-            fields=fields)
+            fields=fields,
+            keys_per_request=keys_per_request)
 
-    async def level_one_forex_unsubs(self, symbols):
+    async def level_one_forex_unsubs(self, symbols, *, keys_per_request=None):
         '''
 
         Un-Subscribe to level one forex quote data.
@@ -3497,9 +3594,11 @@ class StreamClient(EnumEnforcer):
         :param symbols: Forex symbols to receive quotes for
         '''
 
-        await self._service_op(symbols, 'LEVELONE_FOREX', 'UNSUBS')
+        await self._service_op(symbols, 'LEVELONE_FOREX', 'UNSUBS',
+            keys_per_request=keys_per_request)
 
-    async def level_one_forex_add(self, symbols, *, fields=None):
+    async def level_one_forex_add(self, symbols, *, fields=None,
+                                  keys_per_request=None):
         '''
 
         Add symbols to the list to receive quotes for.
@@ -3511,10 +3610,11 @@ class StreamClient(EnumEnforcer):
 
         '''
         if fields and self.LevelOneForexFields.SYMBOL not in fields:
-            fields.append(self.LevelOneForexFields.SYMBOL)
+            fields = list(fields) + [self.LevelOneForexFields.SYMBOL]
         await self._service_op(
             symbols, 'LEVELONE_FOREX', 'ADD',
-            self.LevelOneForexFields, fields=fields)
+            self.LevelOneForexFields, fields=fields,
+            keys_per_request=keys_per_request)
 
     async def level_one_forex_view(self, fields):
         '''
@@ -3645,7 +3745,8 @@ class StreamClient(EnumEnforcer):
         #: Display name of exchange
         EXCHANGE_NAME = 31
 
-    async def level_one_futures_options_subs(self, symbols, *, fields=None):
+    async def level_one_futures_options_subs(self, symbols, *, fields=None,
+                                             keys_per_request=None):
         '''
 
         Subscribe to level one futures options quote data.
@@ -3656,12 +3757,14 @@ class StreamClient(EnumEnforcer):
                        If unset, all fields will be requested.
         '''
         if fields and self.LevelOneFuturesOptionsFields.SYMBOL not in fields:
-            fields.append(self.LevelOneFuturesOptionsFields.SYMBOL)
+            fields = list(fields) + [self.LevelOneFuturesOptionsFields.SYMBOL]
         await self._service_op(
             symbols, 'LEVELONE_FUTURES_OPTIONS', 'SUBS',
-            self.LevelOneFuturesOptionsFields, fields=fields)
+            self.LevelOneFuturesOptionsFields, fields=fields,
+            keys_per_request=keys_per_request)
 
-    async def level_one_futures_options_unsubs(self, symbols):
+    async def level_one_futures_options_unsubs(self, symbols, *,
+                                               keys_per_request=None):
         '''
 
         Un-Subscribe to level one futures options quote data.
@@ -3669,9 +3772,11 @@ class StreamClient(EnumEnforcer):
         :param symbols: Futures options symbols to receive quotes for
         '''
 
-        await self._service_op(symbols, 'LEVELONE_FUTURES_OPTIONS', 'UNSUBS')
+        await self._service_op(symbols, 'LEVELONE_FUTURES_OPTIONS', 'UNSUBS',
+            keys_per_request=keys_per_request)
 
-    async def level_one_futures_options_add(self, symbols, *, fields=None):
+    async def level_one_futures_options_add(self, symbols, *, fields=None,
+                                            keys_per_request=None):
         '''
 
         Add symbols to the list to receive quotes for.
@@ -3682,10 +3787,11 @@ class StreamClient(EnumEnforcer):
                        If unset, all fields will be requested.
         '''
         if fields and self.LevelOneFuturesOptionsFields.SYMBOL not in fields:
-            fields.append(self.LevelOneFuturesOptionsFields.SYMBOL)
+            fields = list(fields) + [self.LevelOneFuturesOptionsFields.SYMBOL]
         await self._service_op(
             symbols, 'LEVELONE_FUTURES_OPTIONS', 'ADD',
-            self.LevelOneFuturesOptionsFields, fields=fields)
+            self.LevelOneFuturesOptionsFields, fields=fields,
+            keys_per_request=keys_per_request)
 
     async def level_one_futures_options_view(self, fields):
         '''
@@ -3801,7 +3907,7 @@ class StreamClient(EnumEnforcer):
     ##########################################################################
     # NYSE_BOOK
 
-    async def nyse_book_subs(self, symbols):
+    async def nyse_book_subs(self, symbols, *, keys_per_request=None):
         '''
         Subscribe to the NYSE level two order book.
 
@@ -3809,23 +3915,26 @@ class StreamClient(EnumEnforcer):
         '''
         await self._service_op(
             symbols, 'NYSE_BOOK', 'SUBS',
-            self.BookFields, fields=self.BookFields.all_fields())
+            self.BookFields, fields=self.BookFields.all_fields(),
+            keys_per_request=keys_per_request)
 
-    async def nyse_book_unsubs(self, symbols):
+    async def nyse_book_unsubs(self, symbols, *, keys_per_request=None):
         '''
         Un-Subscribe to the NYSE level two order book.
 
         :param symbols: NYSE symbols to unsubscribe from.
         '''
-        await self._service_op(symbols, 'NYSE_BOOK', 'UNSUBS')
+        await self._service_op(symbols, 'NYSE_BOOK', 'UNSUBS',
+            keys_per_request=keys_per_request)
 
-    async def nyse_book_add(self, symbols):
+    async def nyse_book_add(self, symbols, *, keys_per_request=None):
         '''
         Add to the NYSE level two order book.
 
         :param symbols: NYSE symbols to add to the subscription.
         '''
-        await self._service_op(symbols, 'NYSE_BOOK', 'ADD', self.BookFields)
+        await self._service_op(symbols, 'NYSE_BOOK', 'ADD', self.BookFields,
+            keys_per_request=keys_per_request)
 
     def add_nyse_book_handler(self, handler):
         '''
@@ -3838,7 +3947,7 @@ class StreamClient(EnumEnforcer):
     ##########################################################################
     # NASDAQ_BOOK
 
-    async def nasdaq_book_subs(self, symbols):
+    async def nasdaq_book_subs(self, symbols, *, keys_per_request=None):
         '''
         Subscribe to the NASDAQ level two order book.
 
@@ -3846,23 +3955,26 @@ class StreamClient(EnumEnforcer):
         '''
         await self._service_op(symbols, 'NASDAQ_BOOK', 'SUBS',
                                self.BookFields,
-                               fields=self.BookFields.all_fields())
+                               fields=self.BookFields.all_fields(),
+            keys_per_request=keys_per_request)
 
-    async def nasdaq_book_unsubs(self, symbols):
+    async def nasdaq_book_unsubs(self, symbols, *, keys_per_request=None):
         '''
         Un-Subscribe to the NASDAQ level two order book.
 
         :param symbols: NASDAQ symbols to unsubscribe from.
         '''
-        await self._service_op(symbols, 'NASDAQ_BOOK', 'UNSUBS')
+        await self._service_op(symbols, 'NASDAQ_BOOK', 'UNSUBS',
+            keys_per_request=keys_per_request)
 
-    async def nasdaq_book_add(self, symbols):
+    async def nasdaq_book_add(self, symbols, *, keys_per_request=None):
         '''
         Add to the NASDAQ level two order book.
 
         :param symbols: NASDAQ symbols to add to the subscription.
         '''
-        await self._service_op(symbols, 'NASDAQ_BOOK', 'ADD', self.BookFields)
+        await self._service_op(symbols, 'NASDAQ_BOOK', 'ADD', self.BookFields,
+            keys_per_request=keys_per_request)
 
     def add_nasdaq_book_handler(self, handler):
         '''
@@ -3875,7 +3987,7 @@ class StreamClient(EnumEnforcer):
     ##########################################################################
     # OPTIONS_BOOK
 
-    async def options_book_subs(self, symbols):
+    async def options_book_subs(self, symbols, *, keys_per_request=None):
         '''
         Subscribe to the level two order book for options.
 
@@ -3883,23 +3995,26 @@ class StreamClient(EnumEnforcer):
         '''
         await self._service_op(symbols, 'OPTIONS_BOOK', 'SUBS',
                                self.BookFields,
-                               fields=self.BookFields.all_fields())
+                               fields=self.BookFields.all_fields(),
+            keys_per_request=keys_per_request)
 
-    async def options_book_unsubs(self, symbols):
+    async def options_book_unsubs(self, symbols, *, keys_per_request=None):
         '''
         Un-Subscribe to the level two order book for options.
 
         :param symbols: Option symbols to unsubscribe from.
         '''
-        await self._service_op(symbols, 'OPTIONS_BOOK', 'UNSUBS')
+        await self._service_op(symbols, 'OPTIONS_BOOK', 'UNSUBS',
+            keys_per_request=keys_per_request)
 
-    async def options_book_add(self, symbols):
+    async def options_book_add(self, symbols, *, keys_per_request=None):
         '''
         Add to the level two order book for options.
 
         :param symbols: Option symbols to add to the subscription.
         '''
-        await self._service_op(symbols, 'OPTIONS_BOOK', 'ADD', self.BookFields)
+        await self._service_op(symbols, 'OPTIONS_BOOK', 'ADD', self.BookFields,
+            keys_per_request=keys_per_request)
 
     def add_options_book_handler(self, handler):
         '''
@@ -3945,7 +4060,7 @@ class StreamClient(EnumEnforcer):
     # A validator would first need checking against real traffic, long enough
     # to say whether the documented set is the actual set. Until then the key
     # format is documented and the caller decides.
-    async def screener_equity_subs(self, symbols):
+    async def screener_equity_subs(self, symbols, *, keys_per_request=None):
         '''
         Subscribe to Screener Equity.
 
@@ -3966,18 +4081,21 @@ class StreamClient(EnumEnforcer):
 
         :param symbols: Screener keys to subscribe to.
         '''
-        await self._service_op(symbols, 'SCREENER_EQUITY', 'SUBS', self.ScreenerFields)
+        await self._service_op(
+            symbols, 'SCREENER_EQUITY', 'SUBS', self.ScreenerFields,
+            keys_per_request=keys_per_request)
 
-    async def screener_equity_unsubs(self, symbols):
+    async def screener_equity_unsubs(self, symbols, *, keys_per_request=None):
         '''
         Un-Subscribe to Screener Equity.
 
         :param symbols: Screener keys to unsubscribe from, in the
                         ``(PREFIX)_(SORTFIELD)_(FREQUENCY)`` form.
         '''
-        await self._service_op(symbols, 'SCREENER_EQUITY', 'UNSUBS')
+        await self._service_op(symbols, 'SCREENER_EQUITY', 'UNSUBS',
+            keys_per_request=keys_per_request)
 
-    async def screener_equity_add(self, symbols):
+    async def screener_equity_add(self, symbols, *, keys_per_request=None):
         '''
         Add keys to the Screener Equity subscription.
 
@@ -3989,7 +4107,9 @@ class StreamClient(EnumEnforcer):
         :param symbols: Screener keys to add, in the
                         ``(PREFIX)_(SORTFIELD)_(FREQUENCY)`` form.
         '''
-        await self._service_op(symbols, 'SCREENER_EQUITY', 'ADD', self.ScreenerFields)
+        await self._service_op(
+            symbols, 'SCREENER_EQUITY', 'ADD', self.ScreenerFields,
+            keys_per_request=keys_per_request)
 
     def add_screener_equity_handler(self, handler):
         '''
@@ -3999,7 +4119,7 @@ class StreamClient(EnumEnforcer):
         self._handlers['SCREENER_EQUITY'].append(
             _Handler(handler, self.ScreenerFields))
 
-    async def screener_option_subs(self, symbols):
+    async def screener_option_subs(self, symbols, *, keys_per_request=None):
         '''
         Subscribe to Screener Option.
 
@@ -4016,18 +4136,21 @@ class StreamClient(EnumEnforcer):
 
         :param symbols: Screener keys to subscribe to.
         '''
-        await self._service_op(symbols, 'SCREENER_OPTION', 'SUBS', self.ScreenerFields)
+        await self._service_op(
+            symbols, 'SCREENER_OPTION', 'SUBS', self.ScreenerFields,
+            keys_per_request=keys_per_request)
 
-    async def screener_option_unsubs(self, symbols):
+    async def screener_option_unsubs(self, symbols, *, keys_per_request=None):
         '''
         Un-Subscribe to Screener Option.
 
         :param symbols: Screener keys to unsubscribe from, in the
                         ``(PREFIX)_(SORTFIELD)_(FREQUENCY)`` form.
         '''
-        await self._service_op(symbols, 'SCREENER_OPTION', 'UNSUBS')
+        await self._service_op(symbols, 'SCREENER_OPTION', 'UNSUBS',
+            keys_per_request=keys_per_request)
 
-    async def screener_option_add(self, symbols):
+    async def screener_option_add(self, symbols, *, keys_per_request=None):
         '''
         Add keys to the Screener Option subscription.
 
@@ -4039,7 +4162,9 @@ class StreamClient(EnumEnforcer):
         :param symbols: Screener keys to add, in the
                         ``(PREFIX)_(SORTFIELD)_(FREQUENCY)`` form.
         '''
-        await self._service_op(symbols, 'SCREENER_OPTION', 'ADD', self.ScreenerFields)
+        await self._service_op(
+            symbols, 'SCREENER_OPTION', 'ADD', self.ScreenerFields,
+            keys_per_request=keys_per_request)
 
     def add_screener_option_handler(self, handler):
         '''
@@ -4104,7 +4229,7 @@ class StreamClient(EnumEnforcer):
         #: A language tag, such as ``'en-US'``.
         LANGUAGE = 11
 
-    async def news_headline_subs(self, symbols):
+    async def news_headline_subs(self, symbols, *, keys_per_request=None):
         '''
         Subscribe to news headlines for the given symbols.
 
@@ -4114,18 +4239,20 @@ class StreamClient(EnumEnforcer):
         :param symbols: Symbols to receive headlines for.
         '''
         await self._service_op(
-            symbols, 'NEWS_HEADLINE', 'SUBS', self.NewsHeadlineFields)
+            symbols, 'NEWS_HEADLINE', 'SUBS', self.NewsHeadlineFields,
+            keys_per_request=keys_per_request)
 
-    async def news_headline_unsubs(self, symbols):
+    async def news_headline_unsubs(self, symbols, *, keys_per_request=None):
         '''
         Un-Subscribe to news headlines for the given symbols. See
         :ref:`news_headline`.
 
         :param symbols: Symbols to stop receiving headlines for.
         '''
-        await self._service_op(symbols, 'NEWS_HEADLINE', 'UNSUBS')
+        await self._service_op(symbols, 'NEWS_HEADLINE', 'UNSUBS',
+            keys_per_request=keys_per_request)
 
-    async def news_headline_add(self, symbols):
+    async def news_headline_add(self, symbols, *, keys_per_request=None):
         '''
         Add symbols to the news headline subscription. See
         :ref:`news_headline`.
@@ -4133,7 +4260,8 @@ class StreamClient(EnumEnforcer):
         :param symbols: Symbols to receive headlines for.
         '''
         await self._service_op(
-            symbols, 'NEWS_HEADLINE', 'ADD', self.NewsHeadlineFields)
+            symbols, 'NEWS_HEADLINE', 'ADD', self.NewsHeadlineFields,
+            keys_per_request=keys_per_request)
 
     def add_news_headline_handler(self, handler):
         '''

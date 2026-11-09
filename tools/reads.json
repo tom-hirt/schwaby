@@ -186,6 +186,7 @@
   "docs/order-templates.rst",
   "docs/streaming.rst",
   "examples/",
+  "requirements.lock",
   "schwaby/",
   "schwaby/__init__.py",
   "schwaby/auth.py",
