@@ -26,9 +26,10 @@ import webbrowser
 
 from schwaby import _redact
 from schwaby.client import AsyncClient, Client
-from schwaby.utils import (LoginExchangeError, SchwabError,
-        _expiry_authlib_acts_on, _is_instance, _refusal_text,
-        _token_endpoint_answer, _venue_text)
+from schwaby.utils import (LoginErrorKind, LoginExchangeError,
+        NoBrowserAvailable, SchwabError,
+        _exchange_kind, _expiry_authlib_acts_on, _is_instance, _redirect_kind,
+        _refusal_text, _sent_code, _token_endpoint_answer, _venue_text)
 from schwaby.debug import register_redactions
 
 
@@ -272,6 +273,7 @@ def _refuse_unusable_token_response(response):
                             '{} and no JSON body to say why'.format(
                                 response.status_code))
         refusal._described_by_this_library = True
+        refusal._no_json_body = True
         refusal._token_endpoint_status = response.status_code
         raise refusal from None
     if isinstance(body, dict) and 'error' in body:
@@ -1049,7 +1051,14 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
             input('Press ENTER to open the browser. Note you can call ' +
                   'this method with interactive=False to skip this input.')
 
-        controller = webbrowser.get(requested_browser)
+        try:
+            controller = webbrowser.get(requested_browser)
+        except webbrowser.Error as e:
+            raise NoBrowserAvailable(
+                    'No browser could be found to open Schwab\'s sign-in '
+                    'page ({}). On a machine with no display, '
+                    'client_from_manual_flow completes the login by hand.'
+                    .format(e)) from e
         controller.open(auth_context.authorization_url)
 
         # Wait for a response
@@ -1442,15 +1451,17 @@ def client_from_received_url(
     if error:
         raise LoginExchangeError(
                 _venue_text(error),
-                _venue_text((query.get('error_description') or [None])[0]))
+                _venue_text((query.get('error_description') or [None])[0]),
+                kind=_redirect_kind(error), server_error_code=error)
     if '#' in received_url:
         raise LoginExchangeError(
                 'invalid_request',
                 'the redirect carries a fragment, which this login does not '
-                'read')
+                'read', kind=LoginErrorKind.MALFORMED_REDIRECT)
     if 'code=' not in received_url or 'code' not in query:
         raise LoginExchangeError(
-                'missing_code', 'the redirect carries no authorization code')
+                'missing_code', 'the redirect carries no authorization code',
+                kind=LoginErrorKind.MALFORMED_REDIRECT)
 
     try:
         token = oauth.fetch_token(
@@ -1468,7 +1479,10 @@ def client_from_received_url(
         answered, status = _token_endpoint_answer(e)
         raise LoginExchangeError(
                 error, description, e.uri, status_code=status,
-                endpoint_answered=answered) from None
+                endpoint_answered=answered,
+                kind=_exchange_kind(e, answered, status),
+                server_error_code=_sent_code(e) if answered else None
+                ) from None
 
     # Don't emit token details in debug logs
     _register_token(token)

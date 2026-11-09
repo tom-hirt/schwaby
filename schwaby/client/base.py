@@ -11,15 +11,18 @@ import contextlib
 import datetime
 import inspect
 import json
+import math
 import os
 import schwaby
+import time
 import warnings
 
 from schwaby.orders.generic import OrderBuilder
 
 from ..utils import (EnumEnforcer, TokenRefreshError, _expiry_authlib_acts_on,
                      _format_iso_instant, _is_instance, _qualified_type_name,
-                     _refusal_text, _token_endpoint_answer)
+                     _refresh_kind, _refusal_text, _sent_code,
+                     _token_endpoint_answer)
 from .. import _redact
 from .. import utils as _utils
 
@@ -255,7 +258,10 @@ class BaseClient(EnumEnforcer):
                     token_age=age,
                     refresh_token_invalid=invalid,
                     status_code=status,
-                    endpoint_answered=answered) from e
+                    endpoint_answered=answered,
+                    kind=_refresh_kind(e, invalid, status),
+                    server_error_code=_sent_code(e) if answered else None
+                    ) from e
 
     def _stored_token_will_be_refreshed(self):
         '''Whether authlib will replace the session's token by itself. It
@@ -399,6 +405,40 @@ class BaseClient(EnumEnforcer):
                         `here <https://github.com/pydantic/httpx2/blob/main/
                         docs/advanced/timeouts.md>`__ for examples.'''
         self.session.timeout = timeout
+
+    @staticmethod
+    def _check_margin(margin):
+        if (not isinstance(margin, (int, float))
+                or isinstance(margin, bool)):
+            raise TypeError('margin must be a number of seconds, got '
+                            '{}'.format(_qualified_type_name(margin)))
+        if not math.isfinite(margin) or margin < 0:
+            raise ValueError('margin must be a finite number of seconds, '
+                             'zero or more, got {!r}'.format(margin))
+        return margin
+
+    def _token_is_fresh(self, margin):
+        '''Whether the session's token has longer than ``margin`` seconds
+        left, by an expiry authlib reads. One whose expiry cannot be read is
+        not.'''
+        try:
+            expires_at = self.session.token.get('expires_at')
+        except Exception:
+            return False
+        return bool(_expiry_authlib_acts_on(expires_at)
+                    and expires_at - time.time() > margin)
+
+    def _refresh_token_to_send(self):
+        '''The refresh token to refresh with. A stored token with none is
+        refused here as authlib refuses one, before anything is sent, so it is
+        reported as the dead token it is.'''
+        try:
+            refresh_token = self.session.token.get('refresh_token')
+        except Exception:
+            refresh_token = None
+        if not (issubclass(type(refresh_token), str) and refresh_token):
+            raise MissingTokenError()
+        return refresh_token
 
     def token_age(self):
         '''Get the age of the token used to create this client, in seconds. For 

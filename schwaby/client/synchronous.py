@@ -1,5 +1,5 @@
 from .base import BaseClient
-from ..utils import LazyLog
+from ..utils import LazyLog, TokenFreshness
 from ..debug import register_redactions_from_response
 
 import json
@@ -27,6 +27,32 @@ class Client(BaseClient):
         asyncio client.
         '''
         self.session.close()
+
+    def ensure_token_fresh(self, margin=300.0):
+        '''Refreshes the access token now if it expires within ``margin``
+        seconds, so that a later call does not have to.
+
+        A request refreshes the token on the way past once it is about to
+        expire, so the first call after that waits for a refresh, and a
+        refusal surfaces from it. This lets a program choose when that
+        happens instead, before it needs the token. The new token is written
+        through the client's token writer, as a request's refresh writes it,
+        and a refusal raises :class:`~schwaby.utils.TokenRefreshError`, with
+        its ``kind``, as a request's would. A token whose expiry cannot be read is refreshed.
+
+        :param margin: seconds; the token is refreshed when it has this long
+                       left or less.
+        :return: :attr:`TokenFreshness.REFRESHED
+                 <schwaby.utils.TokenFreshness.REFRESHED>` when it refreshed,
+                 :attr:`TokenFreshness.FRESH
+                 <schwaby.utils.TokenFreshness.FRESH>` when it sent nothing.
+        '''
+        if self._token_is_fresh(self._check_margin(margin)):
+            return TokenFreshness.FRESH
+        with self._translate_token_errors():
+            self.session.refresh_token(
+                    refresh_token=self._refresh_token_to_send())
+        return TokenFreshness.REFRESHED
 
     def _get_request(self, path, params):
         dest = 'https://api.schwabapi.com' + path

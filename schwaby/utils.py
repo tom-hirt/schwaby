@@ -2,12 +2,15 @@
 module.'''
 
 import collections
+import enum
+import json
 # Aliased so `from schwaby.utils import *` cannot rebind a caller's own
 # `datetime`, which is most often the class rather than the module.
 import datetime as _datetime
 import decimal
 import re
 import time
+import webbrowser
 
 # The class an HTTP error status raises, under a name this library owns.
 #
@@ -803,6 +806,237 @@ def _expiry_authlib_acts_on(expires_at):
             and expires_at <= time.time() + _LONGEST_EXPIRY)
 
 
+class TokenErrorKind(str, enum.Enum):
+    '''What a failed token refresh calls for, as
+    a :class:`TokenRefreshError`'s ``kind`` gives it. A ``str``, so ``kind ==
+    'dead_token'`` holds, and a log or a JSON document carries the plain word.
+    The words do not change.'''
+
+    #: The refresh token is dead: only a new login, which needs a person at a
+    #: browser, gives a working token. What ``refresh_token_invalid`` is
+    #: ``True`` for.
+    DEAD_TOKEN = 'dead_token'
+    #: The token endpoint answered 429, asking for fewer requests, whatever
+    #: else it said.
+    RATE_LIMITED = 'rate_limited'
+    #: The token endpoint answered ``invalid_client`` or
+    #: ``unauthorized_client``, the codes RFC 6749 gives for the app's own key
+    #: and secret. That is the code Schwab sent, not a verdict: what Schwab
+    #: means by it has not been observed, and it has not been seen to be
+    #: final.
+    APP_REFUSED = 'app_refused'
+    #: The token endpoint refused with a 400 or a 401 and no JSON body to say
+    #: why. What was seen, not a verdict: it has not been measured to mean
+    #: either a dead token or a passing failure.
+    REFUSED_NO_BODY = 'refused_no_body'
+    #: Anything else, a redirect included. It may clear on its own.
+    TRANSIENT = 'transient'
+
+
+class LoginErrorKind(str, enum.Enum):
+    '''What a failed login calls for, as a :class:`LoginExchangeError`'s
+    ``kind`` gives it. A ``str``, like :class:`TokenErrorKind`, whose words do not
+    change.'''
+
+    #: The token endpoint refused the authorization code (``invalid_grant``):
+    #: it was already used, or it expired.
+    CODE_REFUSED = 'code_refused'
+    #: The token endpoint answered 429.
+    RATE_LIMITED = 'rate_limited'
+    #: The token endpoint answered ``invalid_client`` or
+    #: ``unauthorized_client``, the codes RFC 6749 gives for the app's own key
+    #: and secret.
+    APP_REFUSED = 'app_refused'
+    #: The token endpoint refused with a 400 or a 401 and no JSON body;
+    #: ``status_code`` says which.
+    REFUSED_NO_BODY = 'refused_no_body'
+    #: The person declined at Schwab's page (``access_denied``). Nothing was
+    #: sent to the token endpoint.
+    ACCESS_DENIED = 'access_denied'
+    #: The redirect's ``state`` is not this login's. Nothing was sent.
+    STATE_MISMATCH = 'state_mismatch'
+    #: The redirect has no code, an empty one, or a fragment. Nothing was
+    #: sent.
+    MALFORMED_REDIRECT = 'malformed_redirect'
+    #: Anything else, an unusable token response included.
+    TRANSIENT = 'transient'
+
+
+class NoBrowserAvailable(SchwabError, webbrowser.Error):
+    '''Raised by a login flow that has to open Schwab's sign-in page in a
+    browser when Python finds no browser it can run, as on a server with no
+    display. It is also a ``webbrowser.Error``, which is what escaped before
+    it existed, so code catching that still catches it. A login that cannot
+    open a browser can be completed with
+    :func:`~schwaby.auth.client_from_manual_flow` instead.
+
+    It cannot see a browser that reports it opened the page when it did not,
+    such as a text-mode one on a machine with no display.'''
+
+
+class TokenFreshness(str, enum.Enum):
+    '''What :meth:`~schwaby.client.Client.ensure_token_fresh` did.'''
+
+    #: It refreshed the token.
+    REFRESHED = 'refreshed'
+    #: The token had longer than the margin left, so nothing was sent.
+    FRESH = 'fresh'
+    #: A newer token was found in a shared token file and taken instead, so
+    #: nothing was sent.
+    ADOPTED = 'adopted'
+
+
+#: The codes that say the token endpoint refused the app itself.
+_APP_REFUSALS = frozenset({'invalid_client', 'unauthorized_client'})
+
+
+def _safe_code(value):
+    '''``value`` when it is a short code of plain ASCII, safe to show or log;
+    otherwise ``None``.'''
+    if issubclass(type(value), str):
+        value = str.__str__(value)
+        if re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', value):
+            return value
+    return None
+
+
+def _sent_code(error):
+    '''The code an authlib error carries as the token endpoint or a redirect
+    sent it, or ``None``: for a code this library made up itself, for one
+    authlib made up before sending anything, and for one not safe to show.
+    Read from the instance, never from a class default. Schwab's nesting of
+    ``invalid_grant`` inside ``unsupported_token_type``'s description is
+    unwrapped to the code it nests.'''
+    fields = vars(error)
+    if fields.get('_described_by_this_library') is True:
+        return None
+    if '_token_endpoint_status' not in fields and not fields.get(
+            '_from_redirect'):
+        return None
+    code = fields.get('error')
+    description = fields.get('description')
+    if issubclass(type(description), str):
+        start, end = description.find('{'), description.rfind('}')
+        if 0 <= start < end:
+            try:
+                nested = json.loads(description[start:end + 1])
+            except ValueError:
+                nested = None
+            if isinstance(nested, dict) and _safe_code(nested.get('error')):
+                code = nested['error']
+    return _safe_code(code)
+
+
+def _no_body(error, status):
+    '''Whether the token endpoint refused with a 400 or a 401 and no JSON
+    body.'''
+    return (vars(error).get('_no_json_body') is True
+            and status in (400, 401))
+
+
+def _refresh_kind(error, invalid, status):
+    '''The :class:`TokenErrorKind` of a failed refresh, the first that
+    applies.'''
+    if invalid:
+        return TokenErrorKind.DEAD_TOKEN
+    if status == 429:
+        return TokenErrorKind.RATE_LIMITED
+    if _sent_code(error) in _APP_REFUSALS:
+        return TokenErrorKind.APP_REFUSED
+    if _no_body(error, status):
+        return TokenErrorKind.REFUSED_NO_BODY
+    return TokenErrorKind.TRANSIENT
+
+
+def _exchange_kind(error, answered, status):
+    '''The :class:`LoginErrorKind` of a code exchange authlib refused, or
+    the token endpoint did, the first that applies.'''
+    if not answered:
+        # Refused by authlib, before anything was sent: its own exceptions
+        # carry their code on the class.
+        code = getattr(type(error), 'error', None)
+        if code == 'mismatching_state':
+            return LoginErrorKind.STATE_MISMATCH
+        if code == 'missing_code':
+            return LoginErrorKind.MALFORMED_REDIRECT
+        return LoginErrorKind.TRANSIENT
+    sent = _sent_code(error)
+    if sent == 'invalid_grant':
+        return LoginErrorKind.CODE_REFUSED
+    if status == 429:
+        return LoginErrorKind.RATE_LIMITED
+    if sent in _APP_REFUSALS:
+        return LoginErrorKind.APP_REFUSED
+    if _no_body(error, status):
+        return LoginErrorKind.REFUSED_NO_BODY
+    return LoginErrorKind.TRANSIENT
+
+
+def _redirect_kind(code):
+    '''The :class:`LoginErrorKind` of a refusal the redirect itself
+    carried.'''
+    if code == 'access_denied':
+        return LoginErrorKind.ACCESS_DENIED
+    if code in _APP_REFUSALS:
+        return LoginErrorKind.APP_REFUSED
+    return LoginErrorKind.TRANSIENT
+
+
+def find_token_error(exc, *, follow_context=False, of=None):
+    '''The first :class:`TokenRefreshError` or :class:`LoginExchangeError`
+    in ``exc`` and the exceptions it was raised from, or ``None``.
+
+    It follows ``__cause__``, the link ``raise ... from`` makes, and stops
+    after 20 links or at one already seen. ``__context__``, the link to an
+    exception that was being handled when this one was raised, is followed
+    only when ``follow_context`` is true: such an exception did not cause
+    this one, and following that link can find a token error behind an
+    unrelated failure. ``of`` narrows the types looked for, such as
+    ``of=(TokenRefreshError,)``, since the two errors' kinds share some
+    words. It never raises.
+
+    :param exc: an exception, or anything else, which gives ``None``.
+    '''
+    types = tuple(of) if of is not None else (TokenRefreshError,
+                                               LoginExchangeError)
+    seen, current = set(), exc
+    try:
+        for _ in range(20):
+            if current is None or id(current) in seen:
+                return None
+            if isinstance(current, types):
+                return current
+            seen.add(id(current))
+            following = getattr(current, '__cause__', None)
+            if following is None and follow_context:
+                following = getattr(current, '__context__', None)
+            current = following
+    except Exception:
+        return None
+    return None
+
+
+def server_error_code(exc):
+    '''The code Schwab sent with a failed refresh or login, as safe text, or
+    ``None``.
+
+    That is the token endpoint's own code, such as ``'invalid_grant'`` or
+    ``'invalid_client'``, or the one a login's redirect carried, such as
+    ``'access_denied'``, with Schwab's nested ``invalid_grant`` unwrapped. It
+    is read from the :class:`TokenRefreshError` or
+    :class:`LoginExchangeError` that :func:`find_token_error` finds in
+    ``exc``. It is ``None`` when Schwab sent no code (a refusal with no JSON
+    body), for the codes this library makes up for what it refuses itself
+    (``http_<status>``, ``unusable_token_response``, ``missing_code``), for a
+    code with anything but ASCII letters, digits, ``_``, ``.`` and ``-``, or
+    longer than 64 characters, and for any exception holding no token error.
+    It never raises.'''
+    found = find_token_error(exc)
+    if found is None:
+        return None
+    return vars(found).get('server_error_code')
+
+
 class TokenRefreshError(SchwabError):
     '''
     Raised when a refresh of the OAuth token fails: Schwab rejects it, the
@@ -866,8 +1100,24 @@ class TokenRefreshError(SchwabError):
     '''
 
     def __init__(self, message, *, token_age=None, refresh_token_invalid=False,
-                 status_code=None, endpoint_answered=False):
+                 status_code=None, endpoint_answered=False,
+                 kind=None, server_error_code=None):
         super().__init__(message)
+
+        #: What the failure calls for, a :class:`TokenErrorKind`: decided as
+        #: ``dead_token`` when ``refresh_token_invalid`` is ``True``, then
+        #: ``rate_limited`` for a 429, then ``app_refused``, then
+        #: ``refused_no_body``, then ``transient``. Built without one, it
+        #: follows ``refresh_token_invalid`` and ``status_code``.
+        if kind is None:
+            kind = (TokenErrorKind.DEAD_TOKEN if refresh_token_invalid
+                    else TokenErrorKind.RATE_LIMITED if status_code == 429
+                    else TokenErrorKind.TRANSIENT)
+        self.kind = TokenErrorKind(kind)
+
+        #: The code the token endpoint sent, as :func:`server_error_code`
+        #: describes it, or ``None``.
+        self.server_error_code = _safe_code(server_error_code)
 
         #: Seconds since the token was originally authorized, or ``None``.
         self.token_age = token_age
@@ -928,8 +1178,22 @@ class LoginExchangeError(SchwabError, OAuthError):
     '''
 
     def __init__(self, error=None, description=None, uri=None, *,
-                 status_code=None, endpoint_answered=False):
+                 status_code=None, endpoint_answered=False,
+                 kind=None, server_error_code=None):
         super().__init__(error, description, uri)
+
+        #: What the failure calls for, a :class:`LoginErrorKind`. ``error``
+        #: keeps the refusal's own code, for wording that tells the cases
+        #: of one kind apart. Built without one, it is ``rate_limited`` for a
+        #: 429 and ``transient`` otherwise.
+        if kind is None:
+            kind = (LoginErrorKind.RATE_LIMITED if status_code == 429
+                    else LoginErrorKind.TRANSIENT)
+        self.kind = LoginErrorKind(kind)
+
+        #: The code Schwab sent, from the token endpoint or the redirect, as
+        #: :func:`server_error_code` describes it, or ``None``.
+        self.server_error_code = _safe_code(server_error_code)
 
         #: The HTTP status the token endpoint answered with, or ``None`` when
         #: the code was never sent.
@@ -940,6 +1204,11 @@ class LoginExchangeError(SchwabError, OAuthError):
 
         #: ``True`` when the token endpoint answered the exchange.
         self.endpoint_answered = endpoint_answered
+
+        #: ``True`` when the authorization code reached the token endpoint,
+        #: which answered; ``False`` when the login was refused before it
+        #: was sent. The same as ``endpoint_answered``.
+        self.sent = endpoint_answered
 
 
 class LazyLog:

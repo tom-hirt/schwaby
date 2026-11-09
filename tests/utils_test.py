@@ -990,6 +990,7 @@ class UtilsTest(unittest.TestCase):
             'AccountNumberNotFoundError': ('m',),
             'UnusableAccountNumbersError': ('m',),
             'UnusableOrderActivityError': ('m',),
+            'NoBrowserAvailable': ('m',),
             'TokenRefreshError': ('m',),
             'LoginExchangeError': ('invalid_grant', 'code already used'),
             'RedirectTimeoutError': ('m',),
@@ -1878,3 +1879,96 @@ class HostileClassTest(unittest.TestCase):
                 MagicMock(spec=datetime.datetime), datetime.datetime))
         self.assertTrue(_is_instance(self.Hostile(), self.Plain))
         self.assertFalse(_is_instance(self.Hostile(), str))
+
+
+class FindTokenErrorTest(unittest.TestCase):
+    """find_token_error and server_error_code, over exception chains."""
+
+    @staticmethod
+    def refresh_error(code='invalid_grant'):
+        from schwaby.utils import TokenRefreshError
+        return TokenRefreshError('m', server_error_code=code)
+
+    @staticmethod
+    def raised_from(cause, *, context_only=False):
+        try:
+            try:
+                raise cause
+            except type(cause) as e:
+                if context_only:
+                    raise RuntimeError('a handler failed')
+                raise RuntimeError('wrapped') from e
+        except RuntimeError as wrapped:
+            return wrapped
+
+    def test_the_error_is_found_through_its_causes(self):
+        from schwaby import find_token_error, server_error_code
+        error = self.refresh_error()
+        outer = self.raised_from(self.raised_from(error))
+        self.assertIs(error, find_token_error(outer))
+        self.assertEqual('invalid_grant', server_error_code(outer))
+        self.assertIs(error, find_token_error(error))
+
+    def test_a_context_is_followed_only_when_asked(self):
+        from schwaby import find_token_error, server_error_code
+        error = self.refresh_error()
+        outer = self.raised_from(error, context_only=True)
+        self.assertIsNone(find_token_error(outer),
+                          'an exception raised while handling a token error '
+                          'was taken for it')
+        self.assertIsNone(server_error_code(outer))
+        # Positive control: asked to, it finds it.
+        self.assertIs(error, find_token_error(outer, follow_context=True))
+
+    def test_of_narrows_the_types(self):
+        from schwaby import (LoginExchangeError, TokenRefreshError,
+                             find_token_error)
+        error = self.refresh_error()
+        self.assertIsNone(find_token_error(error, of=(LoginExchangeError,)))
+        self.assertIs(error, find_token_error(error, of=(TokenRefreshError,)))
+
+    def test_a_cycle_or_a_long_chain_ends(self):
+        from schwaby import find_token_error
+        a, b = RuntimeError('a'), RuntimeError('b')
+        a.__cause__, b.__cause__ = b, a
+        self.assertIsNone(find_token_error(a))
+        chain = self.refresh_error()
+        for _ in range(25):
+            chain = self.raised_from(chain)
+        self.assertIsNone(find_token_error(chain))
+
+    def test_anything_else_gives_none_and_never_raises(self):
+        from schwaby import find_token_error, server_error_code
+
+        class Hostile:
+            @property
+            def __cause__(self):
+                raise RuntimeError('no')
+        for value in (None, 'text', 5, object(), ValueError('x'), Hostile()):
+            with self.subTest(value=type(value).__name__):
+                self.assertIsNone(find_token_error(value))
+                self.assertIsNone(server_error_code(value))
+
+    def test_only_a_short_plain_code_is_kept(self):
+        from schwaby import server_error_code
+        for code, kept in (('invalid_grant', 'invalid_grant'),
+                           ('a.b-c_1', 'a.b-c_1'), ('x' * 64, 'x' * 64),
+                           ('x' * 65, None), ('two words', None),
+                           ('caf\u00e9', None), ('', None), (5, None),
+                           ('line\nbreak', None), (None, None)):
+            with self.subTest(code=repr(code)[:20]):
+                self.assertEqual(kept,
+                                 server_error_code(self.refresh_error(code)))
+
+    def test_a_kind_follows_the_old_attributes_when_not_given(self):
+        from schwaby import (LoginErrorKind, LoginExchangeError,
+                             TokenErrorKind, TokenRefreshError)
+        self.assertIs(TokenErrorKind.DEAD_TOKEN, TokenRefreshError(
+                'm', refresh_token_invalid=True).kind)
+        self.assertIs(TokenErrorKind.RATE_LIMITED, TokenRefreshError(
+                'm', status_code=429).kind)
+        self.assertIs(TokenErrorKind.TRANSIENT, TokenRefreshError('m').kind)
+        self.assertIs(LoginErrorKind.RATE_LIMITED, LoginExchangeError(
+                'x', status_code=429).kind)
+        self.assertEqual('dead_token', TokenErrorKind.DEAD_TOKEN)
+        self.assertTrue(LoginExchangeError('x', endpoint_answered=True).sent)

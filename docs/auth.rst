@@ -120,6 +120,8 @@ token.
 
 .. autofunction:: schwaby.auth.client_from_login_flow
 
+.. autoexception:: schwaby.utils.NoBrowserAvailable
+
 .. _manual_login:
 
 If for some reason you cannot open a web browser, such as when running in a
@@ -305,16 +307,16 @@ Catching a Failed Refresh
 
 Every request refreshes the token first if it is close to expiring, so a
 refresh Schwab rejects surfaces from an ordinary call rather than from anything
-token-shaped:
+token-shaped. Its ``kind`` says what it calls for:
 
 .. code-block:: python
 
-  from schwaby.utils import TokenRefreshError
+  from schwaby import TokenErrorKind, TokenRefreshError
 
   try:
       r = c.get_quote('AAPL')
   except TokenRefreshError as e:
-      if e.refresh_token_invalid:
+      if e.kind == TokenErrorKind.DEAD_TOKEN:
           # Only a new login flow fixes this. Retrying cannot.
           alert('refresh token is dead, log in again')
       else:
@@ -323,7 +325,17 @@ token-shaped:
               # so keep retrying, but someone should know. This runs on every
               # failed retry, so have alert() send it once.
               alert('token is past seven days and refreshes are failing')
+          # A kind of TokenErrorKind.RATE_LIMITED asks for fewer requests:
+          # wait longer before this one.
           retry_later()
+
+``refused_no_body`` and ``app_refused`` are reported as what was seen, for a
+program to decide on. Neither has been measured to mean a dead token: one
+that treats them as dead should be one with a person to sign in again.
+
+To refresh at a moment of your choosing, before the token is needed rather
+than on the first call after it expires, see
+:meth:`~schwaby.client.Client.ensure_token_fresh`.
 
 Not every failure to refresh arrives as ``TokenRefreshError``. A server error
 from the token endpoint raises :class:`~schwaby.utils.HTTPStatusError`, a
@@ -335,6 +347,18 @@ is not JSON is a ``TokenRefreshError`` like any other refusal, whichever
 version of ``authlib`` is installed.
 
 .. autoclass:: schwaby.utils.TokenRefreshError
+
+.. autoclass:: schwaby.utils.TokenErrorKind
+  :members:
+  :undoc-members:
+  :member-order: bysource
+
+A refresh error is often raised again, wrapped, by the code around the call.
+These find it, and the code Schwab sent with it, without reading any
+library's private attributes:
+
+.. autofunction:: schwaby.utils.find_token_error
+.. autofunction:: schwaby.utils.server_error_code
 
 **Read the endpoint's answer from the attributes, not from the text.**
 ``rate_limited`` says the token endpoint answered with a 429, asking for
@@ -593,6 +617,16 @@ the login again. So does a refusal whose body is not JSON. A server error, or a
 success whose body is not JSON, raises as it does during a call.
 
 .. autoclass:: schwaby.utils.LoginExchangeError
+
+.. autoclass:: schwaby.utils.LoginErrorKind
+  :members:
+  :undoc-members:
+  :member-order: bysource
+
+Each kind can cover several codes worded differently, such as
+``access_denied`` and a ``state`` that does not match: ``error`` keeps the
+code, and :func:`~schwaby.utils.server_error_code` the code Schwab itself
+sent. A refusal with no JSON body is told apart by ``status_code``.
 
 ``endpoint_answered`` tells the two kinds of refusal apart: ``False`` for a
 login refused before its code was sent, by the redirect or by the ``state``

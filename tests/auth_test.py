@@ -323,6 +323,34 @@ class ClientFromLoginFlowTest(unittest.TestCase):
     @patch('schwaby.auth.input', MagicMock(return_value=''))
     @patch('time.time', MagicMock(return_value=MOCK_NOW))
     @_skip_on_macos_runner
+    def test_no_browser_to_open_raises_its_own_error(
+            self, mock_webbrowser_get, async_session, sync_session, client):
+        import webbrowser
+        from schwaby import NoBrowserAvailable
+        sync_session.return_value = sync_session
+        sync_session.create_authorization_url.return_value = (
+                'https://auth.url.com', None)
+        mock_webbrowser_get.side_effect = webbrowser.Error(
+                'could not locate runnable browser')
+        with self.assertRaises(NoBrowserAvailable) as cm:
+            auth.client_from_login_flow(
+                    API_KEY, APP_SECRET,
+                    f'https://127.0.0.1:{self.port}/callback',
+                    self.token_path, callback_socket=self.socket,
+                    interactive=False)
+        # Still what escaped before, so code catching that catches it.
+        self.assertIsInstance(cm.exception, webbrowser.Error)
+        self.assertIn('browser', str(cm.exception))
+        self.assertIn('client_from_manual_flow', str(cm.exception))
+        self.assertFalse(os.path.exists(self.token_path))
+
+    @patch('schwaby.auth.Client')
+    @patch('schwaby.auth.OAuth2Client', new_callable=MockOAuthClient)
+    @patch('schwaby.auth.AsyncOAuth2Client', new_callable=MockAsyncOAuthClient)
+    @patch('schwaby.auth.webbrowser.get', new_callable=MagicMock)
+    @patch('schwaby.auth.input', MagicMock(return_value=''))
+    @patch('time.time', MagicMock(return_value=MOCK_NOW))
+    @_skip_on_macos_runner
     def test_specify_web_browser(
             self, mock_webbrowser_get, async_session, sync_session, client):
         AUTH_URL = 'https://auth.url.com'
@@ -2035,6 +2063,56 @@ class LoginExchangeErrorTest(unittest.TestCase):
                 self.assertEqual(status, refusal.status_code)
                 self.assertTrue(refusal.endpoint_answered)
                 self.assertEqual(status == 429, refusal.rate_limited)
+
+    @no_duplicates
+    def test_each_login_refusal_has_its_kind(self):
+        from schwaby import LoginErrorKind as K, server_error_code
+        base = 'https://127.0.0.1:8182/'
+        before = (
+            (base + '?error=access_denied&state=state', K.ACCESS_DENIED,
+             'access_denied'),
+            (base + '?error=access_denied&state=state#x', K.ACCESS_DENIED,
+             'access_denied'),
+            (base + '?error=invalid_client&state=state', K.APP_REFUSED,
+             'invalid_client'),
+            (base + '?error=two+words&state=state', K.TRANSIENT, None),
+            (base + '?code=c&state=state#x', K.MALFORMED_REDIRECT, None),
+            (base + '?state=state', K.MALFORMED_REDIRECT, None),
+            (base + '?code=&state=state', K.MALFORMED_REDIRECT, None),
+            (base + '?code=c&state=OTHER', K.STATE_MISMATCH, None))
+        for url, kind, code in before:
+            with self.subTest(url=url):
+                refusal, sent = self.exchange_refused(400, None, url)
+                self.assertEqual([], sent)
+                self.assertIs(kind, refusal.kind,
+                              'a login refusal was given the wrong kind')
+                self.assertFalse(refusal.sent)
+                self.assertEqual(code, refusal.server_error_code)
+                self.assertEqual(code, server_error_code(refusal))
+        token = {'access_token': 'NEW', 'token_type': 'Bearer',
+                 'expires_in': 1800, 'refresh_token': 'r2'}
+        answered = (
+            (400, {'error': 'invalid_grant'}, K.CODE_REFUSED,
+             'invalid_grant'),
+            (429, None, K.RATE_LIMITED, None),
+            (429, {'error': 'invalid_client'}, K.RATE_LIMITED,
+             'invalid_client'),
+            (401, {'error': 'invalid_client'}, K.APP_REFUSED,
+             'invalid_client'),
+            (400, None, K.REFUSED_NO_BODY, None),
+            (401, None, K.REFUSED_NO_BODY, None),
+            (403, None, K.TRANSIENT, None),
+            (302, token, K.TRANSIENT, None),
+            (200, {'message': 'Unauthorized'}, K.TRANSIENT, None))
+        for status, body, kind, code in answered:
+            with self.subTest(status=status, body=body):
+                refusal, sent = self.exchange_refused(status, body)
+                self.assertEqual(['/v1/oauth/token'], sent)
+                self.assertIs(kind, refusal.kind,
+                              'a login refusal was given the wrong kind')
+                self.assertTrue(refusal.sent)
+                self.assertEqual(status, refusal.status_code)
+                self.assertEqual(code, refusal.server_error_code)
 
     @no_duplicates
     def test_a_login_refused_before_the_code_is_sent_says_so(self):

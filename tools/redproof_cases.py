@@ -8818,3 +8818,72 @@ for _case in CASES:
 del _case
 if len(globals().get('_PORT_GROUP_FOUND', ())) != 7:
     raise ValueError('a retired port-group case name matches no case')
+
+
+# The kind of a failed refresh or login, and the code Schwab sent with it.
+# What must hold: a dead token is never called anything else, a 429 is a
+# rate limit whatever code it carries, a refusal with no body is not called
+# dead, a context link is not taken for a cause, and a code this library
+# made up is not passed off as Schwab's.
+CASES += [
+    Case('token-kind/a-dead-token-is-dead',
+         'schwaby/utils.py',
+         '    if invalid:\n        return TokenErrorKind.DEAD_TOKEN\n',
+         '    if False:\n        return TokenErrorKind.DEAD_TOKEN\n',
+         'tests/client_test.py::ClientTest'
+         '::test_each_refresh_refusal_has_its_kind',
+         'a refusal was given the wrong kind'),
+    Case('token-kind/a-429-is-a-rate-limit-whatever-its-code',
+         'schwaby/utils.py',
+         '    if status == 429:\n        return TokenErrorKind.RATE_LIMITED\n'
+         '    if _sent_code(error) in _APP_REFUSALS:\n'
+         '        return TokenErrorKind.APP_REFUSED\n',
+         '    if _sent_code(error) in _APP_REFUSALS:\n'
+         '        return TokenErrorKind.APP_REFUSED\n'
+         '    if status == 429:\n        return TokenErrorKind.RATE_LIMITED\n',
+         'tests/client_test.py::ClientTest'
+         '::test_each_refresh_refusal_has_its_kind',
+         'a refusal was given the wrong kind'),
+    Case('token-kind/no-body-is-only-a-400-or-401-with-no-body',
+         'schwaby/utils.py',
+         "    return (vars(error).get('_no_json_body') is True\n"
+         '            and status in (400, 401))\n',
+         '    return status in (400, 401)\n',
+         'tests/client_test.py::ClientTest'
+         '::test_each_refresh_refusal_has_its_kind',
+         'a refusal was given the wrong kind'),
+    Case('token-kind/a-made-up-code-is-not-schwabs',
+         'schwaby/utils.py',
+         "    if fields.get('_described_by_this_library') is True:\n"
+         '        return None\n',
+         "    if False:\n"
+         '        return None\n',
+         'tests/client_test.py::ClientTest'
+         '::test_each_refresh_refusal_has_its_kind',
+         'None !='),
+    Case('token-kind/a-context-is-not-a-cause',
+         'schwaby/utils.py',
+         '            if following is None and follow_context:\n',
+         '            if following is None:\n',
+         'tests/utils_test.py::FindTokenErrorTest'
+         '::test_a_context_is_followed_only_when_asked',
+         'was taken for it'),
+    Case('login-kind/a-state-mismatch-is-its-own-kind',
+         'schwaby/utils.py',
+         "        if code == 'mismatching_state':\n"
+         '            return LoginErrorKind.STATE_MISMATCH\n',
+         "        if False:\n"
+         '            return LoginErrorKind.STATE_MISMATCH\n',
+         'tests/auth_test.py::LoginExchangeErrorTest'
+         '::test_each_login_refusal_has_its_kind',
+         'a login refusal was given the wrong kind'),
+    Case('token-kind/a-token-with-no-refresh-token-sends-nothing',
+         'schwaby/client/base.py',
+         "        if not (issubclass(type(refresh_token), str) and refresh_token):\n"
+         '            raise MissingTokenError()\n',
+         "        if False:\n"
+         '            raise MissingTokenError()\n',
+         'tests/client_test.py::ClientTest'
+         '::test_a_token_with_no_refresh_token_is_dead_without_asking',
+         'TokenRefreshError not raised'),
+]

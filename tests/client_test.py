@@ -111,6 +111,148 @@ class _TestClient:
         self.client.set_timeout(timeout)
         self.assertEqual(timeout, self.client.session.timeout)
 
+    # The kind of a failed refresh, and the code Schwab sent with it.
+
+    @staticmethod
+    def hook_refusal(status, body=None, json_body=True):
+        # Raised as the token response hook raises it, from a real response.
+        import httpx2
+        from schwaby import auth
+        request = httpx2.Request(
+                'POST', 'https://api.schwabapi.com/v1/oauth/token')
+        if body is None:
+            response = httpx2.Response(status, content=b'', request=request)
+        else:
+            response = httpx2.Response(status, json=body, request=request)
+        try:
+            auth._refuse_unusable_token_response(response)
+        except OAuthError as e:
+            return e
+        raise AssertionError('the hook let {} through'.format(status))
+
+    @no_duplicates
+    def test_each_refresh_refusal_has_its_kind(self):
+        from authlib.integrations.base_client.errors import MissingTokenError
+        from schwaby import TokenErrorKind as K
+        nested = ('400 Bad Request: {"error_description":"Refresh token is '
+                  'invalid, expired or revoked","error":"invalid_grant"}')
+        token = {'access_token': 'NEW', 'token_type': 'Bearer',
+                 'expires_in': 1800, 'refresh_token': 'r2'}
+        cases = (
+            ('invalid_grant', self.hook_refusal(
+                400, {'error': 'invalid_grant'}), K.DEAD_TOKEN,
+             'invalid_grant'),
+            ('nested', self.hook_refusal(
+                400, {'error': 'unsupported_token_type',
+                      'error_description': nested}), K.DEAD_TOKEN,
+             'invalid_grant'),
+            ('429 naming the app', self.hook_refusal(
+                429, {'error': 'invalid_client'}), K.RATE_LIMITED,
+             'invalid_client'),
+            ('429 with no body', self.hook_refusal(429), K.RATE_LIMITED,
+             None),
+            ('invalid_client', self.hook_refusal(
+                401, {'error': 'invalid_client'}), K.APP_REFUSED,
+             'invalid_client'),
+            ('unauthorized_client', self.hook_refusal(
+                400, {'error': 'unauthorized_client'}), K.APP_REFUSED,
+             'unauthorized_client'),
+            ('400 with no body', self.hook_refusal(400), K.REFUSED_NO_BODY,
+             None),
+            ('401 with no body', self.hook_refusal(401), K.REFUSED_NO_BODY,
+             None),
+            ('403 with no body', self.hook_refusal(403), K.TRANSIENT, None),
+            ('a token at 302', self.hook_refusal(302, token), K.TRANSIENT,
+             None),
+            ('unusable', self.hook_refusal(200, {'message': 'x'}),
+             K.TRANSIENT, None),
+            ('slow_down', self.hook_refusal(400, {'error': 'slow_down'}),
+             K.TRANSIENT, 'slow_down'),
+            ('a stored token with none', MissingTokenError(), K.DEAD_TOKEN,
+             None))
+        for name, refusal, kind, code in cases:
+            with self.subTest(case=name):
+                self.mock_session.get.side_effect = refusal
+                with self.assertRaises(TokenRefreshError) as cm:
+                    self.client.get_quote(SYMBOL)
+                self.assertIs(kind, cm.exception.kind,
+                              'a refusal was given the wrong kind')
+                self.assertEqual(code, cm.exception.server_error_code)
+                self.assertEqual(code,
+                                 schwaby.server_error_code(cm.exception))
+                # What was there before is as it was.
+                self.assertEqual(kind is K.DEAD_TOKEN,
+                                 cm.exception.refresh_token_invalid)
+
+    # ensure_token_fresh
+
+    def token(self, seconds_left, refresh_token='r'):
+        token = {'access_token': 'a', 'token_type': 'Bearer'}
+        if seconds_left is not None:
+            token['expires_at'] = int(time.time()) + seconds_left
+        if refresh_token is not None:
+            token['refresh_token'] = refresh_token
+        return token
+
+    @no_duplicates
+    def test_a_fresh_token_is_left_alone(self):
+        from schwaby import TokenFreshness
+        for left, margin in ((3600, 300.0), (100, 0), (301, 300)):
+            with self.subTest(left=left, margin=margin):
+                self.mock_session.token = self.token(left)
+                self.mock_session.refresh_token.reset_mock()
+                self.assertIs(TokenFreshness.FRESH,
+                              self.client.ensure_token_fresh(margin))
+                self.mock_session.refresh_token.assert_not_called()
+
+    @no_duplicates
+    def test_a_token_near_its_expiry_is_refreshed_now(self):
+        from schwaby import TokenFreshness
+        for left in (100, 300, -50, None, 'soon'):
+            with self.subTest(left=left):
+                token = self.token(left if not isinstance(left, str)
+                                   else None)
+                if isinstance(left, str):
+                    token['expires_at'] = left
+                self.mock_session.token = token
+                self.mock_session.refresh_token.reset_mock()
+                self.assertIs(TokenFreshness.REFRESHED,
+                              self.client.ensure_token_fresh(300),
+                              'a token near its expiry was not refreshed')
+                self.mock_session.refresh_token.assert_called_once_with(
+                        refresh_token='r')
+
+    @no_duplicates
+    def test_ensure_token_fresh_reports_a_refusal_with_its_kind(self):
+        from schwaby import TokenErrorKind
+        self.mock_session.token = self.token(10)
+        self.mock_session.refresh_token.side_effect = self.hook_refusal(
+                400, {'error': 'invalid_grant'})
+        with self.assertRaises(TokenRefreshError) as cm:
+            self.client.ensure_token_fresh()
+        self.assertIs(TokenErrorKind.DEAD_TOKEN, cm.exception.kind)
+
+    @no_duplicates
+    def test_a_token_with_no_refresh_token_is_dead_without_asking(self):
+        from schwaby import TokenErrorKind
+        for refresh_token in (None, '', 5):
+            with self.subTest(refresh_token=refresh_token):
+                self.mock_session.token = self.token(10, refresh_token)
+                self.mock_session.refresh_token.reset_mock()
+                with self.assertRaises(TokenRefreshError) as cm:
+                    self.client.ensure_token_fresh()
+                self.assertIs(TokenErrorKind.DEAD_TOKEN, cm.exception.kind)
+                self.mock_session.refresh_token.assert_not_called()
+
+    @no_duplicates
+    def test_ensure_token_fresh_refuses_a_margin_it_cannot_use(self):
+        for margin, error in ((-1, ValueError), (float('inf'), ValueError),
+                              (float('nan'), ValueError), ('5', TypeError),
+                              (True, TypeError)):
+            with self.subTest(margin=repr(margin)):
+                with self.assertRaises(error):
+                    self.client.ensure_token_fresh(margin)
+
 
     def test_token_age(self):
         token_metadata = MagicMock()

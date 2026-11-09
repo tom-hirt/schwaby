@@ -266,6 +266,13 @@ Token Age
 
 .. automethod:: schwaby.client.Client.token_age
 
+.. automethod:: schwaby.client.Client.ensure_token_fresh
+.. automethod:: schwaby.client.AsyncClient.ensure_token_fresh
+.. autoclass:: schwaby.utils.TokenFreshness
+  :members:
+  :undoc-members:
+  :member-order: bysource
+
 
 ++++++++++++
 Account Info
