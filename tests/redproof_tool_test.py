@@ -534,6 +534,23 @@ class RunRecordTest(unittest.TestCase):
                                      'passed as having none')
 
 
+class QueuedOnlyTest(unittest.TestCase):
+
+    def test_an_entry_that_signals_runs_only_as_a_queued_job(self):
+        signals = cases.Case('x/signals', 'tools/redproof.py', 'a', 'b',
+                             'tests/redproof_tool_test.py::WorkerTest::'
+                             'test_x', 'expected')
+        quiet = case()
+        self.assertEqual(['x/signals'],
+                         redproof.queued_only([signals, quiet], {}),
+                         'an entry that signals processes ran directly')
+        self.assertEqual([], redproof.queued_only(
+            [signals, quiet], {'REDPROOF_JOBS_ALL': '1'}),
+            'an entry that signals processes was held from a queued job')
+        # Positive control: one that signals nothing runs either way.
+        self.assertEqual([], redproof.queued_only([quiet], {}))
+
+
 class ReportTest(unittest.TestCase):
 
     def test_a_run_that_could_not_be_checked_fails_the_whole_run(self):
@@ -725,26 +742,45 @@ def group(name):
     print(name, p.pid, flush=True)
     return p
 
-# This script's pid and session, taken before any worker exists. A worker
-# finds its siblings by them rather than by its own parent: orphaned, a
-# worker's parent is whatever subreaper adopted it, often the user's
-# session manager, whose children are the whole desktop.
+# This script's pid and session, taken before any worker exists.
 SCENARIO, SESSION = os.getpid(), os.getsid(0)
 
+# Each worker the pool forks is recorded as it starts, by the fork that
+# starts it, so a worker signals only pids the scenario started and wrote
+# down, never ones it went looking for.
+real_fork = os.fork
+
+def recording_fork():
+    pid = real_fork()
+    if pid:
+        with open(MARK + 'workers', 'a') as f:
+            f.write('%d\\n' % pid)
+    return pid
+
+os.fork = recording_fork
+
+# The recorded workers, other than this one, that are still the scenario's
+# children in its session, each with a pidfd opened before it is checked: a
+# recorded pid whose worker is gone may belong to another process now, and
+# then the check fails and nothing is signalled.
 def siblings():
+    with open(MARK + 'workers') as f:
+        recorded = {int(line) for line in f if line.strip()}
     out = []
-    for d in os.listdir('/proc'):
-        if not d.isdigit():
+    for pid in sorted(recorded - {os.getpid()}):
+        try:
+            fd = os.pidfd_open(pid)
+        except OSError:
             continue
         try:
-            with open('/proc/%s/stat' % d) as f:
+            with open('/proc/%d/stat' % pid) as f:
                 fields = f.read().rsplit(')', 1)[1].split()
-            ppid, session = int(fields[1]), int(fields[3])
+            if int(fields[1]) == SCENARIO and int(fields[3]) == SESSION:
+                out.append(fd)
+                continue
         except (OSError, ValueError, IndexError):
-            continue
-        if (ppid == SCENARIO and session == SESSION
-                and int(d) != os.getpid()):
-            out.append(int(d))
+            pass
+        os.close(fd)
     return out
 
 def task(item):
@@ -768,8 +804,9 @@ def task(item):
     if item == 'kills-idle':
         time.sleep(0.5)
         found = siblings()
-        for pid in found:
-            os.kill(pid, signal.SIGKILL)
+        for fd in found:
+            signal.pidfd_send_signal(fd, signal.SIGKILL)
+            os.close(fd)
         # Whether it killed any: a search that finds none proves nothing.
         return ('done', item, bool(found))
     if item == 'raises':

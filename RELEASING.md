@@ -38,7 +38,11 @@ return code; a grep for `FAILED` misses `SUBFAILED`, and it requires the failure
 to carry the message you named. The
 entries live in `tools/redproof_cases.py`; add one when you fix something, and
 run it with `python -I -B tools/redproof.py --name <part of its name>`. It
-works on copies, so the working tree is never touched.
+works on copies, so the working tree is never touched. An entry whose test
+signals processes (the worker tests, listed in `SIGNALLING`) is refused
+there and runs only as a queued job, where `REDPROOF_JOBS_ALL=1`: its test
+kills only what it started and recorded, but the code it mutates is the
+code that decides what is killed.
 
 **A reworded assertion or a moved test breaks the entries that quote it.**
 The release red-proof, which runs every entry, is where that is found. To see

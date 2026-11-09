@@ -64,8 +64,10 @@ os.wait4 and killed with os.killpg.
 Exit status 0 only when every selected entry is RED, GREEN (declared),
 RED (declared GREEN) or REMOVED, and no run wrote to a tracked file or went
 unchecked for one; 1 otherwise, and when the copy does not import its own
-schwaby or the suite cannot be collected; 2 when --name matches nothing, or
-the arguments are wrong.
+schwaby or the suite cannot be collected; 2 when --name matches nothing, the
+arguments are wrong, or an entry whose test signals processes is selected
+outside a queued job (SIGNALLING says which; a queued job sets
+REDPROOF_JOBS_ALL=1).
 
 Every run judges every selected entry. Verdicts are not kept from one run to
 the next: the whole set takes about a minute and a half on 20 cores, and a
@@ -269,6 +271,25 @@ def load_cases(snapshot):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.CASES
+
+
+#: The tests that signal processes. Each signals only what it started and
+#: recorded, and no entry's mutation widens what it signals; still, an entry
+#: whose test is one of these runs only as a queued job, never as a direct
+#: run on a shared machine, where a defect in the code it mutates could
+#: reach other processes. A queued job is told apart as the core count
+#: tells it: REDPROOF_JOBS_ALL=1.
+SIGNALLING = ('tests/redproof_tool_test.py::WorkerTest',)
+
+
+def queued_only(cases, environ=os.environ):
+    '''The names of the entries among cases that signal processes, when
+    this is not a queued job; none when it is.'''
+    if environ.get('REDPROOF_JOBS_ALL') == '1':
+        return []
+    return [c.name for c in cases
+            if any(t == s or t.startswith(s + '::') for t in tests_of(c)
+                   for s in SIGNALLING)]
 
 
 def tests_of(case):
@@ -989,6 +1010,12 @@ def judge_all(run, args, started):
 
     removed = [c for c in selected if c.removed]
     live = [c for c in selected if not c.removed]
+    held = queued_only(live)
+    if held:
+        print('redproof: %d of these entries signal processes, so they run '
+              'only as a queued job (REDPROOF_JOBS_ALL=1), never directly: '
+              '%s' % (len(held), ', '.join(held)))
+        return 2
     # 'to run' is the machine-readable count on this line.
     print('redproof: %d selected, %d removed, %d to run%s' % (
         len(selected), len(removed), len(live),
