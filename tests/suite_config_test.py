@@ -136,7 +136,7 @@ class PythonPinsTest(unittest.TestCase):
     def test_ci_tests_the_pinned_pythons(self):
         import re
         minors = [p.rsplit('.', 1)[0] for p in self.pins()]
-        for workflow in ('python.yml', 'publish.yml'):
+        for workflow in ('python.yml', 'publish.yml', 'docs.yml'):
             text = self.read('.github', 'workflows', workflow)
             matrices = re.findall(r'python: \[([^\]]*)\]', text)
             self.assertTrue(matrices, workflow)
@@ -144,9 +144,11 @@ class PythonPinsTest(unittest.TestCase):
                 versions = re.findall(r'"([0-9.]+)"', matrix)
                 self.assertLessEqual(set(versions), set(minors),
                                      '%s tests an unpinned Python' % workflow)
-            self.assertEqual(
-                minors, re.findall(r'"([0-9.]+)"', matrices[0]),
-                '%s does not test every pinned Python' % workflow)
+            # The docs build on one; the tests run on every one.
+            if workflow != 'docs.yml':
+                self.assertEqual(
+                    minors, re.findall(r'"([0-9.]+)"', matrices[0]),
+                    '%s does not test every pinned Python' % workflow)
             self.assertIsNone(
                 re.search(r'uses:\s*["\']?actions/setup-python', text),
                 '%s installs a Python the pin does not choose' % workflow)

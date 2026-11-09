@@ -1,8 +1,13 @@
 name: tests
 
+# CI runs when code it tests changes. A push or pull request touching only
+# docs/ or Markdown runs no test matrix; docs.yml builds the docs on every
+# one. A tag's push is never filtered by path, so a release always runs it.
 on:
   push:
+    paths-ignore: ['docs/**', '**.md']
   pull_request:
+    paths-ignore: ['docs/**', '**.md']
   # Lets CI be re-run on demand, without pushing an empty commit to provoke it.
   workflow_dispatch:
 
@@ -38,6 +43,17 @@ jobs:
             || fromJSON('["ubuntu-latest"]')
           }}
         python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        # Windows and macOS on the oldest and newest Python only: their risk
+        # is the token file writer's renames and permissions, which do not
+        # differ between the Pythons in the middle, and macOS bills at ten
+        # times the Linux rate. Linux runs all five.
+        exclude:
+          - {platform: windows-latest, python: "3.11"}
+          - {platform: windows-latest, python: "3.12"}
+          - {platform: windows-latest, python: "3.13"}
+          - {platform: macos-latest, python: "3.11"}
+          - {platform: macos-latest, python: "3.12"}
+          - {platform: macos-latest, python: "3.13"}
     runs-on: ${{ matrix.platform }}
 
     steps:
@@ -118,44 +134,3 @@ jobs:
         # reports PASSED on a markdown long_description having rendered
         # nothing at all.
         twine check --strict dist/*
-
-  docs:
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [ubuntu-latest]
-        python: ["3.12"]
-    runs-on: ${{ matrix.platform }}
-
-    steps:
-    - uses: actions/checkout@v7
-    - name: Pinned Python ${{ matrix.python }}
-      id: pin
-      shell: bash
-      run: |
-        version=$(tr -d '\r' < .python-versions | grep -E "^${MINOR//./\\.}\.[0-9]+$") || {
-          echo "no pin for $MINOR in .python-versions"; exit 1; }
-        echo "version=$version" >> "$GITHUB_OUTPUT"
-      env:
-        MINOR: ${{ matrix.python }}
-    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3: setup-uv publishes no floating major tag
-      with:
-        version: "0.13.4"
-        python-version: ${{ steps.pin.outputs.version }}
-        activate-environment: true
-    - name: The interpreter is the pinned build
-      shell: bash
-      run: >-
-        python -c "import platform, sys; v = platform.python_version();
-        sys.exit(0 if v == sys.argv[1] else 'running %s, pinned %s' % (v, sys.argv[1]))"
-        ${{ steps.pin.outputs.version }}
-
-    # The lock as a constraint pins whatever docs/requirements.txt installs
-    # without adding anything to it, so that file still checks the imports
-    # sphinx needs.
-    - name: Install dependencies
-      run: uv pip install -c requirements.lock -r docs/requirements.txt
-
-    - name: Verify that documentation builds
-      run: |
-        sphinx-build -W docs/ docs-build

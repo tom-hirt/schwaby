@@ -306,8 +306,8 @@ may go any day.
    `python -m build` earns its place: `setup.py` is not imported by the suite, so
    an edit leaving it unparseable is invisible to `pytest`.
 
-   CI runs the whole matrix, every Python on all three platforms, on each
-   push to a release branch. Read that run for the same commit, and wait for
+   CI runs the whole matrix on each push to a release branch: every Python
+   on Linux, and 3.10 and 3.14 on Windows and macOS. Read that run for the same commit, and wait for
    it to pass: it is the only run on Windows and macOS before the release,
    since the publish workflow tests on Linux alone.
 

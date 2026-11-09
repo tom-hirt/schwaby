@@ -126,9 +126,11 @@ Two of those are easy to get wrong locally:
   suite, so an edit that leaves it unparseable is invisible to ``pytest``. The
   build is what proves the package still assembles.
 
-CI runs the gate on CPython 3.10 through 3.14. Pushes to a branch run Linux
-only; pull requests, tags and pushes to a release branch (``release/...``)
-run Windows and macOS as well.
+CI runs the gate on CPython 3.10 through 3.14 on Linux. Pull requests, tags,
+pushes to a release branch (``release/...``) and manual runs add Windows and
+macOS, on 3.10 and 3.14. A push or pull request that touches only ``docs/``
+or Markdown runs no tests, only the documentation build; a tag always runs
+them. Nothing runs on a schedule.
 
 --------------------------
 A note about the testing
