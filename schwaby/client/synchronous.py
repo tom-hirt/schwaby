@@ -1,4 +1,5 @@
 from .base import BaseClient, TOKEN_PATH
+from .. import _shared_token
 from ..utils import LazyLog, TokenFreshness, TokenRefreshError
 from ..debug import register_redactions_from_response
 
@@ -98,10 +99,13 @@ class Client(BaseClient):
                 # just refreshed, as two requests can.
                 if fresh():
                     return waited, False
-                with self._translate_token_errors():
+                # A shared token file's refresh may take another client's
+                # newer token instead, and send nothing: that is no refresh.
+                with _shared_token.watching_for_a_taken_token() as taken, \
+                        self._translate_token_errors():
                     self.session.refresh_token(
                             refresh_token=self._refresh_token_to_send())
-                return waited, True
+                return waited, not taken
             finally:
                 with self._refresh_lock:
                     self._refresh_flight = None

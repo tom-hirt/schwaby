@@ -37,6 +37,30 @@ def get_logger():
 # write a refresh makes, inside the lock, does not take it again.
 _held = contextvars.ContextVar('schwaby_token_lock_held', default=frozenset())
 
+# Set by a caller that wants to know whether its refresh took another
+# client's token instead of sending one: a list the refresh appends to.
+_taken = contextvars.ContextVar('schwaby_token_taken', default=None)
+
+
+@contextlib.contextmanager
+def watching_for_a_taken_token():
+    '''Around a call of a session's refresh_token: yields a list that is not
+    empty afterwards when the refresh took another client's newer token from
+    the file and sent nothing.'''
+    seen = []
+    token = _taken.set(seen)
+    try:
+        yield seen
+    finally:
+        _taken.reset(token)
+
+
+def _note_taken():
+    seen = _taken.get()
+    if seen is not None:
+        seen.append(True)
+
+
 # One lock per token file in this process, by its real path.
 _process_locks = {}
 _process_locks_guard = threading.Lock()
@@ -373,6 +397,7 @@ def share_refresh(session, shared, metadata, adopt, *, is_async):
                 async with shared.alock():
                     stored = shared.newer_stored(metadata, session)
                     if stored is not None and taken(stored, kwargs):
+                        _note_taken()
                         return session.token
                     return await refresh(*args, **kwargs)
             except TokenFileLockTimeout as e:
@@ -383,6 +408,7 @@ def share_refresh(session, shared, metadata, adopt, *, is_async):
                 with shared.lock():
                     stored = shared.newer_stored(metadata, session)
                     if stored is not None and taken(stored, kwargs):
+                        _note_taken()
                         return session.token
                     return refresh(*args, **kwargs)
             except TokenFileLockTimeout as e:

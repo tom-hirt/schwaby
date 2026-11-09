@@ -405,6 +405,27 @@ class AdoptTest(SharedTokenTestCase):
                                  "the client's own view kept the old token")
 
     @no_duplicates
+    def test_ensure_token_fresh_says_fresh_when_it_took_a_token(self):
+        # It sent nothing, so it did not refresh.
+        for asyncio_ in (False, True):
+            with self.subTest(asyncio=asyncio_):
+                st.write_token_file(self.path, expires_in=-60)
+                endpoint = st.FakeTokenEndpoint()
+                endpoint.answer_refresh(st.token(access_token='FIRST'))
+                one = self.client(asyncio_, endpoint=endpoint)
+                two = self.client(asyncio_, endpoint=endpoint)
+                outcomes = []
+                for client in (one, two):
+                    result = client.ensure_token_fresh()
+                    if asyncio.iscoroutine(result):
+                        result = asyncio.run(result)
+                    outcomes.append(result)
+                self.assertEqual([schwaby.TokenFreshness.REFRESHED,
+                                  schwaby.TokenFreshness.FRESH], outcomes,
+                                 'a token taken was called a refresh')
+                self.assertEqual(1, endpoint.posts('refresh_token'))
+
+    @no_duplicates
     def test_a_token_taken_that_is_still_due_is_refreshed_with_its_own(self):
         st.write_token_file(self.path, expires_in=-60, created_days_ago=1)
         client = self.client()
@@ -477,7 +498,10 @@ class ArgumentsTest(SharedTokenTestCase):
                               ({'shared': True, 'lock_timeout': -1},
                                ValueError),
                               ({'shared': True, 'lock_timeout': '5'},
-                               TypeError)):
+                               TypeError),
+                              # Refused unshared too, not taken unread.
+                              ({'lock_timeout': 'x'}, TypeError),
+                              ({'lock_timeout': -1}, ValueError)):
             with self.subTest(**kwargs):
                 with self.assertRaises(error):
                     auth.client_from_token_file(

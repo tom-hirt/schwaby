@@ -474,17 +474,18 @@ def token_file_writer(token_path, *, shared=False, lock_path=None,
     if not os.path.isdir(directory):
         raise ValueError('token_path must be in an existing directory, and '
                          '{!r} is not one'.format(directory))
-    if _check_shared(shared, lock_path):
+    if _check_shared(shared, lock_path, lock_timeout):
         return _shared_writer(_shared_file(token_path, lock_path=lock_path,
                                            lock_timeout=lock_timeout))
     return __make_update_token_func(token_path)
 
 
-def _check_shared(shared, lock_path):
+def _check_shared(shared, lock_path, lock_timeout):
     '''Whether ``shared`` asks for a shared token file; refuses what it
-    cannot use.'''
+    cannot use, ``lock_timeout`` included whether or not it is shared.'''
     if not isinstance(shared, bool):
         raise TypeError('shared must be True or False')
+    _shared_token._check_timeout(lock_timeout)
     if lock_path is not None and not shared:
         raise ValueError('lock_path is for a shared token file: pass '
                          'shared=True with it')
@@ -567,7 +568,7 @@ def _share_session(client, token_write_func, metadata):
 def _login_writer(token_path, token_write_func, shared, lock_path,
                   lock_timeout):
     '''The writer a login writes its token with.'''
-    if not _check_shared(shared, lock_path):
+    if not _check_shared(shared, lock_path, lock_timeout):
         return (__make_update_token_func(token_path)
                 if token_write_func is None else token_write_func)
     if token_write_func is not None:
@@ -1322,7 +1323,7 @@ def client_from_token_file(token_path, api_key, app_secret, asyncio=False,
     api_key = __normalize_credential(api_key, 'api_key')
     app_secret = __normalize_credential(app_secret, 'app_secret')
 
-    if _check_shared(shared, lock_path):
+    if _check_shared(shared, lock_path, lock_timeout):
         load, write = shared_token_file(token_path, lock_path=lock_path,
                                         lock_timeout=lock_timeout)
     else:

@@ -9340,10 +9340,8 @@ CASES += [
          'a refresh was paced that was never sent'),
     Case('pace/an-async-refresh-is-paced-once',
          'schwaby/client/asynchronous.py',
-         '        flight = client._refresh_flight\n'
-         '        if flight is not None:\n',
-         '        flight = None\n'
-         '        if flight is not None:\n',
+         '        held = client._refresh_flight\n',
+         '        held = None\n',
          'tests/auth_test.py::PacedSessionTest::test_async_calls_at_once_pace_and_send_one_refresh',
          'a refresh was paced that was never sent'),
     # With a pace, the session is given the token's auth, so it does not
@@ -9489,6 +9487,36 @@ CASES += [
          'True is not false'),
 ]
 
+
+# 5.4.0's recorded LOWs, fixed for 5.5.0: lock_timeout refused unshared; a
+# token taken from a shared file is not a refresh; an async refresh flight
+# belongs to its event loop.
+CASES += [
+    Case('shared/lock-timeout-is-refused-unshared-too',
+         'schwaby/auth.py',
+         '    _shared_token._check_timeout(lock_timeout)\n',
+         '',
+         'tests/shared_token_test.py::ArgumentsTest::test_what_cannot_be_used_is_refused',
+         'not raised', subtest="lock_timeout='x'"),
+    Case('shared/a-token-taken-is-no-refresh',
+         'schwaby/client/synchronous.py',
+         '                return waited, not taken\n',
+         '                return waited, True\n',
+         'tests/shared_token_test.py::AdoptTest::test_ensure_token_fresh_says_fresh_when_it_took_a_token',
+         'a token taken was called a refresh', subtest='asyncio=False'),
+    Case('shared/an-async-token-taken-is-no-refresh',
+         'schwaby/client/asynchronous.py',
+         '            return waited, not taken\n',
+         '            return waited, True\n',
+         'tests/shared_token_test.py::AdoptTest::test_ensure_token_fresh_says_fresh_when_it_took_a_token',
+         'a token taken was called a refresh', subtest='asyncio=True'),
+    Case('fresh/a-flight-is-its-loops',
+         'schwaby/client/asynchronous.py',
+         '        if held is not None and held[0] is loop:\n',
+         '        if held is not None:\n',
+         'tests/auth_test.py::PacedSessionTest::test_a_flight_left_by_an_abandoned_loop_holds_nothing_up',
+         'TimeoutError'),
+]
 
 # Out of the release red-proof (2026-11-09): entries on tooling, test
 # scaffolding, docs and CI, which leave it while their tests stay in the

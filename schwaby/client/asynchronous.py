@@ -1,4 +1,5 @@
 from .base import BaseClient, TOKEN_PATH
+from .. import _shared_token
 from ..debug import register_redactions_from_response
 from ..utils import LazyLog, TokenFreshness, TokenRefreshError
 
@@ -151,13 +152,17 @@ async def _refresh_unless(client, fresh, *, attempt):
     while True:
         if fresh():
             return waited, False
-        flight = client._refresh_flight
-        if flight is not None:
+        loop = asyncio.get_running_loop()
+        # A flight is its event loop's: one left by a loop that stopped
+        # without ending it waits for nothing here.
+        held = client._refresh_flight
+        if held is not None and held[0] is loop:
             started = time.monotonic()
-            await flight.wait()
+            await held[1].wait()
             waited += time.monotonic() - started
             continue
-        flight = client._refresh_flight = asyncio.Event()
+        flight = asyncio.Event()
+        mine = client._refresh_flight = (loop, flight)
         try:
             waited += await _call_pace(client, 'token_refresh', 'POST',
                                        TOKEN_PATH, attempt)
@@ -170,12 +175,16 @@ async def _refresh_unless(client, fresh, *, attempt):
             async with lock:
                 if fresh():
                     return waited, False
-                with client._translate_token_errors():
+                # A shared token file's refresh may take another client's
+                # newer token instead, and send nothing: that is no refresh.
+                with _shared_token.watching_for_a_taken_token() as taken, \
+                        client._translate_token_errors():
                     await client.session.refresh_token(
                             refresh_token=client._refresh_token_to_send())
-            return waited, True
+            return waited, not taken
         finally:
-            client._refresh_flight = None
+            if client._refresh_flight is mine:
+                client._refresh_flight = None
             flight.set()
 
 

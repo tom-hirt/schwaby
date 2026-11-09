@@ -619,7 +619,10 @@ class BaseClient(EnumEnforcer):
 
         With a pace, the client refreshes the access token itself, through
         the pace, just before the session would have, so that the refresh is
-        paced too.
+        paced too. With a shared token file (``shared=True``), a client that
+        then finds another client's newer token in the file takes it and
+        sends nothing, having asked its pace already: the pace counts a
+        refresh that was not sent, never the other way.
 
         :param pace: a callable taking a
                      :class:`~schwaby.utils.PaceRequest`, or ``None``.'''

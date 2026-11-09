@@ -3537,3 +3537,25 @@ class PacedSessionTest(unittest.TestCase):
                                   'the flight was left set')
                 self.assertEqual(1, sum(isinstance(r, Exception)
                                         for r in results))
+
+    def test_a_flight_left_by_an_abandoned_loop_holds_nothing_up(self):
+        # A refresh left in flight by an event loop that stopped without
+        # ending it is that loop's: a new loop's refresh does not wait on it.
+        import httpx2
+
+        async def answer(transport, request):
+            return self.answer(request)
+        c = self.client(asyncio_=True, seconds_left=-10)
+        abandoned = asyncio.new_event_loop()
+        abandoned.close()
+        c._refresh_flight = (abandoned, asyncio.Event())
+
+        async def refresh():
+            return await asyncio.wait_for(c.ensure_token_fresh(), 10)
+        with patch.object(httpx2.AsyncHTTPTransport, 'handle_async_request',
+                          answer):
+            from schwaby import TokenFreshness
+            self.assertIs(TokenFreshness.REFRESHED,
+                          asyncio.run(refresh()),
+                          'a refresh waited on another loop\'s flight')
+        self.assertEqual([self.TOKEN_URL], self.posts)
