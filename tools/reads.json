@@ -306,6 +306,7 @@
   "tests/",
   "tests/__init__.py",
   "tests/conftest.py",
+  "tests/reads_test.py",
   "tests/suite_config_test.py",
   "tests/test.py",
   "tests/utils.py"

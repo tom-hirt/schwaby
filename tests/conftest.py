@@ -84,3 +84,73 @@ def guard_login_flow_ports(monkeypatch):
         real(process, *args, **kwargs)
 
     monkeypatch.setattr(multiprocess.Process, '__init__', checked)
+
+
+# progress: DONE/TOTAL sentinels, on a line of its own as the count moves, so
+# a scheduler running the suite can show how far it has got. Printed when the
+# output is not a terminal, or with SUITE_PROGRESS=1; never with
+# SUITE_PROGRESS=0. Once per whole percent, and at the end, rather than once
+# a test.
+
+class _Progress:
+
+    def __init__(self, config):
+        self.config = config
+        self.total = None
+        self.done = set()
+        self.shown = None
+
+    def show(self, force=False):
+        if not self.total:
+            return
+        done = len(self.done)
+        step = done * 100 // self.total
+        if not force and step == self.shown:
+            return
+        self.shown = step
+        reporter = self.config.pluginmanager.get_plugin('terminalreporter')
+        if reporter is not None:
+            # On a line of its own: the progress dots leave the line open.
+            if getattr(reporter._tw, 'width_of_current_line', 0):
+                reporter.write('\n')
+            reporter.write_line(
+                    'progress: {}/{} sentinels'.format(done, self.total))
+
+    def collected(self, count):
+        self.total = count
+        self.show(force=True)
+
+    @pytest.hookimpl(trylast=True)
+    def pytest_collection_finish(self, session):
+        # Without xdist. Under it the controller collects nothing, and the
+        # count comes from a worker's collection, below.
+        if self.total is None and session.items:
+            self.collected(len(session.items))
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_xdist_node_collection_finished(self, node, ids):
+        if self.total is None:
+            self.collected(len(ids))
+
+    def pytest_runtest_logreport(self, report):
+        if report.when == 'call' or report.skipped or report.failed:
+            self.done.add(report.nodeid)
+            self.show()
+
+    def pytest_sessionfinish(self, session):
+        self.show(force=True)
+
+
+def _show_progress(config):
+    choice = os.environ.get('SUITE_PROGRESS')
+    if choice in ('0', '1'):
+        return choice == '1'
+    try:
+        return not os.isatty(1)
+    except OSError:
+        return False
+
+
+def pytest_configure(config):
+    if not hasattr(config, 'workerinput') and _show_progress(config):
+        config.pluginmanager.register(_Progress(config), 'suite-progress')

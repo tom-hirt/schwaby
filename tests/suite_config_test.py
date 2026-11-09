@@ -6,6 +6,7 @@ import importlib.util
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -456,3 +457,29 @@ class ReleaseCommitOnMainTest(unittest.TestCase):
                                  run.stdout + run.stderr)
                 if code:
                     self.assertIn('%s is not on main' % sha, run.stdout)
+
+
+class ProgressLineTest(unittest.TestCase):
+    '''The suite prints `progress: DONE/TOTAL sentinels`, each on a line of
+    its own, ending at the total, so a scheduler can show how far it is.'''
+
+    def run_part(self, choice):
+        env = dict(os.environ, SUITE_PROGRESS=choice)
+        return subprocess.run(
+                [sys.executable, '-I', '-m', 'pytest', '-q',
+                 '-p', 'no:cacheprovider', '-p', 'no:xdist',
+                 os.path.join('tests', 'reads_test.py')],
+                cwd=ROOT, env=env, capture_output=True, text=True,
+                timeout=120).stdout
+
+    def test_the_progress_lines(self):
+        out = self.run_part('1')
+        lines = [line for line in out.splitlines() if 'progress:' in line]
+        self.assertTrue(lines, out[-2000:])
+        for line in lines:
+            self.assertRegex(line, r'^progress: \d+/\d+ sentinels$')
+        done, total = map(int, re.findall(r'\d+', lines[-1]))
+        self.assertEqual(done, total)
+        self.assertEqual('progress: 0/{} sentinels'.format(total), lines[0])
+        # And none when turned off.
+        self.assertNotIn('progress:', self.run_part('0'))
