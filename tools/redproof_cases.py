@@ -8887,3 +8887,30 @@ CASES += [
          '::test_a_token_with_no_refresh_token_is_dead_without_asking',
          'TokenRefreshError not raised'),
 ]
+CASES += [
+    Case('token-kind/only-schwabs-nesting-is-unwrapped',
+         'schwaby/utils.py',
+         "    if code == 'unsupported_token_type' and issubclass(type(description),\n",
+         "    if issubclass(type(description),\n",
+         'tests/auth_test.py::LoginExchangeErrorTest'
+         '::test_each_login_refusal_has_its_kind',
+         'a login refusal was given the wrong kind'),
+    Case('fresh/a-second-call-finds-the-token-fresh',
+         'schwaby/client/synchronous.py',
+         '        with self._refresh_lock:\n'
+         '            if self._token_is_fresh(margin):\n'
+         '                return TokenFreshness.FRESH\n',
+         '        with self._refresh_lock:\n'
+         '            if False:\n'
+         '                return TokenFreshness.FRESH\n',
+         'tests/auth_test.py::EnsureTokenFreshSessionTest'
+         '::test_two_calls_at_once_refresh_once',
+         'two calls at once each sent a refresh'),
+    Case('fresh/the-async-client-holds-the-sessions-lock',
+         'schwaby/client/asynchronous.py',
+         "        lock = getattr(self.session, '_token_refresh_lock', None)\n",
+         "        lock = None\n",
+         'tests/auth_test.py::EnsureTokenFreshSessionTest'
+         '::test_two_async_calls_at_once_refresh_once',
+         'two calls at once each sent a refresh'),
+]

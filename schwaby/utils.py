@@ -812,6 +812,9 @@ class TokenErrorKind(str, enum.Enum):
     'dead_token'`` holds, and a log or a JSON document carries the plain word.
     The words do not change.'''
 
+    __str__ = str.__str__
+    __format__ = str.__format__
+
     #: The refresh token is dead: only a new login, which needs a person at a
     #: browser, gives a working token. What ``refresh_token_invalid`` is
     #: ``True`` for.
@@ -835,8 +838,11 @@ class TokenErrorKind(str, enum.Enum):
 
 class LoginErrorKind(str, enum.Enum):
     '''What a failed login calls for, as a :class:`LoginExchangeError`'s
-    ``kind`` gives it. A ``str``, like :class:`TokenErrorKind`, whose words do not
-    change.'''
+    ``kind`` gives it. A ``str``, like :class:`TokenErrorKind`, whose words
+    do not change.'''
+
+    __str__ = str.__str__
+    __format__ = str.__format__
 
     #: The token endpoint refused the authorization code (``invalid_grant``):
     #: it was already used, or it expired.
@@ -877,13 +883,13 @@ class NoBrowserAvailable(SchwabError, webbrowser.Error):
 class TokenFreshness(str, enum.Enum):
     '''What :meth:`~schwaby.client.Client.ensure_token_fresh` did.'''
 
+    __str__ = str.__str__
+    __format__ = str.__format__
+
     #: It refreshed the token.
     REFRESHED = 'refreshed'
     #: The token had longer than the margin left, so nothing was sent.
     FRESH = 'fresh'
-    #: A newer token was found in a shared token file and taken instead, so
-    #: nothing was sent.
-    ADOPTED = 'adopted'
 
 
 #: The codes that say the token endpoint refused the app itself.
@@ -906,24 +912,25 @@ def _sent_code(error):
     authlib made up before sending anything, and for one not safe to show.
     Read from the instance, never from a class default. Schwab's nesting of
     ``invalid_grant`` inside ``unsupported_token_type``'s description is
-    unwrapped to the code it nests.'''
+    unwrapped to the code it nests, and nothing else is.'''
     fields = vars(error)
     if fields.get('_described_by_this_library') is True:
         return None
-    if '_token_endpoint_status' not in fields and not fields.get(
-            '_from_redirect'):
+    if '_token_endpoint_status' not in fields:
         return None
     code = fields.get('error')
     description = fields.get('description')
-    if issubclass(type(description), str):
+    if code == 'unsupported_token_type' and issubclass(type(description),
+                                                         str):
         start, end = description.find('{'), description.rfind('}')
         if 0 <= start < end:
             try:
                 nested = json.loads(description[start:end + 1])
             except ValueError:
                 nested = None
-            if isinstance(nested, dict) and _safe_code(nested.get('error')):
-                code = nested['error']
+            if isinstance(nested, dict) and nested.get(
+                    'error') == 'invalid_grant':
+                code = 'invalid_grant'
     return _safe_code(code)
 
 
@@ -957,8 +964,6 @@ def _exchange_kind(error, answered, status):
         code = getattr(type(error), 'error', None)
         if code == 'mismatching_state':
             return LoginErrorKind.STATE_MISMATCH
-        if code == 'missing_code':
-            return LoginErrorKind.MALFORMED_REDIRECT
         return LoginErrorKind.TRANSIENT
     sent = _sent_code(error)
     if sent == 'invalid_grant':
@@ -991,16 +996,20 @@ def find_token_error(exc, *, follow_context=False, of=None):
     exception that was being handled when this one was raised, is followed
     only when ``follow_context`` is true: such an exception did not cause
     this one, and following that link can find a token error behind an
-    unrelated failure. ``of`` narrows the types looked for, such as
-    ``of=(TokenRefreshError,)``, since the two errors' kinds share some
-    words. It never raises.
+    unrelated failure. ``of`` narrows the types looked for, as one type or a
+    tuple of them, such as ``of=TokenRefreshError``, since the two errors'
+    kinds share some words. It never raises.
 
     :param exc: an exception, or anything else, which gives ``None``.
     '''
-    types = tuple(of) if of is not None else (TokenRefreshError,
-                                               LoginExchangeError)
     seen, current = set(), exc
     try:
+        if of is None:
+            types = (TokenRefreshError, LoginExchangeError)
+        elif isinstance(of, type):
+            types = (of,)
+        else:
+            types = tuple(of)
         for _ in range(20):
             if current is None or id(current) in seen:
                 return None

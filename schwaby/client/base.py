@@ -14,6 +14,7 @@ import json
 import math
 import os
 import schwaby
+import threading
 import time
 import warnings
 
@@ -64,6 +65,9 @@ class BaseClient(EnumEnforcer):
 
         # Set the default timeout configuration
         self.set_timeout(30.0)
+
+        # ensure_token_fresh's, so two calls of it refresh once.
+        self._refresh_lock = threading.Lock()
 
     # XXX: This class's tests perform monkey patching to inject synthetic values
     # of utcnow(). To avoid being confused by this, these are the values
@@ -419,14 +423,18 @@ class BaseClient(EnumEnforcer):
 
     def _token_is_fresh(self, margin):
         '''Whether the session's token has longer than ``margin`` seconds
-        left, by an expiry authlib reads. One whose expiry cannot be read is
-        not.'''
+        left, by an expiry authlib reads, and longer than the leeway within
+        which the session refreshes it itself. One whose expiry cannot be
+        read is not.'''
+        leeway = getattr(self.session, 'leeway', 0)
+        if not isinstance(leeway, (int, float)) or isinstance(leeway, bool):
+            leeway = 0
         try:
             expires_at = self.session.token.get('expires_at')
         except Exception:
             return False
         return bool(_expiry_authlib_acts_on(expires_at)
-                    and expires_at - time.time() > margin)
+                    and expires_at - time.time() > max(margin, leeway))
 
     def _refresh_token_to_send(self):
         '''The refresh token to refresh with. A stored token with none is

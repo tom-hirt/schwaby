@@ -1926,6 +1926,10 @@ class FindTokenErrorTest(unittest.TestCase):
         error = self.refresh_error()
         self.assertIsNone(find_token_error(error, of=(LoginExchangeError,)))
         self.assertIs(error, find_token_error(error, of=(TokenRefreshError,)))
+        # One type alone, not in a tuple.
+        self.assertIs(error, find_token_error(error, of=TokenRefreshError))
+        self.assertIsNone(find_token_error(error, of=LoginExchangeError))
+        self.assertIsNone(find_token_error(error, of=5))
 
     def test_a_cycle_or_a_long_chain_ends(self):
         from schwaby import find_token_error
@@ -1971,4 +1975,10 @@ class FindTokenErrorTest(unittest.TestCase):
         self.assertIs(LoginErrorKind.RATE_LIMITED, LoginExchangeError(
                 'x', status_code=429).kind)
         self.assertEqual('dead_token', TokenErrorKind.DEAD_TOKEN)
+        # The plain word, however it is turned into text.
+        kind = TokenErrorKind.DEAD_TOKEN
+        self.assertEqual('dead_token', f'{kind}')
+        self.assertEqual('dead_token', '%s' % kind)
+        self.assertEqual('dead_token', str(kind))
+        self.assertEqual('access_denied', str(LoginErrorKind.ACCESS_DENIED))
         self.assertTrue(LoginExchangeError('x', endpoint_answered=True).sent)

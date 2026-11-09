@@ -18,20 +18,14 @@ class AsyncClient(BaseClient):
         '''
         await self.session.aclose()
 
-    async def ensure_token_fresh(self, margin=300.0):
-        '''Refreshes the access token now if it expires within ``margin``
-        seconds, so that a later call does not have to.
-
-        A request refreshes the token on the way past once it is about to
-        expire, so the first call after that waits for a refresh, and a
-        refusal surfaces from it. This lets a program choose when that
-        happens instead, before it needs the token. The new token is written
-        through the client's token writer, as a request's refresh writes it,
-        and a refusal raises :class:`~schwaby.utils.TokenRefreshError`, with
-        its ``kind``, as a request's would. A token whose expiry cannot be read is refreshed.
-
-        The coroutine of :meth:`Client.ensure_token_fresh
-        <schwaby.client.Client.ensure_token_fresh>`, for ``asyncio``.
+    async def ensure_token_fresh(self, margin=600.0):
+        """The coroutine of :meth:`Client.ensure_token_fresh
+        <schwaby.client.Client.ensure_token_fresh>`, for ``asyncio``: it
+        refreshes the access token now if it expires within ``margin``
+        seconds, or the session's own leeway if that is longer, and says
+        whether it did. It holds the session's own refresh lock, which a
+        request's refresh on the way past holds too, so the two never each
+        send a refresh.
 
         :param margin: seconds; the token is refreshed when it has this long
                        left or less.
@@ -39,12 +33,22 @@ class AsyncClient(BaseClient):
                  <schwaby.utils.TokenFreshness.REFRESHED>` when it refreshed,
                  :attr:`TokenFreshness.FRESH
                  <schwaby.utils.TokenFreshness.FRESH>` when it sent nothing.
-        '''
-        if self._token_is_fresh(self._check_margin(margin)):
+        """
+        margin = self._check_margin(margin)
+        if self._token_is_fresh(margin):
             return TokenFreshness.FRESH
-        with self._translate_token_errors():
-            await self.session.refresh_token(
-                    refresh_token=self._refresh_token_to_send())
+        # The session's own lock, which its refresh on the way past a
+        # request holds, so the two never send a refresh each; checked again
+        # inside it, since one may have just finished.
+        lock = getattr(self.session, '_token_refresh_lock', None)
+        if not hasattr(lock, '__aenter__'):
+            lock = _NoLock()
+        async with lock:
+            if self._token_is_fresh(margin):
+                return TokenFreshness.FRESH
+            with self._translate_token_errors():
+                await self.session.refresh_token(
+                        refresh_token=self._refresh_token_to_send())
         return TokenFreshness.REFRESHED
 
     async def _get_request(self, path, params):
@@ -97,3 +101,13 @@ class AsyncClient(BaseClient):
         self._log_response(resp, req_num)
         register_redactions_from_response(resp)
         return resp
+
+
+class _NoLock:
+    """Stands in for a session lock that is not there."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False

@@ -2094,6 +2094,11 @@ class LoginExchangeErrorTest(unittest.TestCase):
         answered = (
             (400, {'error': 'invalid_grant'}, K.CODE_REFUSED,
              'invalid_grant'),
+            (429, {'error': 'invalid_grant'}, K.CODE_REFUSED,
+             'invalid_grant'),
+            (401, {'error': 'unauthorized_client', 'error_description':
+                   'x {"error":"invalid_grant"}'}, K.APP_REFUSED,
+             'unauthorized_client'),
             (429, None, K.RATE_LIMITED, None),
             (429, {'error': 'invalid_client'}, K.RATE_LIMITED,
              'invalid_client'),
@@ -3179,3 +3184,104 @@ class UsableTokenTest(unittest.TestCase):
                       None, [], 'token'):
             with self.subTest(token=token):
                 self.assertFalse(auth._is_usable_token(token))
+
+
+class EnsureTokenFreshSessionTest(unittest.TestCase):
+    """ensure_token_fresh on a real session, with the network replaced: the
+    token is written as a request's refresh writes it, the refusal hook runs,
+    and two calls at once refresh once."""
+
+    TOKEN_URL = '/v1/oauth/token'
+
+    def setUp(self):
+        self.written = []
+        self.posts = []
+        self.answers = []
+
+    def stored(self, seconds_left=60):
+        return {'creation_timestamp': 1700000000, 'token': {
+            'access_token': 'OLD', 'token_type': 'Bearer',
+            'refresh_token': 'r', 'expires_in': 1800,
+            'expires_at': int(time.time()) + seconds_left}}
+
+    def answer(self, request):
+        import httpx2
+        self.posts.append(request.url.path)
+        if self.answers:
+            status, body = self.answers.pop(0)
+        else:
+            status, body = 200, {'access_token': 'NEW',
+                                 'token_type': 'Bearer', 'expires_in': 1800,
+                                 'refresh_token': 'r'}
+        content = b'' if body is None else json.dumps(body).encode()
+        return httpx2.Response(status, content=content, request=request)
+
+    def client(self, asyncio_=False, seconds_left=60):
+        stored = self.stored(seconds_left)
+        return auth.client_from_access_functions(
+                API_KEY, APP_SECRET, lambda: stored,
+                lambda token, *a, **k: self.written.append(token),
+                asyncio=asyncio_)
+
+    def test_a_refresh_is_written_as_a_requests_is(self):
+        import httpx2
+        from schwaby import TokenFreshness
+        with patch.object(httpx2.HTTPTransport, 'handle_request',
+                          lambda transport, request: self.answer(request)):
+            c = self.client()
+            self.assertIs(TokenFreshness.REFRESHED, c.ensure_token_fresh())
+        self.assertEqual([self.TOKEN_URL], self.posts)
+        self.assertEqual(1, len(self.written))
+        self.assertEqual('NEW', self.written[0]['token']['access_token'])
+        # The age is the original authorization's, as a refresh keeps it.
+        self.assertEqual(1700000000, self.written[0]['creation_timestamp'])
+
+    def test_the_refusal_hook_runs(self):
+        import httpx2
+        from schwaby import TokenErrorKind, TokenRefreshError
+        self.answers = [(401, None)]
+        with patch.object(httpx2.HTTPTransport, 'handle_request',
+                          lambda transport, request: self.answer(request)):
+            c = self.client()
+            with self.assertRaises(TokenRefreshError) as cm:
+                c.ensure_token_fresh()
+        self.assertIs(TokenErrorKind.REFUSED_NO_BODY, cm.exception.kind)
+        self.assertEqual(401, cm.exception.status_code)
+        self.assertEqual([], self.written)
+
+    def test_two_calls_at_once_refresh_once(self):
+        import threading
+        import httpx2
+        gate = threading.Event()
+
+        def slow(transport, request):
+            gate.wait(5)
+            return self.answer(request)
+        with patch.object(httpx2.HTTPTransport, 'handle_request', slow):
+            c = self.client()
+            threads = [threading.Thread(target=c.ensure_token_fresh)
+                       for _ in range(2)]
+            for t in threads:
+                t.start()
+            gate.set()
+            for t in threads:
+                t.join(10)
+        self.assertEqual([self.TOKEN_URL], self.posts,
+                         'two calls at once each sent a refresh')
+
+    def test_two_async_calls_at_once_refresh_once(self):
+        import httpx2
+
+        async def answer(transport, request):
+            await asyncio.sleep(0)
+            return self.answer(request)
+
+        async def both():
+            c = self.client(asyncio_=True)
+            await asyncio.gather(c.ensure_token_fresh(),
+                                 c.ensure_token_fresh())
+        with patch.object(httpx2.AsyncHTTPTransport, 'handle_async_request',
+                          answer):
+            asyncio.run(both())
+        self.assertEqual([self.TOKEN_URL], self.posts,
+                         'two calls at once each sent a refresh')

@@ -169,7 +169,31 @@ class _TestClient:
             ('slow_down', self.hook_refusal(400, {'error': 'slow_down'}),
              K.TRANSIENT, 'slow_down'),
             ('a stored token with none', MissingTokenError(), K.DEAD_TOKEN,
-             None))
+             None),
+            # A dead token at 429 is dead: checked first.
+            ('429 with invalid_grant', self.hook_refusal(
+                429, {'error': 'invalid_grant'}), K.DEAD_TOKEN,
+             'invalid_grant'),
+            # Only Schwab's nesting is unwrapped; other JSON in a
+            # description changes nothing.
+            ('invalid_client with JSON in it', self.hook_refusal(
+                401, {'error': 'invalid_client', 'error_description':
+                      'see {"error":"server_error"}'}), K.APP_REFUSED,
+             'invalid_client'),
+            ('slow_down naming invalid_client', self.hook_refusal(
+                400, {'error': 'slow_down', 'error_description':
+                      'x {"error":"invalid_client"}'}), K.TRANSIENT,
+             'slow_down'),
+            # Dead by refresh_token_invalid's own rule, which reads a nested
+            # invalid_grant anywhere; the code is still the one sent.
+            ('invalid_client nesting invalid_grant', self.hook_refusal(
+                401, {'error': 'invalid_client', 'error_description':
+                      'x {"error":"invalid_grant"}'}), K.DEAD_TOKEN,
+             'invalid_client'),
+            ('a nested code that is not invalid_grant', self.hook_refusal(
+                400, {'error': 'unsupported_token_type', 'error_description':
+                      '{"error":"invalid_client"}'}), K.TRANSIENT,
+             'unsupported_token_type'))
         for name, refusal, kind, code in cases:
             with self.subTest(case=name):
                 self.mock_session.get.side_effect = refusal
@@ -197,7 +221,7 @@ class _TestClient:
     @no_duplicates
     def test_a_fresh_token_is_left_alone(self):
         from schwaby import TokenFreshness
-        for left, margin in ((3600, 300.0), (100, 0), (301, 300)):
+        for left, margin in ((3600, 300.0), (100, 0), (900, 300)):
             with self.subTest(left=left, margin=margin):
                 self.mock_session.token = self.token(left)
                 self.mock_session.refresh_token.reset_mock()
@@ -221,6 +245,15 @@ class _TestClient:
                               'a token near its expiry was not refreshed')
                 self.mock_session.refresh_token.assert_called_once_with(
                         refresh_token='r')
+
+    @no_duplicates
+    def test_the_sessions_leeway_is_a_margin_too(self):
+        # A request would refresh within the leeway anyway.
+        from schwaby import TokenFreshness
+        self.mock_session.leeway = 300
+        self.mock_session.token = self.token(200)
+        self.assertIs(TokenFreshness.REFRESHED,
+                      self.client.ensure_token_fresh(0))
 
     @no_duplicates
     def test_ensure_token_fresh_reports_a_refusal_with_its_kind(self):
