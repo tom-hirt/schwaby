@@ -124,6 +124,13 @@ class PythonPinsTest(unittest.TestCase):
                 text = self.read('.github', 'workflows', workflow)
                 self.assertIsNone(re.search(r'^\s*schedule\s*:', text, re.M),
                                   '%s runs on a schedule' % workflow)
+        # Nor does a bot open pull requests, each running CI, on one.
+        dependabot = os.path.join(ROOT, '.github', 'dependabot.yml')
+        if os.path.exists(dependabot):
+            self.assertIsNone(
+                    re.search(r'^\s*schedule\s*:',
+                              self.read('.github', 'dependabot.yml'), re.M),
+                    'dependabot.yml opens update pull requests on a schedule')
 
     def test_ci_tests_the_pinned_pythons(self):
         import re

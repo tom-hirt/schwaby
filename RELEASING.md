@@ -110,24 +110,17 @@ that each pass can still fail together. It costs four seconds.
 
 ## Dependencies
 
-`.github/dependabot.yml` watches the GitHub Actions used by the workflows and
-opens a pull request when one goes stale. Without it they drift major versions
-behind, and the only symptom is a deprecation warning inside a job annotation
-nobody reads.
+Nothing opens update pull requests on a timer: CI runs when code it tests
+changes, never on a schedule. The GitHub Actions the workflows use are
+updated by hand, at a release. Dependabot's security alerts stay on, and
+act on a published advisory, not on a date.
 
-**A `dependabot.yml` in the repository is not the mechanism, only half of it.**
-Dependabot opened nothing here while the dependency graph was switched off in
-the repository's settings; in that state the file says it watches the CI
-actions while they fall majors behind, and the only symptom is a deprecation
-annotation. As with any guard that can look present and do nothing, check that
-the thing has run, not that the config exists.
-
-**Dependabot offers one action per pull request, and two of these only work
-in pairs.** `upload-artifact` and `download-artifact` are versioned separately
+**Two of the actions only work in pairs, and an update may name only
+one.** `upload-artifact` and `download-artifact` are versioned separately
 and their majors are offset by one from v5 onward, because download took a
 breaking change upload did not. The versions that go together are the ones
-released on the same day --- upload v7 with download v8. Dependabot can open a
-pull request bumping one and none for the other, which leaves `publish.yml`
+released on the same day --- upload v7 with download v8. An update, by hand
+or from a security advisory, can bump one and not the other, which leaves `publish.yml`
 handing an artifact between mismatched majors on the one path that only runs
 during a release. Merge both or neither, and prove the pair
 round-trips a file before believing it.
