@@ -288,7 +288,9 @@ may go any day.
 8. **The proof, by tier.** A LIGHT release runs no release gate and no
    release red-proof: one pass of the suite on 3.14 and the build, `twine`
    and docs checks below, on the release branch's head, with CI's run for
-   that commit. A FULL release runs the release gate, on the release
+   that commit. That run may be on a commit that differs from the one to be
+   tagged only in the changelog, the README's status or the version string,
+   such as the head before the cut, with no second run. A FULL release runs the release gate, on the release
    branch's head, on **3.11, 3.12 and 3.14**, one pass on each — 3.14 is the
    newest Python supported, and `asyncio` semantics differ below 3.12 as
    well as above it:
@@ -326,9 +328,11 @@ may go any day.
 
    Every entry it runs must be RED, GREEN (declared), RED (declared GREEN)
    or REMOVED, and no run may write to a tracked file or go unchecked for
-   one. A change to the red-proof itself (`tools/redproof*.py`) is proven on
-   a sample of about twenty entries (`--shard 1/44`) and its own entries,
-   never by running them all again.
+   one. A change to how the red-proof runs (`tools/redproof*.py`) is proven
+   on a sample of about twenty entries (`--shard 1/44`) and its own entries,
+   never by running them all again. A change to how it judges a verdict
+   that could turn a RED into a GREEN re-proves the entries it affects
+   (`--name`), named with their cost before they run.
 
    **Nothing is tagged until the release is signed off.** The maintainer, or
    whoever they have delegated release approval to, approves it having seen the results above for the exact commit that will be tagged. A result from
