@@ -260,6 +260,29 @@ specification can be set using this method:
 .. automethod:: schwaby.client.Client.set_timeout
 
 
++++++++++++
+Rate Limits
++++++++++++
+
+Schwab answers a request it is rate-limiting with HTTP 429, and the client
+returns that response like any other. It can instead wait and send the
+request again, for what is safe to send again, once it is asked to:
+
+.. code-block:: python
+
+  client.set_rate_limit_retry(3, max_wait=30)
+
+.. warning::
+
+   **The wait blocks.** The synchronous client's thread, or the
+   :class:`~schwaby.client.AsyncClient` coroutine making the call, waits
+   through each retry, up to ``max_wait`` seconds a time and ``retries``
+   times a call. Code with a deadline of its own should set ``max_wait``
+   and ``retries`` inside it, or leave this off and handle the 429.
+
+.. automethod:: schwaby.client.Client.set_rate_limit_retry
+
+
 +++++++++
 Token Age
 +++++++++
@@ -390,7 +413,9 @@ Current Quotes
    <schwaby.client.Client.get_quote>` was not measured. Schwab's documentation
    gives a request limit only for placing, replacing and cancelling orders, no
    ``Retry-After`` header was recorded, and four minutes are not enough to
-   infer a rate. Handle a 429 from ``get_quotes``; that price history and
+   infer a rate. Handle a 429 from ``get_quotes``, or have the client retry
+   it with :meth:`set_rate_limit_retry
+   <schwaby.client.Client.set_rate_limit_retry>`; that price history and
    account requests were not seen to return one does not mean they, or any
    other call, cannot.
 

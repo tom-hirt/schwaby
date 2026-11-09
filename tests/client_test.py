@@ -20,7 +20,8 @@ from schwaby.client import AsyncClient, Client
 from schwaby.orders.generic import OrderBuilder
 from schwaby.utils import TokenRefreshError
 
-from .utils import AsyncMagicMock, ResyncProxy, no_duplicates
+from .utils import (AsyncMagicMock, MockResponse, ResyncProxy,
+                    no_duplicates)
 
 # Constants
 
@@ -285,6 +286,235 @@ class _TestClient:
             with self.subTest(margin=repr(margin)):
                 with self.assertRaises(error):
                     self.client.ensure_token_fresh(margin)
+
+
+    # Rate-limit retries. The sleep is replaced, so nothing here waits; what
+    # is checked is what was sent, how often, and the waits asked for.
+
+    def patch_sleep(self):
+        """Replaces the client's sleep, and returns the stand-in."""
+        from unittest.mock import AsyncMock
+        if isinstance(self.client, AsyncClient):
+            target, stand_in = 'schwaby.client.asynchronous._sleep', AsyncMock()
+        else:
+            target, stand_in = 'schwaby.client.synchronous._sleep', MagicMock()
+        patcher = patch(target, new=stand_in)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return stand_in
+
+    def waits(self, sleep):
+        return [c.args[0] for c in sleep.call_args_list]
+
+    @staticmethod
+    def answer(status, headers=None):
+        return MockResponse({}, status, headers=headers)
+
+    @staticmethod
+    def refresh_refused(status):
+        # As the token response hook raises a refusal the endpoint answered.
+        error = OAuthError(error='http_%d' % status,
+                           description='refused at %d' % status)
+        error._token_endpoint_status = status
+        return error
+
+    @no_duplicates
+    def test_a_rate_limited_get_is_returned_when_no_retry_was_asked(self):
+        sleep = self.patch_sleep()
+        limited = self.answer(429)
+        self.mock_session.get.side_effect = [limited, self.answer(200)]
+        self.assertIs(limited, self.client.get_quote(SYMBOL),
+                      'a 429 was retried when no retry was asked')
+        self.assertEqual(1, self.mock_session.get.call_count)
+        self.assertEqual([], self.waits(sleep))
+
+    @no_duplicates
+    def test_a_rate_limited_get_is_sent_again_after_a_backoff(self):
+        sleep = self.patch_sleep()
+        self.client.set_rate_limit_retry(3)
+        done = self.answer(200)
+        self.mock_session.get.side_effect = [
+                self.answer(429), self.answer(429), done]
+        self.assertIs(done, self.client.get_quote(SYMBOL))
+        self.assertEqual(3, self.mock_session.get.call_count)
+        self.assertEqual([1.0, 2.0], self.waits(sleep))
+
+    @no_duplicates
+    def test_the_backoff_never_waits_longer_than_max_wait(self):
+        sleep = self.patch_sleep()
+        self.client.set_rate_limit_retry(5, max_wait=3)
+        self.mock_session.get.side_effect = (
+                [self.answer(429)] * 5 + [self.answer(200)])
+        self.assertEqual(200, self.client.get_quote(SYMBOL).status_code)
+        self.assertEqual([1.0, 2.0, 3.0, 3.0, 3.0], self.waits(sleep),
+                         'a wait was longer than max_wait')
+
+    @no_duplicates
+    def test_retry_after_is_the_wait_when_schwab_gives_one(self):
+        import email.utils
+        long_past = email.utils.format_datetime(
+                datetime.datetime(2001, 1, 1, tzinfo=datetime.timezone.utc),
+                usegmt=True)
+        for header, wait in (('7', 7.0), (' 12 ', 12.0), (long_past, 0.0),
+                             ('soon', 1.0), ('-3', 1.0), ('1.5', 1.0),
+                             ('9' * 400, 1.0)):
+            with self.subTest(header=header[:20]):
+                sleep = self.patch_sleep()
+                self.client.set_rate_limit_retry(1)
+                self.mock_session.get.reset_mock()
+                self.mock_session.get.side_effect = [
+                        self.answer(429, {'Retry-After': header}),
+                        self.answer(200)]
+                self.assertEqual(200,
+                                 self.client.get_quote(SYMBOL).status_code)
+                self.assertEqual([wait], self.waits(sleep))
+
+    @no_duplicates
+    def test_a_retry_after_beyond_max_wait_returns_the_429(self):
+        # Asking again sooner than Schwab said would only be refused again.
+        import email.utils
+        far = email.utils.format_datetime(
+                datetime.datetime(2999, 1, 1, tzinfo=datetime.timezone.utc),
+                usegmt=True)
+        for header in ('60', far):
+            with self.subTest(header=header):
+                sleep = self.patch_sleep()
+                self.client.set_rate_limit_retry(2, max_wait=5)
+                self.mock_session.get.reset_mock()
+                limited = self.answer(429, {'Retry-After': header})
+                self.mock_session.get.side_effect = [limited, self.answer(200)]
+                self.assertIs(limited, self.client.get_quote(SYMBOL),
+                              'a 429 whose Retry-After is beyond max_wait '
+                              'was retried')
+                self.assertEqual(1, self.mock_session.get.call_count)
+                self.assertEqual([], self.waits(sleep))
+
+    @no_duplicates
+    def test_the_last_429_is_returned_when_the_retries_run_out(self):
+        sleep = self.patch_sleep()
+        self.client.set_rate_limit_retry(2)
+        last = self.answer(429)
+        self.mock_session.get.side_effect = [
+                self.answer(429), self.answer(429), last, self.answer(200)]
+        self.assertIs(last, self.client.get_quote(SYMBOL),
+                      'the retries did not stop where asked')
+        self.assertEqual(3, self.mock_session.get.call_count)
+        self.assertEqual([1.0, 2.0], self.waits(sleep))
+
+    @no_duplicates
+    def test_an_order_answered_429_is_never_sent_again(self):
+        # Placing, replacing or cancelling twice is the harm this guards.
+        for name, call, method in (
+                ('place', lambda: self.client.place_order(ACCOUNT_HASH, {}),
+                 'post'),
+                ('replace', lambda: self.client.replace_order(
+                    ACCOUNT_HASH, ORDER_ID, {}), 'put'),
+                ('cancel', lambda: self.client.cancel_order(
+                    ORDER_ID, ACCOUNT_HASH), 'delete')):
+            with self.subTest(order=name):
+                sleep = self.patch_sleep()
+                self.client.set_rate_limit_retry(3)
+                send = getattr(self.mock_session, method)
+                send.reset_mock()
+                limited = self.answer(429, {'Retry-After': '1'})
+                send.side_effect = [limited, self.answer(201)]
+                self.assertIs(limited, call(),
+                              'an order Schwab answered was sent again')
+                self.assertEqual(1, send.call_count,
+                                 'an order Schwab answered was sent again')
+                self.assertEqual([], self.waits(sleep))
+
+    @no_duplicates
+    def test_a_rate_limited_refresh_is_retried_even_for_an_order(self):
+        # The refresh comes before the request is sent: nothing reached
+        # Schwab's order endpoint, so sending it after the wait is its first.
+        sleep = self.patch_sleep()
+        self.client.set_rate_limit_retry(2)
+        placed = self.answer(201)
+        self.mock_session.post.side_effect = [
+                self.refresh_refused(429), placed]
+        self.assertIs(placed, self.client.place_order(ACCOUNT_HASH, {}))
+        self.assertEqual([1.0], self.waits(sleep))
+
+    @no_duplicates
+    def test_a_refresh_refused_otherwise_is_raised_at_once(self):
+        for refusal in (self.refresh_refused(401), self.refresh_refused(400),
+                        OAuthError(error='invalid_grant', description='x')):
+            with self.subTest(refusal=refusal.error):
+                sleep = self.patch_sleep()
+                self.client.set_rate_limit_retry(3)
+                self.mock_session.get.reset_mock()
+                self.mock_session.get.side_effect = [refusal, self.answer(200)]
+                with self.assertRaises(TokenRefreshError,
+                                       msg='a refresh refused other than '
+                                           'by a rate limit was retried'):
+                    self.client.get_quote(SYMBOL)
+                self.assertEqual(1, self.mock_session.get.call_count)
+                self.assertEqual([], self.waits(sleep))
+
+    @no_duplicates
+    def test_a_refresh_still_rate_limited_after_the_retries_raises(self):
+        sleep = self.patch_sleep()
+        self.client.set_rate_limit_retry(1)
+        self.mock_session.get.side_effect = [
+                self.refresh_refused(429), self.refresh_refused(429)]
+        with self.assertRaises(TokenRefreshError) as cm:
+            self.client.get_quote(SYMBOL)
+        self.assertTrue(cm.exception.rate_limited)
+        self.assertEqual([1.0], self.waits(sleep))
+
+    @no_duplicates
+    def test_a_refresh_429_is_not_retried_when_no_retry_was_asked(self):
+        sleep = self.patch_sleep()
+        self.mock_session.get.side_effect = [self.refresh_refused(429)]
+        with self.assertRaises(TokenRefreshError):
+            self.client.get_quote(SYMBOL)
+        self.assertEqual([], self.waits(sleep))
+
+    @no_duplicates
+    def test_zero_retries_turns_the_retry_off_again(self):
+        sleep = self.patch_sleep()
+        self.client.set_rate_limit_retry(2)
+        self.client.set_rate_limit_retry(0)
+        limited = self.answer(429)
+        self.mock_session.get.side_effect = [limited, self.answer(200)]
+        self.assertIs(limited, self.client.get_quote(SYMBOL))
+        self.assertEqual([], self.waits(sleep))
+
+    @no_duplicates
+    def test_each_wait_is_logged(self):
+        self.patch_sleep()
+        self.client.set_rate_limit_retry(2)
+        self.mock_session.get.side_effect = [self.answer(429),
+                                             self.answer(200)]
+        with self.assertLogs(self.client.logger, level='WARNING') as logs:
+            self.client.get_quote(SYMBOL)
+        self.assertEqual(1, len(logs.records))
+        self.assertIn('rate limited (HTTP 429); sending again in 1.0 s, '
+                      'retry 1 of 2', logs.output[0])
+
+    @no_duplicates
+    def test_set_rate_limit_retry_refuses_what_it_cannot_use(self):
+        for kwargs, error in (({'retries': -1}, ValueError),
+                              ({'retries': 1.5}, TypeError),
+                              ({'retries': True}, TypeError),
+                              ({'retries': '2'}, TypeError),
+                              ({'retries': 1, 'max_wait': 0}, ValueError),
+                              ({'retries': 1, 'max_wait': -1}, ValueError),
+                              ({'retries': 1, 'max_wait': float('inf')},
+                               ValueError),
+                              ({'retries': 1, 'max_wait': float('nan')},
+                               ValueError),
+                              ({'retries': 1, 'max_wait': '5'}, TypeError),
+                              ({'retries': 1, 'max_wait': True}, TypeError)):
+            with self.subTest(**{k: repr(v) for k, v in kwargs.items()}):
+                with self.assertRaises(error):
+                    self.client.set_rate_limit_retry(**kwargs)
+        # Positive control: a sound setting is taken, and what was refused
+        # left the retry as it was.
+        self.client.set_rate_limit_retry(4, max_wait=2.5)
+        self.assertEqual((4, 2.5), (self.client._rate_limit_retries,
+                                    self.client._rate_limit_max_wait))
 
 
     def test_token_age(self):

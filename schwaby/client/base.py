@@ -9,10 +9,12 @@ from enum import Enum
 
 import contextlib
 import datetime
+import email.utils
 import inspect
 import json
 import math
 import os
+import re
 import schwaby
 import threading
 import time
@@ -30,6 +32,25 @@ from .. import utils as _utils
 
 def get_logger():
     return _redact.get_logger(__name__)
+
+
+def _retry_after_seconds(value):
+    '''The seconds a ``Retry-After`` header asks for, or None when there is
+    none or it cannot be read. It is either a number of seconds or an HTTP
+    date; a date already past asks for none.'''
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if re.fullmatch(r'[0-9]{1,9}', value):
+        return float(value)
+    try:
+        when = email.utils.parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if when is None or when.tzinfo is None:
+        return None
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return max(0.0, (when - now).total_seconds())
 
 
 
@@ -68,6 +89,9 @@ class BaseClient(EnumEnforcer):
 
         # ensure_token_fresh's, so two calls of it refresh once.
         self._refresh_lock = threading.Lock()
+        # A rate-limited request is not retried unless asked for.
+        self._rate_limit_retries = 0
+        self._rate_limit_max_wait = 60.0
 
     # XXX: This class's tests perform monkey patching to inject synthetic values
     # of utcnow(). To avoid being confused by this, these are the values
@@ -447,6 +471,82 @@ class BaseClient(EnumEnforcer):
         if not (issubclass(type(refresh_token), str) and refresh_token):
             raise MissingTokenError()
         return refresh_token
+
+    def set_rate_limit_retry(self, retries, *, max_wait=60.0):
+        '''Retries a request Schwab rate-limits, up to ``retries`` times. Off
+        until this is called with ``retries`` above zero, and off again with
+        zero.
+
+        Only what is safe to send again is retried:
+
+        * a GET Schwab answers with HTTP 429. The wait is the ``Retry-After``
+          its answer gives, in seconds or as a date; without one, 1 second,
+          then 2, 4 and so on, never more than ``max_wait``. When
+          ``Retry-After`` asks for longer than ``max_wait``, the 429 is
+          returned instead, rather than asking again sooner than Schwab
+          said.
+        * any request whose token refresh, which happens before the request
+          is sent, is answered with HTTP 429. Nothing was sent, so even an
+          order is then sent once, after the wait. The refresh's answer
+          carries no ``Retry-After`` here, so the wait is the backoff.
+
+        A POST, PUT or DELETE Schwab answers with 429 is never sent again,
+        so an order cannot be placed, replaced or cancelled twice by this.
+        When the retries run out, the last 429 response is returned, or the
+        last :class:`~schwaby.utils.TokenRefreshError` raised, as without
+        them. Each wait is logged as a warning, and the thread or, for
+        :class:`AsyncClient`, the coroutine waits through it.
+
+        :param retries: how many times to send again after a 429; ``0``
+                        turns this off.
+        :param max_wait: the longest single wait, in seconds.'''
+        if not isinstance(retries, int) or isinstance(retries, bool):
+            raise TypeError('retries must be an int, got {}'.format(
+                _qualified_type_name(retries)))
+        if retries < 0:
+            raise ValueError('retries must be zero or more, got {}'.format(
+                retries))
+        if (not isinstance(max_wait, (int, float))
+                or isinstance(max_wait, bool)):
+            raise TypeError('max_wait must be a number of seconds, got '
+                            '{}'.format(_qualified_type_name(max_wait)))
+        if not math.isfinite(max_wait) or max_wait <= 0:
+            raise ValueError('max_wait must be a finite number of seconds '
+                             'above zero, got {!r}'.format(max_wait))
+        self._rate_limit_retries = retries
+        self._rate_limit_max_wait = float(max_wait)
+
+    def _retry_wait(self, attempt, retry_after=None):
+        '''The seconds to wait before sending again after the 429 that ended
+        send number ``attempt``, or None not to send again.'''
+        if attempt > self._rate_limit_retries:
+            return None
+        asked = _retry_after_seconds(retry_after)
+        if asked is not None:
+            return asked if asked <= self._rate_limit_max_wait else None
+        return min(self._rate_limit_max_wait, 2.0 ** (attempt - 1))
+
+    def _response_retry_wait(self, resp, attempt):
+        '''The wait before sending a GET again, or None: only after a 429,
+        and only when retries were asked for. The response is not read when
+        they were not.'''
+        if not self._rate_limit_retries or resp.status_code != 429:
+            return None
+        return self._retry_wait(attempt, resp.headers.get('Retry-After'))
+
+    def _refresh_retry_wait(self, error, attempt):
+        '''The wait before sending again after a token refresh the token
+        endpoint answered with 429, or None. A refresh that failed any other
+        way is not retried here.'''
+        if not (error.rate_limited and error.endpoint_answered):
+            return None
+        return self._retry_wait(attempt)
+
+    def _log_retry(self, req_num, what, wait, attempt):
+        self.logger.warning(
+                'Req %s: %s rate limited (HTTP 429); sending again in %.1f s, '
+                'retry %d of %d', req_num, what, wait, attempt,
+                self._rate_limit_retries)
 
     def token_age(self):
         '''Get the age of the token used to create this client, in seconds. For 

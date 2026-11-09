@@ -9154,3 +9154,60 @@ CASES += [
          'tests/testing_test.py::FakeTokenEndpointTest::test_the_grants_are_kept_apart',
          'UnexpectedRequest not raised'),
 ]
+# The opt-in retry of a rate-limited request. What it must never do is send
+# an order Schwab answered a second time; what it must do is wait as asked,
+# stop where asked, and stay off until asked.
+CASES += [
+    Case('rate-limit/an-order-answered-429-is-never-sent-again',
+         'schwaby/client/synchronous.py',
+         '            wait = self._response_retry_wait(resp, attempt) if safe '
+         'else None\n',
+         '            wait = self._response_retry_wait(resp, attempt)\n',
+         'tests/client_test.py::ClientTest'
+         '::test_an_order_answered_429_is_never_sent_again',
+         'an order Schwab answered was sent again'),
+    Case('rate-limit/an-async-order-answered-429-is-never-sent-again',
+         'schwaby/client/asynchronous.py',
+         '        wait = client._response_retry_wait(resp, attempt) if safe '
+         'else None\n',
+         '        wait = client._response_retry_wait(resp, attempt)\n',
+         'tests/client_test.py::AsyncClientTest'
+         '::test_an_order_answered_429_is_never_sent_again',
+         'an order Schwab answered was sent again'),
+    Case('rate-limit/off-until-asked',
+         'schwaby/client/base.py',
+         '        self._rate_limit_retries = 0\n',
+         '        self._rate_limit_retries = 3\n',
+         'tests/client_test.py::ClientTest'
+         '::test_a_rate_limited_get_is_returned_when_no_retry_was_asked',
+         'a 429 was retried when no retry was asked'),
+    Case('rate-limit/a-retry-after-beyond-max-wait-is-not-retried',
+         'schwaby/client/base.py',
+         '            return asked if asked <= self._rate_limit_max_wait else '
+         'None\n',
+         '            return min(asked, self._rate_limit_max_wait)\n',
+         'tests/client_test.py::ClientTest'
+         '::test_a_retry_after_beyond_max_wait_returns_the_429',
+         'beyond max_wait was retried'),
+    Case('rate-limit/the-backoff-is-capped',
+         'schwaby/client/base.py',
+         '        return min(self._rate_limit_max_wait, 2.0 ** (attempt - 1))\n',
+         '        return 2.0 ** (attempt - 1)\n',
+         'tests/client_test.py::ClientTest'
+         '::test_the_backoff_never_waits_longer_than_max_wait',
+         'a wait was longer than max_wait'),
+    Case('rate-limit/the-retries-stop-where-asked',
+         'schwaby/client/base.py',
+         '        if attempt > self._rate_limit_retries:\n',
+         '        if attempt > self._rate_limit_retries + 1:\n',
+         'tests/client_test.py::ClientTest'
+         '::test_the_last_429_is_returned_when_the_retries_run_out',
+         'the retries did not stop where asked'),
+    Case('rate-limit/only-a-rate-limited-refresh-is-retried',
+         'schwaby/client/base.py',
+         '        if not (error.rate_limited and error.endpoint_answered):\n',
+         '        if not error.endpoint_answered:\n',
+         'tests/client_test.py::ClientTest'
+         '::test_a_refresh_refused_otherwise_is_raised_at_once',
+         'refused other than by a rate limit was retried'),
+]

@@ -1,8 +1,9 @@
 from .base import BaseClient
 from ..debug import register_redactions_from_response
-from ..utils import LazyLog, TokenFreshness
+from ..utils import LazyLog, TokenFreshness, TokenRefreshError
 
 import json
+from asyncio import sleep as _sleep
 
 
 class AsyncClient(BaseClient):
@@ -58,11 +59,9 @@ class AsyncClient(BaseClient):
         self.logger.debug('Req %s: GET to %s, params=%s',
                 req_num, dest, LazyLog(lambda: json.dumps(params, indent=4)))
 
-        with self._translate_token_errors():
-            resp = await self.session.get(dest, params=params)
-        self._log_response(resp, req_num)
-        register_redactions_from_response(resp)
-        return resp
+        return await _send(self, req_num,
+                           lambda: self.session.get(dest, params=params),
+                           safe=True)
 
     async def _post_request(self, path, data):
         dest = 'https://api.schwabapi.com' + path
@@ -71,11 +70,9 @@ class AsyncClient(BaseClient):
         self.logger.debug('Req %s: POST to %s, json=%s',
                 req_num, dest, LazyLog(lambda: json.dumps(data, indent=4)))
 
-        with self._translate_token_errors():
-            resp = await self.session.post(dest, json=data)
-        self._log_response(resp, req_num)
-        register_redactions_from_response(resp)
-        return resp
+        return await _send(self, req_num,
+                           lambda: self.session.post(dest, json=data),
+                           safe=False)
 
     async def _put_request(self, path, data):
         dest = 'https://api.schwabapi.com' + path
@@ -84,11 +81,9 @@ class AsyncClient(BaseClient):
         self.logger.debug('Req %s: PUT to %s, json=%s',
                 req_num, dest, LazyLog(lambda: json.dumps(data, indent=4)))
 
-        with self._translate_token_errors():
-            resp = await self.session.put(dest, json=data)
-        self._log_response(resp, req_num)
-        register_redactions_from_response(resp)
-        return resp
+        return await _send(self, req_num,
+                           lambda: self.session.put(dest, json=data),
+                           safe=False)
 
     async def _delete_request(self, path):
         dest = 'https://api.schwabapi.com' + path
@@ -96,11 +91,38 @@ class AsyncClient(BaseClient):
         req_num = self._req_num()
         self.logger.debug('Req %s: DELETE to %s', req_num, dest)
 
-        with self._translate_token_errors():
-            resp = await self.session.delete(dest)
-        self._log_response(resp, req_num)
+        return await _send(self, req_num,
+                           lambda: self.session.delete(dest), safe=False)
+
+
+# A function, not a method: every coroutine method of the client is one a
+# caller awaits, and this is only ever awaited by them.
+async def _send(client, req_num, send, *, safe):
+    '''Sends ``client``'s request with ``send()``, and again after a rate
+    limit when :meth:`~schwaby.client.Client.set_rate_limit_retry` asked for
+    it: after a token refresh answered with 429, which sent nothing, and,
+    for a ``safe`` request (a GET), after a 429 response.'''
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            with client._translate_token_errors():
+                resp = await send()
+        except TokenRefreshError as e:
+            wait = client._refresh_retry_wait(e, attempt)
+            if wait is None:
+                raise
+            client._log_retry(req_num, 'its token refresh was', wait,
+                              attempt)
+            await _sleep(wait)
+            continue
+        client._log_response(resp, req_num)
         register_redactions_from_response(resp)
-        return resp
+        wait = client._response_retry_wait(resp, attempt) if safe else None
+        if wait is None:
+            return resp
+        client._log_retry(req_num, 'it was', wait, attempt)
+        await _sleep(wait)
 
 
 class _NoLock:

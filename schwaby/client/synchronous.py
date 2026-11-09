@@ -1,8 +1,9 @@
 from .base import BaseClient
-from ..utils import LazyLog, TokenFreshness
+from ..utils import LazyLog, TokenFreshness, TokenRefreshError
 from ..debug import register_redactions_from_response
 
 import json
+from time import sleep as _sleep
 
 
 class Client(BaseClient):
@@ -75,11 +76,9 @@ class Client(BaseClient):
         self.logger.debug('Req %s: GET to %s, params=%s',
                 req_num, dest, LazyLog(lambda: json.dumps(params, indent=4)))
 
-        with self._translate_token_errors():
-            resp = self.session.get(dest, params=params)
-        self._log_response(resp, req_num)
-        register_redactions_from_response(resp)
-        return resp
+        return self._send(req_num,
+                          lambda: self.session.get(dest, params=params),
+                          safe=True)
 
     def _post_request(self, path, data):
         dest = 'https://api.schwabapi.com' + path
@@ -88,11 +87,9 @@ class Client(BaseClient):
         self.logger.debug('Req %s: POST to %s, json=%s',
             req_num, dest, LazyLog(lambda: json.dumps(data, indent=4)))
 
-        with self._translate_token_errors():
-            resp = self.session.post(dest, json=data)
-        self._log_response(resp, req_num)
-        register_redactions_from_response(resp)
-        return resp
+        return self._send(req_num,
+                          lambda: self.session.post(dest, json=data),
+                          safe=False)
 
     def _put_request(self, path, data):
         dest = 'https://api.schwabapi.com' + path
@@ -101,11 +98,9 @@ class Client(BaseClient):
         self.logger.debug('Req %s: PUT to %s, json=%s',
             req_num, dest, LazyLog(lambda: json.dumps(data, indent=4)))
 
-        with self._translate_token_errors():
-            resp = self.session.put(dest, json=data)
-        self._log_response(resp, req_num)
-        register_redactions_from_response(resp)
-        return resp
+        return self._send(req_num,
+                          lambda: self.session.put(dest, json=data),
+                          safe=False)
 
     def _delete_request(self, path):
         dest = 'https://api.schwabapi.com' + path
@@ -113,8 +108,33 @@ class Client(BaseClient):
         req_num = self._req_num()
         self.logger.debug('Req %s: DELETE to %s', req_num, dest)
 
-        with self._translate_token_errors():
-            resp = self.session.delete(dest)
-        self._log_response(resp, req_num)
-        register_redactions_from_response(resp)
-        return resp
+        return self._send(req_num,
+                          lambda: self.session.delete(dest),
+                          safe=False)
+
+    def _send(self, req_num, send, *, safe):
+        '''Sends a request with ``send()``, and again after a rate limit
+        when :meth:`set_rate_limit_retry` asked for it: after a token refresh
+        answered with 429, which sent nothing, and, for a ``safe`` request (a
+        GET), after a 429 response.'''
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                with self._translate_token_errors():
+                    resp = send()
+            except TokenRefreshError as e:
+                wait = self._refresh_retry_wait(e, attempt)
+                if wait is None:
+                    raise
+                self._log_retry(req_num, 'its token refresh was', wait,
+                                attempt)
+                _sleep(wait)
+                continue
+            self._log_response(resp, req_num)
+            register_redactions_from_response(resp)
+            wait = self._response_retry_wait(resp, attempt) if safe else None
+            if wait is None:
+                return resp
+            self._log_retry(req_num, 'it was', wait, attempt)
+            _sleep(wait)
