@@ -159,9 +159,9 @@ credentials (`schwaby/auth.py`), the order path (`schwaby/orders/`,
 callers trade on (`schwaby/streaming.py`, the Decimal decoding in
 `schwaby/contrib/util.py`), secret redaction (`schwaby/_redact.py`), or how
 the package installs. Everything else, words, docs, tooling and tests, is
-LIGHT. No proof runs until the maintainer has called the release, and at
-most one batched release goes out a week; a FULL fix to trading or security
-may go any day.
+LIGHT. No proof runs until the maintainer has called the release. A release
+goes when it is ready, with no limit on how often: the tiers, and a
+red-proof of only the entries whose code changed, keep each one cheap.
 
 1. **The release branch**, from the base the release is of:
 
