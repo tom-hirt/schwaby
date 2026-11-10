@@ -180,13 +180,18 @@ class FillTest(unittest.TestCase):
 
     @no_duplicates
     def test_a_cumulative_quantity_absent_is_never_filled_in(self):
-        event = read_account_activity(item('OrderFillCompleted',
-                                           fill(cumulative=None)))
-        self.assertIs(K.FILL, event.kind)
+        # Not a fill, since every real fill carries one; but the execution it
+        # reads is still read as it is.
+        data = cancel_execution()
+        del data['BaseEvent']['ExecutionCreatedEventExecutionInfo'][
+                'ExecutionInfo']['CancelType']
+        event = read_account_activity(item('ExecutionCreated', data))
         self.assertIsNone(event.execution.cumulative_quantity,
                           'cumulative was filled in from another quantity')
         self.assertEqual(decimal.Decimal(1),
                          event.execution.execution_quantity)
+        self.assertIs(K.UNKNOWN, read_account_activity(item(
+                'OrderFillCompleted', fill(cumulative=None))).kind)
 
     @no_duplicates
     def test_an_empty_object_is_not_zero(self):
@@ -359,6 +364,21 @@ class NeverAFillTest(unittest.TestCase):
                 ('a cancelled leg', with_(
                     lambda d: d['BaseEvent'][block].update(
                         LegSubStatus='LegSubStatusCancelled'))),
+                ('no execution price', with_(
+                    lambda d: d['BaseEvent'][block]['ExecutionInfo'].pop(
+                        'ExecutionPrice'))),
+                ('a zero execution price', with_(
+                    lambda d: d['BaseEvent'][block]['ExecutionInfo'].update(
+                        ExecutionPrice=ZERO))),
+                ('a negative average price', with_(
+                    lambda d: d['BaseEvent'][block]['QuantityInfo'].update(
+                        AveragePrice=dec(150250000, 13)))),
+                ('a zero cumulative quantity', with_(
+                    lambda d: d['BaseEvent'][block]['QuantityInfo'].update(
+                        CumulativeQuantity=ZERO))),
+                ('an execution above its cumulative', with_(
+                    lambda d: d['BaseEvent'][block]['ExecutionInfo'].update(
+                        ExecutionQuantity=dec(5000000)))),
                 ('a negative quantity', with_(
                     lambda d: d['BaseEvent'][block]['ExecutionInfo'].update(
                         ExecutionQuantity=dec(1000000, 13)))),
@@ -628,17 +648,31 @@ class KindsTest(unittest.TestCase):
     def test_it_does_not_log(self):
         with self.assertNoLogs(level=logging.DEBUG):
             for given in (item('OrderFillCompleted', fill()),
-                          item('OrderFillCompleted', fill(price={
-                              'lo': '1', 'SignScale': 12})),
+                          item('OrderFillCompleted', fill(extra_info={
+                              'PrincipalAmmount': {'lo': '1',
+                                                   'SignScale': 12}})),
                           item('SomethingNew', {}), {'1': 'x'}):
                 read_account_activity(given)
 
     @no_duplicates
+    def test_a_mapping_decimal_with_an_unknown_key_does_not_log(self):
+        import collections
+        data = fill()
+        data['BaseEvent']['OrderFillCompletedEventOrderLegQuantityInfo'][
+                'ExecutionInfo']['PrincipalAmmount'] = collections.UserDict(
+                    {'lo': '1', 'Foo': 12})
+        with self.assertNoLogs(level=logging.DEBUG):
+            event = read_account_activity(
+                    dict(item('OrderFillCompleted', 'x'), MESSAGE_DATA=data))
+        self.assertIs(K.FILL, event.kind)
+        self.assertIsNone(event.execution.principal)
+
+    @no_duplicates
     def test_a_decimal_with_an_unknown_key_is_none(self):
         event = read_account_activity(item('OrderFillCompleted', fill(
-                price={'lo': '1', 'SignScale': 12})))
+                extra_info={'PrincipalAmmount': {'lo': '1', 'SignScale': 12}})))
         self.assertIs(K.FILL, event.kind)
-        self.assertIsNone(event.execution.execution_price)
+        self.assertIsNone(event.execution.principal)
 
     @no_duplicates
     def test_a_long_text_value_is_bounded(self):

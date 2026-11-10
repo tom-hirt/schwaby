@@ -265,8 +265,8 @@ def _decimal(value):
     reading it as nothing left.'''
     if value is None or value == {}:
         return None
-    if isinstance(value, dict) and any(key not in _DECIMAL_KEYS
-                                       for key in value):
+    if isinstance(value, collections.abc.Mapping) and any(
+            key not in _DECIMAL_KEYS for key in value):
         # Refused here, as decode_decimal would refuse it, but without the
         # warning it logs: this reader logs nothing.
         return None
@@ -360,13 +360,26 @@ def _doubtful_fill(data, message_type, blocks):
     Each rule held on every one of 682 real fills a consumer counted: one
     event block and one ``ExecutionInfo`` each, ``EventType`` present (twice)
     and always the fill's own, ``ExecutionTransType`` present and ``Fill``, a
-    positive ``ExecutionQuantity``, no cancel key, and a ``LegSubStatus`` of
-    filled (616) or partially filled (66).'''
+    positive ``ExecutionQuantity``, ``ExecutionPrice``, ``AveragePrice`` and
+    ``CumulativeQuantity``, the execution no more than the running total, no
+    cancel key, and a ``LegSubStatus`` of filled (616) or partially filled
+    (66).'''
     if len(blocks) != 1 or not isinstance(_get(blocks[0], 'ExecutionInfo'),
                                          dict):
         return True
     quantity = _decimal(_get(blocks[0], 'ExecutionInfo', 'ExecutionQuantity'))
     if quantity is None or quantity <= 0:
+        return True
+    # Each present and above zero, and the execution no more than the running
+    # total, on every real fill counted.
+    for path in (('ExecutionInfo', 'ExecutionPrice'),
+                 ('QuantityInfo', 'AveragePrice')):
+        value = _decimal(_get(blocks[0], *path))
+        if value is None or value <= 0:
+            return True
+    cumulative = _decimal(_get(blocks[0], 'QuantityInfo', 'CumulativeQuantity'))
+    # The quantity is above zero, so a cumulative no smaller is too.
+    if cumulative is None or quantity > cumulative:
         return True
     own = _fold(message_type)
     infos = events = trans = legs = 0
@@ -498,8 +511,10 @@ def read_account_activity(item):
     **A fill is** ``OrderFillCompleted`` **and nothing else**, and then only
     with every sign of one and no sign anywhere in the item that it is not
     one. It must have exactly one event block of that type, carrying an
-    ``ExecutionInfo`` with an ``ExecutionQuantity`` above zero, and exactly
-    one ``ExecutionInfo`` in the item. At least one ``EventType``,
+    ``ExecutionInfo`` with an ``ExecutionQuantity`` and an ``ExecutionPrice``
+    above zero and a ``QuantityInfo`` with an ``AveragePrice`` and a
+    ``CumulativeQuantity`` above zero, the cumulative no less than the
+    execution, and exactly one ``ExecutionInfo`` in the item. At least one ``EventType``,
     ``ExecutionTransType`` and ``LegSubStatus`` must be present, and every one
     of them must be the fill's own type, ``Fill``, and filled or partially
     filled. No ``CancelType``, ``OutCancelType``, ``CancelRequestType``,
