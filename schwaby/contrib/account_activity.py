@@ -78,8 +78,9 @@ class AccountActivityKind(str, enum.Enum):
     #: :attr:`FILL`. ``(order_id, execution.execution_sequence)`` joins the
     #: two where both arrive.
     EXECUTION = 'execution'
-    #: ``OrderFillCompleted``, with no sign of a cancel: one per execution. A
-    #: partial fill is one with ``execution.leaves_quantity`` above zero.
+    #: ``OrderFillCompleted`` carrying every sign of a fill and no sign of
+    #: anything else (see :func:`read_account_activity`): one per execution.
+    #: A partial fill is one with ``execution.leaves_quantity`` above zero.
     FILL = 'fill'
     #: An empty type carrying text, such as ``"Feature not supported"``.
     NOTICE = 'notice'
@@ -393,14 +394,14 @@ def _doubtful_fill(data, message_type, blocks):
     return infos != 1 or not events or not trans or not legs
 
 
+#: The two ``LegSubStatus`` values seen on real fills, folded: 616 and 66 of
+#: 682. Anything else, ``Unfilled`` and ``Overfilled`` included, is doubtful.
+_FILLED_LEGS = frozenset(('LEGSUBSTATUSFILLED', 'LEGSUBSTATUSPARTIALLYFILLED'))
+
+
 def _filled_leg(value):
-    '''Whether a ``LegSubStatus`` says filled or partially filled, the only
-    two seen on real fills, and nothing that ends an order otherwise.'''
-    if not isinstance(value, str):
-        return False
-    folded = _fold(value)
-    return folded.endswith('FILLED') and not any(
-            fragment in folded for fragment in _NOT_A_FILL)
+    '''Whether a ``LegSubStatus`` is one of the two seen on real fills.'''
+    return isinstance(value, str) and _fold(value) in _FILLED_LEGS
 
 
 def _fold(text):
@@ -502,11 +503,14 @@ def read_account_activity(item):
     ``ExecutionTransType`` and ``LegSubStatus`` must be present, and every one
     of them must be the fill's own type, ``Fill``, and filled or partially
     filled. No ``CancelType``, ``OutCancelType``, ``CancelRequestType``,
-    ``CancelQuantity`` or ``LegCancelRequestInfoList`` may appear at all. Keys
-    match whatever their case. A fragment of a type never makes anything a
+    ``CancelQuantity`` or ``LegCancelRequestInfoList`` may appear at all; those
+    keys are matched whatever their case, while the paths read for values are
+    matched as Schwab spells them. A fragment of a type never makes anything a
     fill, and ``ExecutionCreated``
     is :attr:`~AccountActivityKind.EXECUTION` whatever it carries, so summing
-    ``execution.execution_quantity`` over fills counts each execution once.
+    ``execution.execution_quantity`` over fills counts each execution once,
+    once an item delivered twice, as a replay is, has been dropped by its
+    ``execution.execution_id``.
 
     ``symbol`` is the first order leg's ``Security/Symbol`` on
     ``OrderCreated``, and otherwise the shallowest ``Symbol`` in the event

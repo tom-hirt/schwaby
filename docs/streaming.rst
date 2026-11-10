@@ -1453,11 +1453,20 @@ before, and call it on each item of ``msg['content']`` if they want it.
   from schwaby.contrib.account_activity import (
           AccountActivityKind, read_account_activity)
 
+  seen = set()
+
   def on_activity(msg):
       for item in msg['content']:
           event = read_account_activity(item)
-          if event.kind is AccountActivityKind.FILL:
-              book(event.order_id, event.execution)
+          if event.kind is not AccountActivityKind.FILL:
+              continue
+          # A replay delivers an item again: book each execution once.
+          key = (event.execution.execution_id
+                 or (event.order_id, event.execution.execution_sequence))
+          if key in seen:
+              continue
+          seen.add(key)
+          book(event.order_id, event.execution)
 
 .. danger::
 

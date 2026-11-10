@@ -442,7 +442,9 @@ class NeverAFillTest(unittest.TestCase):
     def test_a_leg_that_ended_otherwise_is_not_a_fill(self):
         for sub in ('LegSubStatusRejected', 'LegSubStatusBusted',
                     'LegSubStatusUROut', 'LegSubStatusExpired',
-                    'LegSubStatusReplaced', 'LegSubStatusCancelledFilled'):
+                    'LegSubStatusReplaced', 'LegSubStatusCancelledFilled',
+                    'LegSubStatusUnfilled', 'LegSubStatusNotFilled',
+                    'LegSubStatusOverfilled', 'Filled'):
             with self.subTest(sub):
                 data = fill(extra_block={'LegSubStatus': sub})
                 self.assertIs(K.UNKNOWN, read_account_activity(
