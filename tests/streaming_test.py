@@ -6445,6 +6445,39 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_task_an_earlier_close_started_waits_for_a_later_one(
+            self, ws_connect):
+        # As a reconnect task started by an earlier close's handler: it
+        # carries that run in its context, and must still wait for the
+        # handlers of the next connection's close.
+        socket = await self.login_and_get_socket(ws_connect)
+        events = []
+
+        async def slow(close):
+            events.append('handler start')
+            await asyncio.sleep(0.05)
+            events.append('handler end')
+        self.client.add_close_handler(slow)
+        socket.recv.side_effect = [self.closed(1006), self.closed(1006)]
+
+        async def finder(name, call):
+            try:
+                await call()
+            except Exception:
+                events.append(name + ' raised')
+        earlier = schwaby.streaming._in_close_handlers.set(asyncio.Event())
+        try:
+            await asyncio.gather(
+                    finder('reader', self.client.handle_message),
+                    finder('subs',
+                           lambda: self.client.chart_equity_add(['A'])))
+        finally:
+            schwaby.streaming._in_close_handlers.reset(earlier)
+        self.assertEqual('handler end', events[1],
+                         'a finder raised before the close handler ended')
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_reports_from_a_wait_go_before_the_close_handler(
             self, ws_connect):
         socket = await self.login_and_get_socket(ws_connect)

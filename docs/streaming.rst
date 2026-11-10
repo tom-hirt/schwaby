@@ -524,7 +524,8 @@ before the call that finds the close raises, and reset by
 :meth:`~schwaby.streaming.StreamClient.add_close_handler` is called with it
 once for each connection that ends, before that raise, whichever call found
 the close; a second call that found it too waits for the handlers before
-raising, unless it is a close handler's own. A failed :meth:`login
+raising, unless it is that close's own handlers, or a task they started,
+finding it again. A failed :meth:`login
 <schwaby.streaming.StreamClient.login>` sets ``last_close`` but calls no close
 handler: no connection ended, and its caller has the error. A close handler
 that logs in again should back off between tries.

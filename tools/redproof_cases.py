@@ -9733,8 +9733,8 @@ CASES += [
          'ahead of an earlier one'),
     Case('stream-close/a-second-finder-waits-for-the-handlers',
          'schwaby/streaming.py',
-         '                    and not _in_close_handlers.get()):\n                await running.wait()\n',
-         '                    and not _in_close_handlers.get()):\n                pass\n',
+         '                    and _in_close_handlers.get() is not running):\n                await running.wait()\n',
+         '                    and _in_close_handlers.get() is not running):\n                pass\n',
          'tests/streaming_test.py::StreamClientTest::test_a_second_finder_raises_after_the_close_handler',
          'raised before the close handler ended'),
     Case('stream-close/reports-go-before-the-close-handlers',
@@ -9813,7 +9813,7 @@ CASES += [
 CASES += [
     Case('stream-close/a-close-handlers-own-call-does-not-wait-on-it',
          'schwaby/streaming.py',
-         '            if (running is not None and not running.is_set()\n                    and not _in_close_handlers.get()):\n',
+         '            if (running is not None and not running.is_set()\n                    and _in_close_handlers.get() is not running):\n',
          '            if (running is not None and not running.is_set()):\n',
          'tests/streaming_test.py::StreamClientTest::test_a_close_handler_that_issues_a_command_does_not_hang',
          "a close handler's own command waited on its run"),
@@ -9841,6 +9841,17 @@ CASES += [
          '',
          'tests/shared_token_test.py::NewestWinsTest::test_the_order_of_two_tokens',
          'two tokens were ordered wrongly'),
+]
+
+# Round three: a task an earlier close's handlers started still waits for a
+# later close's handlers (5.5.0).
+CASES += [
+    Case('stream-close/only-the-same-runs-calls-skip-the-wait',
+         'schwaby/streaming.py',
+         '                    and _in_close_handlers.get() is not running):\n',
+         '                    and _in_close_handlers.get() is None):\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_task_an_earlier_close_started_waits_for_a_later_one',
+         'a finder raised before the close handler ended'),
 ]
 
 # Out of the release red-proof (2026-11-09): entries on tooling, test

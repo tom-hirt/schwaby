@@ -513,11 +513,12 @@ def _text_or_none(value):
     return value if isinstance(value, str) else None
 
 
-# Set while a client's close handlers run, in their task and any task they
-# start: their own calls find the close again, and must not wait for the run
-# they are part of.
+# The run of close handlers going on in this task, inherited by any task they
+# start: their own calls find that close again, and must not wait for the
+# run they are part of. Only that run: a task they start that later meets
+# another connection's close waits for that one's handlers as anyone does.
 _in_close_handlers = contextvars.ContextVar('schwaby_in_close_handlers',
-                                            default=False)
+                                            default=None)
 
 #: The codes Schwab documents as severing the stream, which a notice carries.
 _SEVERING_CODES = frozenset({12, 30})
@@ -1178,13 +1179,13 @@ class StreamClient(EnumEnforcer):
         if not self._close_due:
             running = self._close_running
             if (running is not None and not running.is_set()
-                    and not _in_close_handlers.get()):
+                    and _in_close_handlers.get() is not running):
                 await running.wait()
             return
         self._close_due = False
         close = self.last_close
         running = self._close_running = asyncio.Event()
-        token = _in_close_handlers.set(True)
+        token = _in_close_handlers.set(running)
         try:
             for handler in list(self._close_handlers):
                 await self._call_user_handler(handler, close, 'Close handler')
