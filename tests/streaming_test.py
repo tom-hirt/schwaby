@@ -6558,35 +6558,38 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
-    async def test_a_drain_cancelled_leaves_the_close_for_the_next_call(
+    async def test_a_login_cancelled_or_failed_in_the_reports_keeps_last_close(
             self, ws_connect):
+        # The handlers are not called for a close whose drain is cancelled (a
+        # known limit), but last_close never says connected without a
+        # connection.
+        for fails in (False, True):
+            with self.subTest(fails=fails):
+                self.setUp()
+                await self.cancel_a_login_in_the_reports(ws_connect, fails)
+                self.assertIsNotNone(
+                        self.client.last_close,
+                        'last_close says connected, with no connection')
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_login_that_fails_keeps_the_notice_before_it(
+            self, ws_connect):
+        # Bumped, then a login whose preferences do not read: the old socket
+        # stays up, and when it closes, the close is the bump it was.
         socket = await self.login_and_get_socket(ws_connect)
-        events = []
-        started = asyncio.Event()
-
-        async def slow(service, exc, message):
-            events.append('report')
-            started.set()
-            await asyncio.sleep(30)
-        self.client.add_error_handler(slow)
-        self.client.add_close_handler(
-                lambda close: events.append(('close', close.kind)))
-        queued = []
-
-        def closing():
-            if not queued:
-                queued.append(True)
-                self.client._pending_reports.append(
-                        (RuntimeError('queued'), 'CHART_EQUITY', None))
-            raise self.closed(1006)
-        socket.recv.side_effect = closing
-        with self.assertRaises(asyncio.TimeoutError):
-            await asyncio.wait_for(self.client.handle_message(), 0.2)
-        self.assertTrue(started.is_set())
+        notice = {'notify': [{'service': 'ADMIN',
+                              'content': {'code': 12, 'msg': 'bumped'}}]}
+        socket.recv.side_effect = [json.dumps(notice), self.closed(1000)]
+        await self.client.handle_message()
+        self.http_client.get_user_preferences.return_value = MockResponse(
+                {}, 200)
+        with self.assertRaises(KeyError):
+            await self.client.login()
         with self.assertRaises(Exception):
             await self.client.handle_message()
-        self.assertEqual(['report', ('close', 'connection_lost')], events,
-                         'a drain cancelled lost the close')
+        self.assertEqual('bumped', self.client.last_close.kind,
+                         'a failed login lost the bump before it')
 
     async def cancel_a_login_in_the_reports(self, ws_connect, fails):
         '''A close found while a report is queued; the error handler logs in
@@ -6626,92 +6629,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         socket.recv.side_effect = closing
         with self.assertRaises(asyncio.TimeoutError):
             await asyncio.wait_for(self.client.handle_message(), 0.2)
-        self.assertIsNotNone(self.client.last_close,
-                             'last_close says connected, with no connection')
-        with self.assertRaises(Exception):
-            await self.client.handle_message()
         return events
-
-    async def cancel_the_drain(self, ws_connect):
-        '''A close found while a report is queued, and the slow error
-        handler's drain cancelled by a wait_for: the close is due again.'''
-        socket = await self.login_and_get_socket(ws_connect)
-        events = []
-
-        async def slow(service, exc, message):
-            events.append('report')
-            await asyncio.sleep(30)
-        self.client.add_error_handler(slow)
-        self.client.add_close_handler(
-                lambda close: events.append(('close', close.close_code)))
-        queued = []
-
-        def closing():
-            if not queued:
-                queued.append(True)
-                self.client._pending_reports.append(
-                        (RuntimeError('queued'), 'CHART_EQUITY', None))
-            raise self.closed(1006)
-        socket.recv.side_effect = closing
-        with self.assertRaises(asyncio.TimeoutError):
-            await asyncio.wait_for(self.client.handle_message(), 0.2)
-        return events
-
-    @no_duplicates
-    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
-    async def test_a_login_that_fails_keeps_a_close_due(self, ws_connect):
-        for cancelled in (False, True):
-            with self.subTest(cancelled=cancelled):
-                self.setUp()
-                events = await self.cancel_the_drain(ws_connect)
-                if cancelled:
-                    async def hang():
-                        await asyncio.sleep(30)
-                    self.http_client.get_user_preferences.side_effect = (
-                            lambda: hang())
-                    with self.assertRaises(asyncio.TimeoutError):
-                        await asyncio.wait_for(self.client.login(), 0.1)
-                else:
-                    self.http_client.get_user_preferences.side_effect = (
-                            RuntimeError('down'))
-                    with self.assertRaises(RuntimeError):
-                        await self.client.login()
-                with self.assertRaises(Exception):
-                    await self.client.handle_message()
-                self.assertEqual(['report', ('close', 1006)], events,
-                                 'a login that failed lost the close due')
-
-    @no_duplicates
-    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
-    async def test_a_waiter_a_cancelled_run_releases_says_the_close(
-            self, ws_connect):
-        socket = await self.login_and_get_socket(ws_connect)
-        events = []
-
-        async def slow(service, exc, message):
-            events.append('report')
-            await asyncio.sleep(30)
-        self.client.add_error_handler(slow)
-        self.client.add_close_handler(
-                lambda close: events.append(('close', close.close_code)))
-        gate = asyncio.Event()
-
-        async def recv():
-            await gate.wait()
-            self.client._pending_reports.append(
-                    (RuntimeError('queued'), 'CHART_EQUITY', None))
-            raise self.closed(1006)
-        socket.recv.side_effect = recv
-        reader = asyncio.ensure_future(
-                asyncio.wait_for(self.client.handle_message(), 0.3))
-        await asyncio.sleep(0.01)
-        subscribe = asyncio.ensure_future(
-                self.client.chart_equity_subs(['GOOG']))
-        await asyncio.sleep(0.01)
-        gate.set()
-        await asyncio.gather(reader, subscribe, return_exceptions=True)
-        self.assertEqual(['report', ('close', 1006)], events,
-                         'the waiting call raised before any handler ran')
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
@@ -6782,22 +6700,6 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         self.assertEqual('connection_lost', self.client.last_close.kind)
         self.assertIsNone(self.client.last_close.close_code,
                           "a login that failed did not say so")
-
-    @no_duplicates
-    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
-    async def test_a_login_cancelled_in_the_reports_leaves_the_close_due(
-            self, ws_connect):
-        events = await self.cancel_a_login_in_the_reports(ws_connect, False)
-        self.assertEqual(['report', ('close', 1006)], events,
-                         'a login cancelled in the reports lost the close')
-
-    @no_duplicates
-    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
-    async def test_a_login_failed_in_the_reports_leaves_the_close_due(
-            self, ws_connect):
-        events = await self.cancel_a_login_in_the_reports(ws_connect, True)
-        self.assertEqual(['report', 'login failed', ('close', 1006)], events,
-                         'a login failed in the reports lost the close')
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)

@@ -537,12 +537,21 @@ error handler that logs in again while they do so does not cancel the close:
 its handlers are still called, with that close, though ``last_close`` then
 says how that login went: ``None`` if it succeeded, its failure if it did
 not. A close handler that reconnects may skip it when ``client.last_close is
-None``; in any other case it should reconnect. If the call is cancelled
-while the reports go out, a ``wait_for`` around ``handle_message`` say, the
-close is left for the next call that finds it, unless a login has succeeded
-in the meantime. A login that failed after closing the socket leaves none to
-find it: the next call raises that the socket is not open, and the next
-login starts afresh.
+None``; in any other case it should reconnect.
+
+.. warning::
+
+   A call cancelled while the reports before a close go out, by a
+   ``wait_for`` around ``handle_message`` say, calls no close handler for that
+   close, and no later call does: a known limit. ``last_close`` still says
+   how the stream ended, so a loop that times out ``handle_message`` should
+   read it after a cancelled call rather than rely on the handlers alone.
+
+   A login whose new socket closes before Schwab answers its LOGIN says that
+   close from inside :meth:`~schwaby.streaming.StreamClient.login`: a close
+   handler that calls ``login()`` again directly nests one call deeper for
+   each try. Reconnect from a task the handler starts
+   (``asyncio.ensure_future``), not by awaiting ``login()`` inside it.
 
 A close the client makes itself is not said: :meth:`~schwaby.streaming.StreamClient.close`,
 :meth:`~schwaby.streaming.StreamClient.logout`, or a new

@@ -858,9 +858,6 @@ class StreamClient(EnumEnforcer):
         # moved on by the time they run.
         self._due_close = None
         self._close_running = None
-        # How many logins have succeeded: a close claimed before one is that
-        # connection's past, and not due again.
-        self._logins = 0
         self._last_notice = None
         # How many handle_message calls are dispatching a frame now.
         self._dispatching = 0
@@ -1099,6 +1096,9 @@ class StreamClient(EnumEnforcer):
         # with nothing closing it. Failure to close is logged, not raised: the
         # login is the operation the caller asked for.
         previous, self._socket = self._socket, None
+        # A notice is its connection's: the old one's goes with it, and not
+        # before, so a login that fails first keeps a bump said as one.
+        self._last_notice = None
         if previous is not None:
             try:
                 await previous.close()
@@ -1188,8 +1188,7 @@ class StreamClient(EnumEnforcer):
         The close is claimed before them, so an error handler that logs in
         again while they go out cannot cancel it: the handlers still run,
         given this close, though ``last_close`` then says how that login
-        went. Cancelled while they go out, the close is due again, unless a
-        login has succeeded since.'''
+        went.'''
         if not self._close_due:
             if drain_first:
                 await self._drain_pending_reports()
@@ -1197,29 +1196,16 @@ class StreamClient(EnumEnforcer):
             if (running is not None and not running.is_set()
                     and _in_close_handlers.get() is not running):
                 await running.wait()
-            if not self._close_due:
-                return
-            # The run it waited on was cancelled before its handlers, and
-            # left the close due: this call says it.
+            return
         self._close_due = False
         close = self._due_close
-        logins = self._logins
         running = self._close_running = asyncio.Event()
         token = _in_close_handlers.set(running)
         try:
             if drain_first:
-                try:
-                    await self._drain_pending_reports()
-                except BaseException:
-                    # Cancelled, say, by a wait_for around handle_message:
-                    # the close is due again for the next call that finds it,
-                    # unless a login since has succeeded, which makes it an
-                    # earlier connection's. A login that failed, or was itself
-                    # cancelled, connected nothing.
-                    if self._logins == logins:
-                        self._due_close = close
-                        self._close_due = True
-                    raise
+                # Cancelled here, by a wait_for around handle_message say, the
+                # handlers are not called for this close: a known limit.
+                await self._drain_pending_reports()
             for handler in list(self._close_handlers):
                 await self._call_user_handler(handler, close, 'Close handler')
         finally:
@@ -2740,7 +2726,6 @@ class StreamClient(EnumEnforcer):
         # keeps the last connection's end until this login succeeds: one in
         # flight, or cancelled, has connected nothing.
         await self._deliver_set_aside()
-        self._last_notice = None
         old_socket = self._socket
 
         # Fetch required data and initialize the client
@@ -2817,7 +2802,6 @@ class StreamClient(EnumEnforcer):
         if self._socket is opened and self._close_said_for is not opened:
             self.last_close = None
             self._close_due = False
-        self._logins += 1
 
     ##########################################################################
     # LOGOUT
