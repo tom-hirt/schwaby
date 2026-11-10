@@ -143,13 +143,14 @@ _KNOWN_SERVICES = frozenset((
 
 def _is_known_service(service):
     '''Whether ``service`` is one this client dispatches to. A notice on any
-    other -- ``Invalid Service``, a name this version does not know, something
-    that is not a name -- is dispatched as well, and so reported as an
+    other is dispatched as well; dispatch reports ``Invalid Service``, a name
+    this version does not know, or something that is not a name as an
     :class:`UnusableMessage` beside the notice, as every element was before
-    notices were told apart.'''
+    notices were told apart, and does nothing with a missing service.'''
     try:
         return service in _KNOWN_SERVICES
-    except TypeError:
+    except Exception:
+        # A decoder's object whose hash raises is no name this client knows.
         return False
 
 
@@ -463,9 +464,9 @@ class StreamNotice(SchwabError):
     connection at any given time from a given user") or 30 (stopped
     streaming). An element whose content is a list (or a custom decoder's
     tuple) is still dispatched to its service's handlers, with the notice
-    beside it; one on a service this client does not know is also reported
-    as an :class:`UnusableMessage`, as before notices were told apart. It
-    reaches the
+    beside it. A notice on a service this client does not know, whatever its
+    content, is also reported as an :class:`UnusableMessage`, as before
+    notices were told apart. It reaches the
     error handlers, and when the connection then
     closes it is the :class:`StreamClose`'s ``notice``.'''
 

@@ -10511,17 +10511,17 @@ CASES += [
 CASES += [
     Case('stream-notice/an-unknown-services-notice-is-also-unusable',
          'schwaby/streaming.py',
-         '    try:\n        return service in _KNOWN_SERVICES\n    except TypeError:\n        return False\n',
-         '    return True\n',
+         '    try:\n        return service in _KNOWN_SERVICES\n    except Exception:\n',
+         '    return True\n    try:\n        pass\n    except Exception:\n',
          'tests/streaming_test.py::StreamClientTest::test_a_notice_on_an_unknown_service_is_also_unusable',
          'an unknown service was not reported as unusable beside its notice',
          subtest='Invalid Service'),
     Case('stream-notice/a-known-services-notice-is-not-unusable',
          'schwaby/streaming.py',
-         '    try:\n        return service in _KNOWN_SERVICES\n    except TypeError:\n        return False\n',
-         '    return False\n',
+         '    try:\n        return service in _KNOWN_SERVICES\n    except Exception:\n',
+         '    return False\n    try:\n        pass\n    except Exception:\n',
          'tests/streaming_test.py::StreamClientTest::test_a_notice_on_an_unknown_service_is_also_unusable',
-         '!=',
+         "['StreamNotice'] != ['StreamNotice', 'UnusableMessage']",
          subtest='a known service without a content list'),
 ]
 
