@@ -6497,6 +6497,55 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_an_error_handler_logging_in_does_not_cancel_the_close(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        events = []
+
+        async def relogin(service, exc, message):
+            events.append(type(exc).__name__)
+            await self.login_and_get_socket(ws_connect)
+        self.client.add_error_handler(relogin)
+        self.client.add_close_handler(
+                lambda close: events.append(('close', close.kind)))
+        notice = {'notify': [{'service': 'ADMIN',
+                              'content': {'code': 12, 'msg': 'bumped'}}]}
+        socket.recv.side_effect = [json.dumps(notice), self.closed(1000)]
+        with self.assertRaises(Exception):
+            await self.client.chart_equity_add(['A'])
+        self.assertEqual(['StreamNotice', ('close', 'bumped')], events,
+                         'a login during the reports cancelled the close')
+        self.assertIsNone(self.client.last_close,
+                          "last_close is not the new connection's")
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_reader_whose_error_handler_logs_in_still_says_the_close(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        events = []
+
+        async def relogin(service, exc, message):
+            events.append(str(exc))
+            await self.login_and_get_socket(ws_connect)
+        self.client.add_error_handler(relogin)
+        self.client.add_close_handler(
+                lambda close: events.append(('close', close.kind)))
+        def closing():
+            # Queued during the read that finds the close, as a report the
+            # read makes would be: the top of the loop drained before it.
+            self.client._pending_reports.append(
+                    (RuntimeError('queued'), 'CHART_EQUITY', None))
+            raise self.closed(1006)
+        socket.recv.side_effect = closing
+        with self.assertRaises(Exception):
+            await self.client.handle_message()
+        self.assertEqual(['queued', ('close', 'connection_lost')], events,
+                         "a reader's login during the reports cancelled the "
+                         "close")
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_frames_set_aside_are_delivered_when_it_closes(
             self, ws_connect):
         await self.login_and_get_socket(ws_connect)

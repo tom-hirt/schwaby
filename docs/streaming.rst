@@ -529,7 +529,11 @@ finding it again. A failed :meth:`login
 <schwaby.streaming.StreamClient.login>` sets ``last_close`` but calls no close
 handler: no connection ended, and its caller has the error. A close handler
 that logs in again should back off between tries.
-Reports from the moments before the close reach the error handlers first.
+Reports from the moments before the close reach the error handlers first. An
+error handler that logs in again while they do so does not cancel the close:
+its handlers are still called, with that close, though ``last_close`` is then
+the new connection's (``None``). A close handler can tell by comparing: it
+need not reconnect when ``client.last_close is not close``.
 
 A close the client makes itself is not said: :meth:`~schwaby.streaming.StreamClient.close`,
 :meth:`~schwaby.streaming.StreamClient.logout`, or a new

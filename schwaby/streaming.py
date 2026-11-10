@@ -1173,10 +1173,16 @@ class StreamClient(EnumEnforcer):
         ran out.'''
         self.last_close = StreamClose(kind, notice=self._last_notice)
 
-    async def _run_close_handlers(self):
+    async def _run_close_handlers(self, *, drain_first=False):
         '''Runs the close handlers once for the close found, and makes any
-        other call that found it wait for them before it raises too.'''
+        other call that found it wait for them before it raises too. With
+        ``drain_first``, the reports queued before the close go out first.
+        The close is claimed before them, so an error handler that logs in
+        again while they go out cannot cancel it: the handlers still run,
+        given this close, though ``last_close`` is the new connection's.'''
         if not self._close_due:
+            if drain_first:
+                await self._drain_pending_reports()
             running = self._close_running
             if (running is not None and not running.is_set()
                     and _in_close_handlers.get() is not running):
@@ -1187,6 +1193,8 @@ class StreamClient(EnumEnforcer):
         running = self._close_running = asyncio.Event()
         token = _in_close_handlers.set(running)
         try:
+            if drain_first:
+                await self._drain_pending_reports()
             for handler in list(self._close_handlers):
                 await self._call_user_handler(handler, close, 'Close handler')
         finally:
@@ -1934,8 +1942,7 @@ class StreamClient(EnumEnforcer):
             # The reports queued during the wait go out first: a login would
             # clear them.
             try:
-                await self._drain_pending_reports()
-                await self._run_close_handlers()
+                await self._run_close_handlers(drain_first=True)
             except asyncio.CancelledError:
                 cancelled = True
                 raise
@@ -2531,8 +2538,7 @@ class StreamClient(EnumEnforcer):
             except ConnectionClosed:
                 # Likewise outside it: a close handler may log in again, so
                 # the reports queued first go out first.
-                await self._drain_pending_reports()
-                await self._run_close_handlers()
+                await self._run_close_handlers(drain_first=True)
                 raise
 
             if msg is not ROUTED:

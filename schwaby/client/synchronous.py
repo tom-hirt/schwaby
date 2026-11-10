@@ -109,7 +109,10 @@ class Client(BaseClient):
                     # The token taken is still inside what the caller asked
                     # for: refreshed once, with its own refresh token. The
                     # file holds nothing newer now, so this sends.
-                    with self._translate_token_errors():
+                    # Asked for, as the first was: sent though the token has
+                    # not expired.
+                    with _shared_token.watching_for_a_taken_token(), \
+                            self._translate_token_errors():
                         self.session.refresh_token(
                                 refresh_token=self._refresh_token_to_send())
                     return waited, True

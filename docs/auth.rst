@@ -311,7 +311,14 @@ With it:
   refreshed already it takes that token and sends nothing;
 - a token is written only if it is at least as new as the file's: by the
   login it came from, then its access token's expiry. A fresh login always
-  wins over a refresh of the old token;
+  wins over a refresh of the old token, whatever the clocks say: each
+  sign-in records the logins it replaced, by their creation times, and a
+  token of a login another has replaced is the older, so a login dated ahead
+  by a clock since set back gives way to the next. A token written by an
+  older version carries no record, and is ordered by date alone;
+- a request's refresh that waited for the lock while another thread's
+  refresh made the token fresh sends nothing. One that
+  :meth:`~schwaby.client.Client.ensure_token_fresh` asks for is sent;
 - the lock is a file beside the token file's real path, ``token.json.lock``,
   created readable only by you, or ``lock_path``. Its directory must be
   yours alone (no group or other write) and neither it nor the lock file may

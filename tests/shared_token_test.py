@@ -414,6 +414,25 @@ class SignInTest(SharedTokenTestCase):
                          'a token dated in the future swallowed a sign-in')
 
     @no_duplicates
+    def test_a_sign_in_wins_where_its_record_cannot_say(self):
+        # The file's token is of the same second as the sign-in, and its
+        # access token expires later: the record cannot tell them apart and
+        # the order would keep the file's. A sign-in is written anyway.
+        now = int(time.time())
+        with open(self.path, 'w') as f:
+            json.dump({'creation_timestamp': now,
+                       'token': st.token(access_token='SAME-SECOND',
+                                         expires_at=now + 86400)}, f)
+        write = auth.token_file_writer(self.path, shared=True)
+        signed_in = {'creation_timestamp': now,
+                     'token': st.token(access_token='SIGNED-IN',
+                                       expires_at=now + 1800)}
+        with patch('time.time', return_value=now):
+            write(signed_in, sign_in=True)
+        self.assertEqual('SIGNED-IN', self.stored()['token']['access_token'],
+                         'a sign-in lost to a token of its own second')
+
+    @no_duplicates
     def test_a_writer_takes_sign_in(self):
         newer = st.write_token_file(self.path, created_days_ago=0)
         older = {'creation_timestamp': newer['creation_timestamp'] - 86400,
@@ -423,6 +442,143 @@ class SignInTest(SharedTokenTestCase):
         self.assertNotEqual('OLDER', self.stored()['token']['access_token'])
         write(older, sign_in=True)
         self.assertEqual('OLDER', self.stored()['token']['access_token'])
+
+
+class SuccessionTest(SharedTokenTestCase):
+    '''A sign-in replaces the one before it whatever the clocks say.'''
+
+    def sign_in(self, access_token, write=None, expires_in=1800):
+        self.endpoint.answer_exchange(st.token(expires_in,
+                                               access_token=access_token))
+        context = auth.get_auth_context(API_KEY, CALLBACK_URL)
+        return auth.client_from_received_url(
+                API_KEY, APP_SECRET, context, st.received_url(context),
+                write or auth.token_file_writer(self.path, shared=True),
+                transport=self.endpoint)
+
+
+    def date_ahead(self, seconds):
+        stored = self.stored()
+        stored['creation_timestamp'] += seconds
+        with open(self.path, 'w') as f:
+            json.dump(stored, f)
+
+    @no_duplicates
+    def test_a_sign_in_dated_ahead_gives_way_to_the_next(self):
+        # A signed in while its clock ran half an hour fast, and the clock
+        # has since been set right. B signs in now. A's next refresh takes
+        # B's token, rather than writing its own over it.
+        for asyncio_ in (False, True):
+            with self.subTest(asyncio=asyncio_):
+                st.write_token_file(self.path, expires_in=-60,
+                                    token=st.token(access_token='A'))
+                self.date_ahead(1800)
+                a = self.client(asyncio_)
+                self.sign_in('B')
+                self.endpoint.answer_refresh(st.token(access_token='A2'),
+                                             repeat=True)
+                self.quote(a)
+                self.assertEqual('B', self.stored()['token']['access_token'],
+                                 "a refresh of the sign-in before wrote over "
+                                 "the one after it")
+                self.assertEqual('B', a.token_metadata.token['access_token'],
+                                 'the client kept the replaced sign-in')
+                self.assertEqual(0, self.endpoint.posts('refresh_token'))
+
+    @no_duplicates
+    def test_a_sign_in_records_what_it_replaced(self):
+        first = st.write_token_file(self.path)['creation_timestamp']
+        self.date_ahead(1800)
+        self.sign_in('B')
+        self.assertEqual([first + 1800], self.stored()['replaces'])
+        stored = self.stored()
+        stored['creation_timestamp'] -= 3600
+        stored['replaces'] = list(range(100, 100 + 40))
+        with open(self.path, 'w') as f:
+            json.dump(stored, f)
+        before = self.stored()['creation_timestamp']
+        self.sign_in('C')
+        replaces = self.stored()['replaces']
+        self.assertEqual(_shared_token._REPLACED_KEPT, len(replaces))
+        self.assertEqual([before, 100, 101], replaces[:3])
+
+    @no_duplicates
+    def test_a_sign_in_never_records_its_own_time(self):
+        # One in the same second as the token it replaces would name itself,
+        # and know itself by a time it says it replaced.
+        st.write_token_file(self.path, created_days_ago=0)
+        stored = self.stored()
+        stored['creation_timestamp'] = int(time.time()) + 7200
+        stored['replaces'] = [int(time.time()) + 7200 - 86400]
+        with open(self.path, 'w') as f:
+            json.dump(stored, f)
+        with patch('time.time', return_value=stored['creation_timestamp']):
+            self.sign_in('B')
+        own = self.stored()['creation_timestamp']
+        self.assertEqual(stored['creation_timestamp'], own)
+        self.assertNotIn(own, self.stored()['replaces'],
+                         'a sign-in recorded its own time as replaced')
+        self.assertEqual(stored['replaces'], self.stored()['replaces'])
+
+    @no_duplicates
+    def test_a_refresh_keeps_its_sign_ins_record(self):
+        # By a client that loaded the token, and by the one that signed in.
+        for loaded in (True, False):
+            with self.subTest(loaded=loaded):
+                st.write_token_file(self.path, created_days_ago=1,
+                                    token=st.token(access_token='A'))
+                replaced = self.stored()['creation_timestamp']
+                client = self.sign_in('B', expires_in=-60)
+                if loaded:
+                    client = self.client()
+                self.endpoint.answer_refresh(st.token(access_token='B2'))
+                self.quote(client)
+                self.assertEqual('B2',
+                                 self.stored()['token']['access_token'])
+                self.assertEqual([replaced], self.stored().get('replaces'),
+                                 "a refresh dropped its sign-in's record")
+
+    @no_duplicates
+    def test_a_token_taken_keeps_its_sign_ins_record(self):
+        st.write_token_file(self.path, expires_in=-60, created_days_ago=1,
+                            token=st.token(access_token='A'))
+        replaced = self.stored()['creation_timestamp']
+        a = self.client()
+        # B's token is due already, so A takes it and refreshes it: the
+        # write it makes is of B's sign-in.
+        self.sign_in('B', expires_in=-60)
+        self.endpoint.answer_refresh(st.token(access_token='B2'))
+        self.quote(a)
+        self.assertEqual(1, self.endpoint.posts('refresh_token'))
+        self.assertEqual('B2', self.stored()['token']['access_token'])
+        self.assertEqual([replaced], self.stored().get('replaces'),
+                         "a token taken lost its sign-in's record")
+
+    @no_duplicates
+    def test_another_sign_ins_token_is_written_without_the_record(self):
+        # Through the writer the sign-in went through, which knows it.
+        st.write_token_file(self.path, created_days_ago=1)
+        write = auth.token_file_writer(self.path, shared=True)
+        self.sign_in('B', write)
+        self.assertTrue(self.stored()['replaces'])
+        other = {'creation_timestamp': time.time() + 60,
+                 'token': st.token(access_token='OTHER')}
+        write(other)
+        self.assertEqual('OTHER', self.stored()['token']['access_token'])
+        self.assertNotIn('replaces', self.stored())
+
+    @no_duplicates
+    def test_the_order_of_successive_sign_ins(self):
+        newer = _shared_token.is_at_least_as_new
+        a = {'creation_timestamp': 2000, 'token': {'expires_at': 9}}
+        b = {'creation_timestamp': 1000, 'token': {'expires_at': 1},
+             'replaces': [2000]}
+        unrelated = {'creation_timestamp': 1500, 'token': {'expires_at': 5},
+                     'replaces': [7]}
+        self.assertTrue(newer(b, a), 'a sign-in lost to the one it replaced')
+        self.assertFalse(newer(a, b), 'a replaced sign-in outranked its next')
+        self.assertTrue(newer(a, unrelated), 'unrelated sign-ins not by date')
+        self.assertFalse(newer(unrelated, a))
 
 
 class NewestWinsTest(SharedTokenTestCase):
@@ -598,6 +754,50 @@ class AdoptTest(SharedTokenTestCase):
         for secret in (other['token']['access_token'],
                        other['token']['refresh_token']):
             self.assertNotIn(secret, text)
+
+
+class RefreshedMeanwhileTest(SharedTokenTestCase):
+    '''A request's refresh that waited for the lock behind another's sends
+    nothing; one ensure_token_fresh asks for is sent.'''
+
+    @no_duplicates
+    def test_a_refresh_queued_behind_another_sends_nothing(self):
+        for asyncio_ in (False, True):
+            with self.subTest(asyncio=asyncio_):
+                st.write_token_file(self.path, expires_in=-60,
+                                    token=st.token(refresh_token='R'))
+                endpoint = st.FakeTokenEndpoint()
+                endpoint.on_api(lambda request: {'ok': True})
+                endpoint.answer_refresh(st.token(access_token='FIRST'))
+                endpoint.answer_refresh(st.token(), repeat=True)
+                client = self.client(asyncio_, endpoint=endpoint)
+                self.quote(client)
+                # Another thread's request found the token expired before the
+                # first refresh ended, and called authlib's refresh, which
+                # waited for the lock.
+                result = client.session.refresh_token(
+                        auth.TOKEN_ENDPOINT, refresh_token='R')
+                if asyncio.iscoroutine(result):
+                    asyncio.run(result)
+                self.assertEqual(1, endpoint.posts('refresh_token'),
+                                 'a refresh queued behind another sent again')
+                self.assertEqual('FIRST',
+                                 client.session.token['access_token'])
+
+    @no_duplicates
+    def test_one_asked_for_is_sent_though_not_expired(self):
+        for asyncio_ in (False, True):
+            with self.subTest(asyncio=asyncio_):
+                st.write_token_file(self.path, expires_in=500)
+                endpoint = st.FakeTokenEndpoint()
+                endpoint.answer_refresh(st.token(access_token='ASKED'))
+                client = self.client(asyncio_, endpoint=endpoint)
+                result = client.ensure_token_fresh(600)
+                if asyncio.iscoroutine(result):
+                    result = asyncio.run(result)
+                self.assertIs(schwaby.TokenFreshness.REFRESHED, result)
+                self.assertEqual(1, endpoint.posts('refresh_token'),
+                                 'a refresh asked for was not sent')
 
 
 class AccessFunctionsTest(SharedTokenTestCase):

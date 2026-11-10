@@ -13,6 +13,13 @@ at least as new as the file's, so a fresh sign-in is never overwritten by a
 refresh of the old token. Before refreshing, a client takes the file's token
 instead when another client has refreshed already, and sends nothing.
 
+A sign-in is known by its creation time, which its refreshes keep. Each
+sign-in written here records the ones it replaced, and a client's refreshes
+carry that record too. A token whose sign-in another has replaced is older
+than it, whatever the clocks say: a sign-in dated ahead by a clock since set
+back cannot outrank the one after it. Tokens with no record, as older
+versions write, are ordered by date.
+
 No token, nor any part of one, is logged here.
 '''
 
@@ -40,7 +47,9 @@ def get_logger():
 _held = contextvars.ContextVar('schwaby_token_lock_held', default=frozenset())
 
 # Set by a caller that wants to know whether its refresh took another
-# client's token instead of sending one: a list the refresh appends to.
+# client's token instead of sending one: a list the refresh appends to. Only
+# ensure_token_fresh sets it, and it asks for the refresh: one is sent even
+# when the token has not expired, as a request's would not be.
 _taken = contextvars.ContextVar('schwaby_token_taken', default=None)
 
 
@@ -48,13 +57,20 @@ _taken = contextvars.ContextVar('schwaby_token_taken', default=None)
 def watching_for_a_taken_token():
     '''Around a call of a session's refresh_token: yields a list that is not
     empty afterwards when the refresh took another client's newer token from
-    the file and sent nothing.'''
+    the file and sent nothing. The refresh is asked for: it is sent even when
+    the token has not expired.'''
     seen = []
     token = _taken.set(seen)
     try:
         yield seen
     finally:
         _taken.reset(token)
+
+
+def _asked_for():
+    '''Whether this refresh was asked for, by ensure_token_fresh, rather than
+    made by a request that found the token expired.'''
+    return _taken.get() is not None
 
 
 def _note_taken():
@@ -183,6 +199,55 @@ def _number(value):
     return value if math.isfinite(value) else -math.inf
 
 
+#: How many earlier sign-ins a sign-in remembers having replaced.
+_REPLACED_KEPT = 16
+
+
+def _is_time(value):
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value))
+
+
+def _sign_in_of(wrapped):
+    '''A stored token's sign-in, as its creation time, and the sign-ins that
+    one replaced: (None, ()) for a token with no creation time to know it by.
+    '''
+    if not isinstance(wrapped, dict):
+        return None, ()
+    sign_in = wrapped.get('creation_timestamp')
+    if not _is_time(sign_in):
+        return None, ()
+    replaced = wrapped.get('replaces')
+    if not isinstance(replaced, (list, tuple)):
+        replaced = ()
+    return sign_in, tuple(r for r in replaced if _is_time(r))
+
+
+def _replaces(current, own):
+    '''What a sign-in created at ``own`` records on replacing the stored
+    token ``current``: the current one's sign-in, then what that replaced,
+    the newest kept. Never its own time, which a sign-in in the same second
+    as the one it replaces would otherwise name.'''
+    sign_in, replaced = _sign_in_of(current)
+    if sign_in is None:
+        return []
+    return [r for r in (sign_in, *replaced) if r != own][:_REPLACED_KEPT]
+
+
+def _succession(ours, theirs):
+    '''True when ``ours`` comes of a sign-in that replaced ``theirs``'s,
+    False when the other way round, None when neither says.'''
+    our_id, ours_replaced = _sign_in_of(ours)
+    their_id, theirs_replaced = _sign_in_of(theirs)
+    if our_id is None or their_id is None or our_id == their_id:
+        return None
+    if their_id in ours_replaced:
+        return True
+    if our_id in theirs_replaced:
+        return False
+    return None
+
+
 #: A login dated further ahead than this is a wrong clock's, not newer.
 _FUTURE_SLACK = 60 * 60
 
@@ -210,6 +275,9 @@ def is_at_least_as_new(ours, theirs):
     alone, as that version orders them.'''
     if theirs is None:
         return True
+    succession = _succession(ours, theirs)
+    if succession is not None:
+        return succession
     a, b = _order(ours), _order(theirs)
     if a != b:
         return a > b
@@ -275,6 +343,11 @@ class SharedTokenFile:
         self.write_bytes = write_bytes or default_write
         # When the client's current token arrived, as written or loaded.
         self.received_at = None
+        # The sign-in the client's current token comes of, by its creation
+        # time, and what that replaced, as written or loaded: its refreshes
+        # are written with the record.
+        self.sign_in = None
+        self.replaced = ()
 
     # ---------------------------------------------------------- the lock
 
@@ -398,7 +471,12 @@ class SharedTokenFile:
             if isinstance(received, (int, float)) and not isinstance(
                     received, bool):
                 self.received_at = received
+            self.remember_sign_in(stored)
         return stored
+
+    def remember_sign_in(self, stored):
+        '''Makes the client's sign-in the one ``stored`` comes of.'''
+        self.sign_in, self.replaced = _sign_in_of(stored)
 
     def _read_or_none(self):
         '''The stored token, or None when there is none to compare with: no
@@ -413,12 +491,20 @@ class SharedTokenFile:
     def write(self, wrapped, *args, sign_in=False, **kwargs):
         '''Writes the stored token ``wrapped`` under the lock, if it is at
         least as new as the file's, or whatever the file holds when
-        ``sign_in`` says it is a fresh sign-in's; whether it did.'''
+        ``sign_in`` says it is a fresh sign-in's; whether it did. A sign-in
+        records the sign-in it replaced; any other token is written with the
+        record of the client's sign-in.'''
         wrapped = dict(wrapped)
         wrapped['received_at'] = time.time()
         with self.lock():
-            current = None if sign_in else self._read_or_none()
-            if not is_at_least_as_new(wrapped, current):
+            current = self._read_or_none()
+            if sign_in:
+                wrapped['replaces'] = _replaces(
+                        current, wrapped.get('creation_timestamp'))
+            elif (self.replaced and self.sign_in is not None
+                    and _sign_in_of(wrapped)[0] == self.sign_in):
+                wrapped.setdefault('replaces', list(self.replaced))
+            if not sign_in and not is_at_least_as_new(wrapped, current):
                 get_logger().info(
                         'Kept the newer token in %s: the token it would have '
                         'replaced is older', self.token_path)
@@ -426,6 +512,7 @@ class SharedTokenFile:
             data = json.dumps(wrapped).encode('utf-8')
             self.write_bytes(self.token_path, data)
             self.received_at = wrapped['received_at']
+            self.remember_sign_in(wrapped)
             return True
 
     # ------------------------------------------------ the refresh hook
@@ -439,7 +526,8 @@ class SharedTokenFile:
             return None
         ours = {'creation_timestamp': metadata.creation_timestamp,
                 'token': dict(session.token or {}),
-                'received_at': self.received_at}
+                'received_at': self.received_at,
+                'replaces': list(self.replaced)}
         if is_at_least_as_new(ours, stored):
             return None
         return stored
@@ -465,6 +553,7 @@ def share_refresh(session, shared, metadata, adopt, *, is_async):
         received = stored.get('received_at')
         shared.received_at = (received if isinstance(received, (int, float))
                               and not isinstance(received, bool) else None)
+        shared.remember_sign_in(stored)
         get_logger().info('Took the newer token another client wrote to %s',
                           shared.token_path)
         if not session.token.is_expired(leeway=getattr(session, 'leeway', 0)):
@@ -473,6 +562,13 @@ def share_refresh(session, shared, metadata, adopt, *, is_async):
         kwargs['refresh_token'] = session.token.get('refresh_token')
         return False
 
+    def refreshed_meanwhile():
+        '''A request's refresh, made because the token had expired, that
+        waited for the lock while another thread's refresh, or a token
+        taken, made it fresh: it sends nothing. One asked for is sent.'''
+        return not _asked_for() and session.token is not None and not (
+                session.token.is_expired(leeway=getattr(session, 'leeway', 0)))
+
     if is_async:
         async def shared_refresh(*args, **kwargs):
             try:
@@ -480,6 +576,8 @@ def share_refresh(session, shared, metadata, adopt, *, is_async):
                     stored = shared.newer_stored(metadata, session)
                     if stored is not None and taken(stored, kwargs):
                         _note_taken()
+                        return session.token
+                    if stored is None and refreshed_meanwhile():
                         return session.token
                     return await refresh(*args, **kwargs)
             except TokenFileLockTimeout as e:
@@ -491,6 +589,8 @@ def share_refresh(session, shared, metadata, adopt, *, is_async):
                     stored = shared.newer_stored(metadata, session)
                     if stored is not None and taken(stored, kwargs):
                         _note_taken()
+                        return session.token
+                    if stored is None and refreshed_meanwhile():
                         return session.token
                     return refresh(*args, **kwargs)
             except TokenFileLockTimeout as e:
