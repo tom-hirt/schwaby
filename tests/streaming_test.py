@@ -6327,6 +6327,152 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         self.assertEqual(beat_at, self.client.last_heartbeat_at)
 
     ##########################################################################
+    # A close is its connection's
+
+    def parked_socket(self, closed):
+        """A socket whose recv waits until close() is called on it, then
+        raises ``closed``."""
+        socket = AsyncMock()
+        shut = asyncio.Event()
+
+        async def recv():
+            await shut.wait()
+            raise closed
+
+        async def close():
+            shut.set()
+        socket.recv.side_effect = recv
+        socket.close.side_effect = close
+        return socket
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_replaced_sockets_close_is_not_the_new_ones(
+            self, ws_connect):
+        from schwaby.streaming import StreamCloseKind
+        # Logged in on a socket whose reader is parked.
+        first = self.parked_socket(self.closed(1000))
+        login = self.success_response(0, 'ADMIN', 'LOGIN')
+        recv = first.recv.side_effect
+
+        async def first_recv(replies=[json.dumps(login)]):
+            if replies:
+                return replies.pop()
+            return await recv()
+        first.recv.side_effect = first_recv
+        self.http_client.get_user_preferences.return_value = MockResponse(
+                account_preferences(), 200)
+        ws_connect.return_value = first
+        await self.client.login()
+        seen = self.record_closes(self.client)
+        reader = asyncio.create_task(self.client.handle_message())
+        await asyncio.sleep(0)
+        # A healthy re-login: the old socket is closed, and its reader sees
+        # that close.
+        second = AsyncMock()
+        ws_connect.return_value = second
+        second.recv.side_effect = [json.dumps(self.success_response(
+                self.client._request_id, 'ADMIN', 'LOGIN')),
+                self.closed(1006)]
+        await self.client.login()
+        # The reader met the old socket's clean close, read on from the new
+        # socket, and met that one's own drop: only that is said, once.
+        from websockets.exceptions import ConnectionClosedError
+        with self.assertRaises(ConnectionClosedError):
+            await asyncio.wait_for(reader, 5)
+        self.assertEqual([(StreamCloseKind.CONNECTION_LOST, 1006, True)],
+                         seen,
+                         "a replaced socket's close was said as the new one's")
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_closing_it_yourself_is_no_close_to_say(self, ws_connect):
+        from websockets.exceptions import ConnectionClosedOK
+        await self.login_and_get_socket(ws_connect)
+        parked = self.parked_socket(self.closed(1000))
+        self.client._socket = parked
+        seen = self.record_closes(self.client)
+        reader = asyncio.create_task(self.client.handle_message())
+        await asyncio.sleep(0)
+        await self.client.close()
+        with self.assertRaises((ConnectionClosedOK, ValueError)):
+            await asyncio.wait_for(reader, 5)
+        self.assertEqual([], seen, "the client's own close was said")
+        self.assertIsNone(self.client.last_close)
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_close_found_sending_is_said_once(self, ws_connect):
+        from websockets.exceptions import ConnectionClosedError
+        from schwaby.streaming import StreamCloseKind
+        socket = await self.login_and_get_socket(ws_connect)
+        seen = self.record_closes(self.client)
+        socket.send.side_effect = self.closed(1006)
+        with self.assertRaises(ConnectionClosedError):
+            await self.client.chart_equity_add(['A'])
+        self.assertEqual([(StreamCloseKind.CONNECTION_LOST, 1006, True)],
+                         seen, 'a close found sending was not said once')
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_second_finder_raises_after_the_close_handler(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        events = []
+
+        async def slow(close):
+            events.append('handler start')
+            await asyncio.sleep(0.05)
+            events.append('handler end')
+        self.client.add_close_handler(slow)
+        socket.recv.side_effect = [self.closed(1006), self.closed(1006)]
+
+        async def finder(name, call):
+            try:
+                await call()
+            except Exception:
+                events.append(name + ' raised')
+        await asyncio.gather(
+                finder('reader', self.client.handle_message),
+                finder('subs', lambda: self.client.chart_equity_add(['A'])))
+        self.assertEqual('handler end', events[1],
+                         'a finder raised before the close handler ended')
+        self.assertEqual(1, events.count('handler start'))
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_reports_from_a_wait_go_before_the_close_handler(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        events = []
+        self.client.add_error_handler(
+                lambda service, exc, message: events.append(
+                    type(exc).__name__))
+        self.client.add_close_handler(lambda close: events.append('close'))
+        notice = {'notify': [{'service': 'ADMIN',
+                              'content': {'code': 12, 'msg': 'bumped'}}]}
+        socket.recv.side_effect = [json.dumps(notice), self.closed(1000)]
+        with self.assertRaises(Exception):
+            await self.client.chart_equity_add(['A'])
+        self.assertEqual(['StreamNotice', 'close'], events,
+                         'a report from the wait came after the close')
+        self.assertEqual('bumped', self.client.last_close.kind)
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_frames_set_aside_are_delivered_when_it_closes(
+            self, ws_connect):
+        await self.login_and_get_socket(ws_connect)
+        seen = []
+        self.client.add_chart_equity_handler(
+                lambda m: seen.append(m['content'][0]['key']))
+        self.client._overflow_items.appendleft(self.streaming_entry(
+                'CHART_EQUITY', 'SUBS', [{'key': 'FILL'}]))
+        await self.client.close()
+        self.assertEqual(['FILL'], seen,
+                         'a frame set aside was dropped at close')
+
+    ##########################################################################
     # No frame held behind a request's answer
 
     @no_duplicates
@@ -6365,6 +6511,53 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         listening.cancel()
         self.assertEqual(keys, seen,
                          'a frame was lost, doubled or reordered')
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_frame_waits_behind_one_handle_message_is_dispatching(
+            self, ws_connect):
+        # handle_message's dispatch of [A, B] pauses in an async error
+        # handler after A; a waiting subscribe reads [C] meanwhile.
+        socket = await self.login_and_get_socket(ws_connect)
+        inbound = asyncio.Queue()
+
+        async def recv():
+            return await inbound.get()
+        socket.recv.side_effect = recv
+        seen = []
+
+        def handler(m):
+            seen.append(m['content'][0]['key'])
+            if m['content'][0]['key'] == 'A':
+                raise RuntimeError('A')
+
+        async def on_error(service, exc, message):
+            await asyncio.sleep(0.05)
+        self.client.add_chart_equity_handler(handler)
+        self.client.add_error_handler(on_error)
+        two = {'data': [
+            self.streaming_entry('CHART_EQUITY', 'SUBS',
+                                 [{'key': 'A'}])['data'][0],
+            self.streaming_entry('CHART_EQUITY', 'SUBS',
+                                 [{'key': 'B'}])['data'][0]]}
+        await inbound.put(json.dumps(two))
+        reader = asyncio.create_task(self.client.handle_message())
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        subscribe = asyncio.create_task(
+                self.client.chart_equity_add(['GOOG']))
+        await inbound.put(json.dumps(self.streaming_entry(
+                'CHART_EQUITY', 'SUBS', [{'key': 'C'}])))
+        await inbound.put(json.dumps(
+                self.success_response(1, 'CHART_EQUITY', 'ADD')))
+        await inbound.put(json.dumps(self.streaming_entry(
+                'CHART_EQUITY', 'SUBS', [{'key': 'D'}])))
+        await asyncio.wait_for(reader, 5)
+        await asyncio.wait_for(subscribe, 5)
+        # C was set aside behind B; the next handle_message delivers it.
+        await asyncio.wait_for(self.client.handle_message(), 5)
+        self.assertEqual(['A', 'B', 'C'], seen[:3],
+                         'a frame was dispatched ahead of an earlier one')
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)

@@ -843,9 +843,12 @@ class StreamClient(EnumEnforcer):
         self.last_heartbeat_at = None
         self._close_handlers = []
         self._heartbeat_handlers = []
-        self._close_found = False
+        self._close_said_for = None
         self._close_due = False
+        self._close_running = None
         self._last_notice = None
+        # How many handle_message calls are dispatching a frame now.
+        self._dispatching = 0
         self._response_timeout = response_timeout
 
         # Set by the login() function
@@ -991,10 +994,11 @@ class StreamClient(EnumEnforcer):
                 self.req_num(),
                 LazyLog(lambda: self._pretty(_redact.mask(obj))))
 
+        socket = self._socket
         try:
-            await self._socket.send(json.dumps(obj))
+            await socket.send(json.dumps(obj))
         except ConnectionClosed as exc:
-            self._found_close(exc)
+            self._found_close(exc, socket)
             raise
 
     async def _receive_from_socket(self):
@@ -1002,10 +1006,11 @@ class StreamClient(EnumEnforcer):
             raise ValueError(
                 'Socket not open. Did you forget to call login()?')
 
+        socket = self._socket
         try:
-            raw = await self._socket.recv()
+            raw = await socket.recv()
         except ConnectionClosed as exc:
-            self._found_close(exc)
+            self._found_close(exc, socket)
             raise
         # Any frame counts, one that will not parse included: the socket
         # is alive.
@@ -1122,11 +1127,20 @@ class StreamClient(EnumEnforcer):
         reported. Schwab documents no interval, and none is measured.'''
         self._heartbeat_handlers.append(handler)
 
-    def _found_close(self, exc):
+    def _found_close(self, exc, socket):
         '''Records how the connection ended, once, where it is found: under
-        a lock, so nothing here calls user code.'''
-        if self._close_found:
+        a lock, so nothing here calls user code. A close is its socket's: one
+        from a socket this client has replaced, or closed itself, is not the
+        current connection's, and is not said.'''
+        if socket is not self._socket:
+            # Marked when a login replaced it, so the reader that met it reads
+            # on from the new one rather than ending the caller's loop. A
+            # socket the client closed itself raises as it always has.
+            exc._schwaby_replaced = self._socket is not None
             return
+        if self._close_said_for is socket:
+            return
+        self._close_said_for = socket
         rcvd = getattr(exc, 'rcvd', None)
         code = getattr(rcvd, 'code', None)
         notice = self._last_notice
@@ -1141,7 +1155,6 @@ class StreamClient(EnumEnforcer):
         self._set_close(kind, code, getattr(rcvd, 'reason', None), notice)
 
     def _set_close(self, kind, code=None, reason=None, notice=None):
-        self._close_found = True
         self.last_close = StreamClose(kind, code, reason, notice)
         self._close_due = True
 
@@ -1150,19 +1163,47 @@ class StreamClient(EnumEnforcer):
         await self._run_close_handlers()
 
     async def _run_close_handlers(self):
+        '''Runs the close handlers once for the close found, and makes any
+        other call that found it wait for them before it raises too.'''
         if not self._close_due:
+            running = self._close_running
+            if running is not None and not running.is_set():
+                await running.wait()
             return
         self._close_due = False
         close = self.last_close
-        for handler in list(self._close_handlers):
-            await self._call_user_handler(handler, close, 'Close handler')
+        running = self._close_running = asyncio.Event()
+        try:
+            for handler in list(self._close_handlers):
+                await self._call_user_handler(handler, close, 'Close handler')
+        finally:
+            running.set()
+
+    async def _deliver_set_aside(self):
+        '''Dispatches what is still set aside before its socket goes: a
+        frame read on a connection that is ending is still one Schwab sent.'''
+        while self._overflow_items:
+            await self._process(self._overflow_items.pop())
 
     async def _run_heartbeat_handlers(self, value):
         if isinstance(value, str) and value.isdigit():
             value = int(value)
         value = _int_or_none(value)
         for handler in list(self._heartbeat_handlers):
-            await self._call_user_handler(handler, value, 'Heartbeat handler')
+            try:
+                result = handler(value)
+            except Exception as exc:
+                self.logger.error('Heartbeat handler raised %s. Ignoring it.',
+                                  _type_name(exc), exc_info=exc)
+                await self._report_error(exc)
+                continue
+            if inspect.isawaitable(result):
+                # A task, as a data handler's coroutine is, so one that
+                # issues a stream command does not wait on its own caller.
+                task = asyncio.ensure_future(
+                        self._run_handler(result, None, value))
+                self._handler_tasks.add(task)
+                task.add_done_callback(self._on_handler_task_done)
 
     async def _call_user_handler(self, handler, argument, what):
         try:
@@ -1794,8 +1835,9 @@ class StreamClient(EnumEnforcer):
                         self._fail_pending_request(exc)
                         raise
                     if frame is not ROUTED:
-                        if self._overflow_items:
-                            # Frames are set aside already: this one goes
+                        if self._overflow_items or self._dispatching:
+                            # Frames are set aside already, or handle_message
+                            # is dispatching the one before this: this goes
                             # behind them, so they are dispatched in arrival
                             # order. appendleft here, pop from the right in
                             # _receive.
@@ -1875,7 +1917,10 @@ class StreamClient(EnumEnforcer):
             raise
         except ConnectionClosed:
             # The locks are released here, so a close handler may log in.
+            # The reports queued during the wait go out first: a login would
+            # clear them.
             try:
+                await self._drain_pending_reports()
                 await self._run_close_handlers()
             except asyncio.CancelledError:
                 cancelled = True
@@ -2235,6 +2280,11 @@ class StreamClient(EnumEnforcer):
             # Made while a request that holds the locks dispatches a frame: an
             # error handler may log in, which needs them. The request delivers
             # these once it has released them, as it does its other reports.
+            if len(self._pending_reports) == self._pending_reports.maxlen:
+                self.logger.warning(
+                        'A report queued during a request was dropped: more '
+                        'than %d were made before it finished.',
+                        self._pending_reports.maxlen)
             self._pending_reports.append((exception, service, message))
             return
         for error_handler in self._error_handlers:
@@ -2447,25 +2497,40 @@ class StreamClient(EnumEnforcer):
                     try:
                         msg = await self._read_and_route()
                     except BaseException as exc:
-                        # A read failure is also a failure for any request
-                        # waiting on a response, which will otherwise wait for
-                        # a reply that can no longer arrive.
-                        self._fail_pending_request(exc)
-                        raise
+                        if getattr(exc, '_schwaby_replaced', False):
+                            # A login replaced the socket this read was on:
+                            # nothing ended for the connection now open, and
+                            # its request is not failed by the old one's
+                            # close. Read on from the new socket.
+                            msg = ROUTED
+                        else:
+                            # A read failure is also a failure for any request
+                            # waiting on a response, which will otherwise wait
+                            # for a reply that can no longer arrive.
+                            self._fail_pending_request(exc)
+                            raise
             except UnparsableMessage as exc:
                 # Outside the `async with`, so the read lock is released before
                 # any user code runs.
                 await self._report_unparsable(exc)
                 raise
             except ConnectionClosed:
-                # Likewise outside it: a close handler may log in again.
+                # Likewise outside it: a close handler may log in again, so
+                # the reports queued first go out first.
+                await self._drain_pending_reports()
                 await self._run_close_handlers()
                 raise
 
             if msg is not ROUTED:
                 break
 
-        await self._process(msg)
+        # While this dispatches, a request reading for its answer queues
+        # what it reads behind this frame rather than dispatching first.
+        self._dispatching += 1
+        try:
+            await self._process(msg)
+        finally:
+            self._dispatching -= 1
 
     async def _process(self, msg):
         '''Dispatches one frame that is not the answer to a request: to its
@@ -2625,9 +2690,10 @@ class StreamClient(EnumEnforcer):
                                        other two saying there is none.
         '''
 
-        # A new connection: nothing has closed on it yet.
+        # What the connection being replaced set aside is delivered, not
+        # dropped; then nothing has closed on the new one yet.
+        await self._deliver_set_aside()
         self.last_close = None
-        self._close_found = False
         self._close_due = False
         self._last_notice = None
 
@@ -2752,6 +2818,9 @@ class StreamClient(EnumEnforcer):
         operations.
         '''
         socket, self._socket = self._socket, None
+        # Frames read but not yet handled are delivered before the rest is
+        # cleared: a fill from a session being torn down is still a fill.
+        await self._deliver_set_aside()
 
         # Anything still queued belongs to the session being torn down. Its
         # exception carries a frame from that connection, so delivering it

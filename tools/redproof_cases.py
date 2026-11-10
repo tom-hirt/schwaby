@@ -686,12 +686,12 @@ CASES = [
 
     Case('streaming/unparsable-report-holds-no-lock',
          'schwaby/streaming.py',
-         """                        self._fail_pending_request(exc)
-                        raise
+         """                            self._fail_pending_request(exc)
+                            raise
             except UnparsableMessage as exc:""",
-         """                        self._fail_pending_request(exc)
-                        await self._report_error(exc)
-                        raise
+         """                            self._fail_pending_request(exc)
+                            await self._report_error(exc)
+                            raise
             except UnparsableMessage as exc:""",
          'tests/streaming_test.py::StreamClientTest'
          '::test_reporting_an_unparsable_frame_holds_no_lock',
@@ -9596,8 +9596,8 @@ CASES += [
 CASES += [
     Case('stream-close/said-once-per-connection',
          'schwaby/streaming.py',
-         '        if self._close_found:\n            return\n        rcvd',
-         '        rcvd',
+         '        if self._close_said_for is socket:\n            return\n',
+         '',
          'tests/streaming_test.py::StreamClientTest::test_a_close_a_subscribe_finds_is_said_once',
          'one close was said twice'),
     Case('stream-close/a-code-12-notice-is-a-bump',
@@ -9614,14 +9614,14 @@ CASES += [
          'a close was not said once, before the raise'),
     Case('stream-close/handle-message-says-the-close-before-raising',
          'schwaby/streaming.py',
-         '                # Likewise outside it: a close handler may log in again.\n                await self._run_close_handlers()\n',
-         '                # Likewise outside it: a close handler may log in again.\n',
+         '                await self._drain_pending_reports()\n                await self._run_close_handlers()\n                raise\n',
+         '                await self._drain_pending_reports()\n                raise\n',
          'tests/streaming_test.py::StreamClientTest::test_a_clean_close_is_said_once_and_still_raised',
          'a close was not said once, before the raise'),
     Case('stream-close/a-subscribe-says-the-close-before-raising',
          'schwaby/streaming.py',
-         '            # The locks are released here, so a close handler may log in.\n            try:\n                await self._run_close_handlers()\n',
-         '            # The locks are released here, so a close handler may log in.\n            try:\n                pass\n',
+         '            try:\n                await self._drain_pending_reports()\n                await self._run_close_handlers()\n',
+         '            try:\n                await self._drain_pending_reports()\n',
          'tests/streaming_test.py::StreamClientTest::test_a_close_a_subscribe_finds_is_said_once',
          'the subscribe did not say the close'),
     Case('stream-notice/an-admin-notice-is-reported',
@@ -9656,8 +9656,8 @@ CASES += [
          'dead_token', subtest='TokenRefreshError'),
     Case('stream-login/login-resets-the-last-close',
          'schwaby/streaming.py',
-         '        self.last_close = None\n        self._close_found = False\n        self._close_due = False\n        self._last_notice = None\n\n        # Fetch required data',
-         '        self._close_found = False\n        self._close_due = False\n        self._last_notice = None\n\n        # Fetch required data',
+         '        await self._deliver_set_aside()\n        self.last_close = None\n',
+         '        await self._deliver_set_aside()\n',
          'tests/streaming_test.py::StreamClientTest::test_login_resets_the_last_close',
          'a new login kept the old close'),
     Case('stream-refusal/carries-its-parts',
@@ -9705,6 +9705,55 @@ CASES += [
          '            # Made while a request that holds the locks dispatches a frame: an\n',
          'tests/streaming_test.py::StreamClientTest::test_a_handler_error_in_a_wait_is_reported_after_it',
          'TimeoutError'),
+]
+
+# Round-one fixes to 5.5.0's closes and dispatch: a close is its socket's;
+# a reader on a replaced socket reads on; a frame waits behind handle_message's
+# dispatch; a second finder waits for the handlers; reports go before them;
+# frames set aside are delivered at close; a close found sending is said.
+CASES += [
+    Case('stream-close/a-replaced-sockets-close-is-not-said',
+         'schwaby/streaming.py',
+         '        if socket is not self._socket:\n            # Marked when a login replaced it,',
+         '        if False:\n            # Marked when a login replaced it,',
+         'tests/streaming_test.py::StreamClientTest::test_a_replaced_sockets_close_is_not_the_new_ones',
+         'ConnectionClosedOK'),
+    Case('stream-close/a-reader-on-a-replaced-socket-reads-on',
+         'schwaby/streaming.py',
+         "                        if getattr(exc, '_schwaby_replaced', False):\n",
+         '                        if False:\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_replaced_sockets_close_is_not_the_new_ones',
+         'ConnectionClosedOK'),
+    Case('stream-dispatch/a-frame-waits-behind-handle-messages-dispatch',
+         'schwaby/streaming.py',
+         '                        if self._overflow_items or self._dispatching:\n',
+         '                        if self._overflow_items:\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_frame_waits_behind_one_handle_message_is_dispatching',
+         'ahead of an earlier one'),
+    Case('stream-close/a-second-finder-waits-for-the-handlers',
+         'schwaby/streaming.py',
+         '            if running is not None and not running.is_set():\n                await running.wait()\n',
+         '            if running is not None and not running.is_set():\n                pass\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_second_finder_raises_after_the_close_handler',
+         'raised before the close handler ended'),
+    Case('stream-close/reports-go-before-the-close-handlers',
+         'schwaby/streaming.py',
+         '            try:\n                await self._drain_pending_reports()\n                await self._run_close_handlers()\n',
+         '            try:\n                await self._run_close_handlers()\n',
+         'tests/streaming_test.py::StreamClientTest::test_reports_from_a_wait_go_before_the_close_handler',
+         'came after the close'),
+    Case('stream-close/frames-set-aside-are-delivered-at-close',
+         'schwaby/streaming.py',
+         '        await self._deliver_set_aside()\n\n        # Anything still queued belongs to the session being torn down.',
+         '\n        # Anything still queued belongs to the session being torn down.',
+         'tests/streaming_test.py::StreamClientTest::test_frames_set_aside_are_delivered_when_it_closes',
+         'dropped at close'),
+    Case('stream-close/a-close-found-sending-is-said',
+         'schwaby/streaming.py',
+         '            await socket.send(json.dumps(obj))\n        except ConnectionClosed as exc:\n            self._found_close(exc, socket)\n',
+         '            await socket.send(json.dumps(obj))\n        except ConnectionClosed as exc:\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_close_found_sending_is_said_once',
+         'was not said once'),
 ]
 
 # Out of the release red-proof (2026-11-09): entries on tooling, test
