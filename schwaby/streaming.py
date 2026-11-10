@@ -449,8 +449,9 @@ class StreamNotice(SchwabError):
     one on the ``ADMIN`` service, or carrying a code
     Schwab documents as severing the stream, 12 ("a limit of 1 Streamer
     connection at any given time from a given user") or 30 (stopped
-    streaming). An element that carries content as well is still
-    dispatched to its handlers, with the notice beside it. It reaches the
+    streaming). An element whose content is a list (or a custom decoder's
+    tuple) is still dispatched to its service's handlers, with the notice
+    beside it. It reaches the
     error handlers, and when the connection then
     closes it is the :class:`StreamClose`'s ``notice``.'''
 
