@@ -97,21 +97,27 @@ class Client(BaseClient):
                 # Without a pace the synchronous session refreshes on its
                 # own, with no lock, so a request in another thread may have
                 # just refreshed, as two requests can.
+                # The token found due, so the refresh can tell one made by
+                # another while it waited for the file's lock.
+                checked = self.session.token
                 if fresh():
                     return waited, False
                 # A shared token file's refresh may take another client's
                 # newer token instead, and send nothing: that is no refresh.
-                with _shared_token.watching_for_a_taken_token() as taken, \
+                with _shared_token.watching_for_a_taken_token(checked) \
+                        as taken, \
                         self._translate_token_errors():
                     self.session.refresh_token(
                             refresh_token=self._refresh_token_to_send())
+                checked = self.session.token
                 if taken and not fresh():
                     # The token taken is still inside what the caller asked
                     # for: refreshed once, with its own refresh token. The
                     # file holds nothing newer now, so this sends.
                     # Asked for, as the first was: sent though the token has
                     # not expired.
-                    with _shared_token.watching_for_a_taken_token() as again, \
+                    with _shared_token.watching_for_a_taken_token(
+                            checked) as again, \
                             self._translate_token_errors():
                         self.session.refresh_token(
                                 refresh_token=self._refresh_token_to_send())

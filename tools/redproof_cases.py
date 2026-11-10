@@ -8934,9 +8934,9 @@ CASES += [
          '::test_two_calls_at_once_refresh_once',
          'two calls at once each sent a refresh',
          # The check after the pace finds it fresh too; both go.
-         also=('                # just refreshed, as two requests can.\n'
+         also=('                checked = self.session.token\n'
                '                if fresh():\n',
-               '                # just refreshed, as two requests can.\n'
+               '                checked = self.session.token\n'
                '                if False:\n')),
     Case('fresh/the-async-client-holds-the-sessions-lock',
          'schwaby/client/asynchronous.py',
@@ -9961,14 +9961,14 @@ CASES += [
          'a refresh asked for was not sent'),
     Case('fresh/a-sync-second-refresh-is-asked-for',
          'schwaby/client/synchronous.py',
-         '                    with _shared_token.watching_for_a_taken_token() as again, \\\n                            self._translate_token_errors():\n',
+         '                    with _shared_token.watching_for_a_taken_token(\n                            checked) as again, \\\n                            self._translate_token_errors():\n',
          '                    again = []\n                    with self._translate_token_errors():\n',
          'tests/shared_token_test.py::AdoptTest::test_a_token_taken_inside_the_margin_is_refreshed_once_more',
          '1 != 0',
          subtest='asyncio=False'),
     Case('fresh/an-async-second-refresh-is-asked-for',
          'schwaby/client/asynchronous.py',
-         '                    with _shared_token.watching_for_a_taken_token() as again, \\\n                            client._translate_token_errors():\n',
+         '                    with _shared_token.watching_for_a_taken_token(\n                            checked) as again, \\\n                            client._translate_token_errors():\n',
          '                    again = []\n                    with client._translate_token_errors():\n',
          'tests/shared_token_test.py::AdoptTest::test_a_token_taken_inside_the_margin_is_refreshed_once_more',
          '1 != 0',
@@ -10539,6 +10539,32 @@ CASES += [
          'tests/streaming_test.py::StreamClientTest::test_a_notice_on_an_unknown_service_is_also_unusable',
          "['StreamNotice'] != ['StreamNotice', 'UnusableMessage']",
          subtest='a known service without a content list'),
+]
+
+# After 5.7.0's candidate: a refresh compares with the token its caller
+# checked.
+CASES += [
+    Case('shared/a-refresh-compares-with-the-token-checked',
+         'schwaby/_shared_token.py',
+         '    return session.token if checked is _NOT_GIVEN else checked\n',
+         '    return session.token\n',
+         'tests/shared_token_test.py::AskedForMeanwhileTest::test_one_replaced_after_it_was_checked_sends_nothing',
+         'it refreshed again what another refreshed after it checked',
+         subtest='asyncio=False'),
+    Case('fresh/a-sync-refresh-names-the-token-it-checked',
+         'schwaby/client/synchronous.py',
+         '                with _shared_token.watching_for_a_taken_token(checked) \\\n',
+         '                with _shared_token.watching_for_a_taken_token() \\\n',
+         'tests/shared_token_test.py::AskedForMeanwhileTest::test_one_replaced_after_it_was_checked_sends_nothing',
+         'it refreshed again what another refreshed after it checked',
+         subtest='asyncio=False'),
+    Case('fresh/an-async-refresh-names-the-token-it-checked',
+         'schwaby/client/asynchronous.py',
+         '                with _shared_token.watching_for_a_taken_token(checked) \\\n',
+         '                with _shared_token.watching_for_a_taken_token() \\\n',
+         'tests/shared_token_test.py::AskedForMeanwhileTest::test_one_replaced_after_it_was_checked_sends_nothing',
+         'it refreshed again what another refreshed after it checked',
+         subtest='asyncio=True'),
 ]
 
 # Out of the release red-proof (2026-11-09): entries on tooling, test

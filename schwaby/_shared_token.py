@@ -53,18 +53,28 @@ _held = contextvars.ContextVar('schwaby_token_lock_held', default=frozenset())
 # has not expired, as authlib's own call for a request would not be.
 _taken = contextvars.ContextVar('schwaby_token_taken', default=None)
 
+# The token the caller last found not fresh enough, beside _taken: one that
+# has been replaced by the time the refresh holds the lock was refreshed, or
+# taken, by someone else meanwhile.
+_NOT_GIVEN = object()
+_checked = contextvars.ContextVar('schwaby_token_checked', default=_NOT_GIVEN)
+
 
 @contextlib.contextmanager
-def watching_for_a_taken_token():
+def watching_for_a_taken_token(checked=_NOT_GIVEN):
     '''Around a call of a session's refresh_token: yields a list that is not
     empty afterwards when the refresh took another client's newer token from
     the file and sent nothing. The refresh is asked for: it is sent even when
-    the token has not expired.'''
+    the token has not expired, unless the token is no longer ``checked``,
+    the one the caller found due: then another refresh did its work while
+    this waited, and that counts as a token taken.'''
     seen = []
     token = _taken.set(seen)
+    mark = _checked.set(checked)
     try:
         yield seen
     finally:
+        _checked.reset(mark)
         _taken.reset(token)
 
 
@@ -562,6 +572,13 @@ def _lock_timeout_error(error):
             'was sent.', kind=TokenErrorKind.TRANSIENT)
 
 
+def _before(session):
+    '''The token to tell a refresh made meanwhile by: the one the caller
+    checked, when it said, else the session's on entering the refresh.'''
+    checked = _checked.get()
+    return session.token if checked is _NOT_GIVEN else checked
+
+
 def share_refresh(session, shared, metadata, adopt, *, is_async):
     '''Makes ``session``'s refresh hold ``shared``'s lock, and take the
     file's token instead when it is newer. ``adopt(stored)`` makes the
@@ -602,7 +619,7 @@ def share_refresh(session, shared, metadata, adopt, *, is_async):
 
     if is_async:
         async def shared_refresh(*args, **kwargs):
-            before = session.token
+            before = _before(session)
             try:
                 async with shared.alock():
                     stored = shared.newer_stored(metadata, session)
@@ -616,7 +633,7 @@ def share_refresh(session, shared, metadata, adopt, *, is_async):
                 raise _lock_timeout_error(e) from e
     else:
         def shared_refresh(*args, **kwargs):
-            before = session.token
+            before = _before(session)
             try:
                 with shared.lock():
                     stored = shared.newer_stored(metadata, session)

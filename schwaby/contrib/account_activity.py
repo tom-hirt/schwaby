@@ -518,8 +518,9 @@ def read_account_activity(item):
     execution, and exactly one ``ExecutionInfo`` in the item. At least one
     ``EventType``, ``ExecutionTransType`` and ``LegSubStatus`` must be
     present, and every one of them must be the fill's own type, ``Fill``, and
-    filled or partially filled. No ``CancelType``, ``OutCancelType``, ``CancelRequestType``,
-    ``CancelQuantity`` or ``LegCancelRequestInfoList`` may appear at all; those
+    filled or partially filled. No ``CancelType``, ``OutCancelType``,
+    ``CancelRequestType``, ``CancelQuantity`` or ``LegCancelRequestInfoList``
+    may appear at all; those
     keys are matched whatever their case, while the paths read for values are
     matched as Schwab spells them. A fragment of a type never makes anything a
     fill, and ``ExecutionCreated``

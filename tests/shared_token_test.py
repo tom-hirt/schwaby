@@ -980,6 +980,39 @@ class AskedForMeanwhileTest(SharedTokenTestCase):
                 self.assertIs(schwaby.TokenFreshness.FRESH, result)
 
     @no_duplicates
+    def test_one_replaced_after_it_was_checked_sends_nothing(self):
+        # The token was found due, and before the refresh entered, another
+        # thread's refresh replaced it: the refresh compares with the token
+        # that was checked, not the one it finds on entering.
+        for asyncio_ in (False, True):
+            with self.subTest(asyncio=asyncio_):
+                st.write_token_file(self.path, expires_in=400)
+                endpoint = st.FakeTokenEndpoint()
+                endpoint.answer_refresh(st.token(), repeat=True)
+                read, write = auth.shared_token_file(self.path)
+                client = auth.client_from_access_functions(
+                        API_KEY, APP_SECRET, read, write, asyncio=asyncio_,
+                        transport=endpoint)
+                fresh = dict(client.session.token, access_token='ANOTHERS',
+                             expires_at=time.time() + 1800)
+                watching = _shared_token.watching_for_a_taken_token
+
+                @contextlib.contextmanager
+                def replaced_first(*args, **kwargs):
+                    client.session.token = fresh
+                    with watching(*args, **kwargs) as seen:
+                        yield seen
+                with patch.object(_shared_token, 'watching_for_a_taken_token',
+                                  replaced_first):
+                    result = client.ensure_token_fresh(600)
+                    if asyncio.iscoroutine(result):
+                        result = asyncio.run(result)
+                self.assertEqual(0, endpoint.posts('refresh_token'),
+                                 'it refreshed again what another refreshed '
+                                 'after it checked')
+                self.assertIs(schwaby.TokenFreshness.FRESH, result)
+
+    @no_duplicates
     def test_a_second_take_is_not_called_a_refresh(self):
         # Inside the margin, it takes a newer token, refreshes once more, and
         # that refresh takes a newer one still: nothing was sent.
