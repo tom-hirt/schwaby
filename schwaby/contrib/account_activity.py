@@ -21,7 +21,8 @@ import collections.abc
 import dataclasses
 import enum
 
-from .util import UnparsableMessageData, decode_decimal, parse_message_data
+from .util import (UnparsableMessageData, _DECIMAL_KEYS, decode_decimal,
+                   parse_message_data)
 
 
 #: The most nodes of ``MESSAGE_DATA`` read, the deepest nesting, and the most
@@ -39,8 +40,11 @@ _RELATED_ORDER_KEYS = ('ParentSchwabOrderID', 'LifecycleSchwabOrderID',
 # Fragments of an ExecutionTransType that say the execution filled nothing.
 _NOT_A_FILL = ('UROUT', 'CANCEL', 'BUST', 'REJECT')
 # Keys that only a cancel's events have carried. On an item that says it is
-# a fill, any of them anywhere, whatever its value, makes it doubtful.
-_CANCEL_KEYS = ('CancelType', 'OutCancelType', 'CancelRequestType')
+# a fill, any of them anywhere, whatever its value, makes it doubtful. None
+# appeared, not even empty, in any of 682 real fills a consumer counted.
+_CANCEL_KEYS = frozenset(key.casefold() for key in (
+        'CancelType', 'OutCancelType', 'CancelRequestType', 'CancelQuantity',
+        'LegCancelRequestInfoList'))
 
 
 class AccountActivityKind(str, enum.Enum):
@@ -136,7 +140,8 @@ class Execution:
     average_price: object = None
     #: ``ExecutionInfo/PrincipalAmmount`` (Schwab's spelling).
     principal: object = None
-    #: ``ExecutionInfo/PriceImprovement``, as sent. Its unit is not
+    #: ``PriceImprovement``, directly under the event block where the
+    #: observations put it, else under ``ExecutionInfo``. Its unit is not
     #: established.
     price_improvement: object = None
     #: ``ExecutionInfo/ActualChargedCommissionAmount``.
@@ -259,6 +264,11 @@ def _decimal(value):
     reading it as nothing left.'''
     if value is None or value == {}:
         return None
+    if isinstance(value, dict) and any(key not in _DECIMAL_KEYS
+                                       for key in value):
+        # Refused here, as decode_decimal would refuse it, but without the
+        # warning it logs: this reader logs nothing.
+        return None
     try:
         result = decode_decimal(value)
     except Exception:
@@ -344,22 +354,37 @@ def _event_blocks(data, message_type):
 
 def _doubtful_fill(data, message_type, blocks):
     '''Whether an item that says it is a fill shows any sign that it is not
-    one, anywhere in it: so that a doubtful item is never a fill.'''
+    one, anywhere in it: so that a doubtful item is never a fill.
+
+    Each rule held on every one of 682 real fills a consumer counted: one
+    event block and one ``ExecutionInfo`` each, every ``EventType`` (two per
+    item) the fill's own, every ``ExecutionTransType`` ``Fill``, a positive
+    ``ExecutionQuantity``, no cancel key, and a ``LegSubStatus`` of filled or
+    partially filled.'''
     if len(blocks) != 1 or not isinstance(_get(blocks[0], 'ExecutionInfo'),
                                          dict):
         return True
-    event_type = _get(data, 'BaseEvent', 'EventType')
-    if event_type is not None and not (
-            isinstance(event_type, str)
-            and _fold(event_type) == _fold(message_type)):
+    quantity = _decimal(_get(blocks[0], 'ExecutionInfo', 'ExecutionQuantity'))
+    if quantity is None or quantity <= 0:
         return True
+    own = _fold(message_type)
+    infos = 0
     for _, key, child in _walk(data):
-        if key in _CANCEL_KEYS:
+        folded = key.casefold() if isinstance(key, str) else None
+        if folded in _CANCEL_KEYS:
             return True
-        if key == 'ExecutionTransType' and not (
+        if folded == 'executioninfo':
+            infos += 1
+        elif folded == 'eventtype' and not (
+                isinstance(child, str) and _fold(child) == own):
+            return True
+        elif folded == 'executiontranstype' and not (
                 isinstance(child, str) and _fold(child) == 'FILL'):
             return True
-    return False
+        elif folded == 'legsubstatus' and isinstance(child, str) and (
+                'CANCEL' in _fold(child)):
+            return True
+    return infos != 1
 
 
 def _fold(text):
@@ -408,9 +433,9 @@ def _execution(block):
             average_price=_decimal(_get(quantity, 'AveragePrice')),
             principal=_decimal(principal),
             price_improvement=_decimal(
-                _get(info, 'PriceImprovement')
-                if _get(info, 'PriceImprovement') is not None
-                else _get(block, 'PriceImprovement')),
+                _get(block, 'PriceImprovement')
+                if _get(block, 'PriceImprovement') is not None
+                else _get(info, 'PriceImprovement')),
             commission=_decimal(commission),
             sec_fee=_decimal(_get(fees, 'SECFees')),
             taf=_decimal(_get(fees, 'TAF')),
@@ -532,8 +557,13 @@ def _read(item):
     if kind is AccountActivityKind.ORDER_CREATED:
         symbol = _text(_get(leg, 'Security', 'Symbol'))
     else:
-        symbol = _text(_first(block, 'Symbol',
-                              outside=('QuoteOnOrderAcceptance',)))
+        # The event's own symbol, outside any quote; none when the event holds
+        # more than one, as an order of several legs might, since then which
+        # leg this is cannot be told.
+        found = {child for at, name, child in _walk(block or {})
+                 if name == 'Symbol' and _text(child)
+                 and 'QuoteOnOrderAcceptance' not in at}
+        symbol = found.pop() if len(found) == 1 else None
     symbols = []
     for at, name, child in _walk(data):
         if name in _SYMBOL_KEYS and _text(child):

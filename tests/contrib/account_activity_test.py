@@ -319,10 +319,42 @@ class NeverAFillTest(unittest.TestCase):
                 ('a cancel type on the block', with_(
                     lambda d: d['BaseEvent'][block].update(
                         CancelType='ClientCancel'))),
-                ('an execution info at the top', with_(
-                    lambda d: d.update(ExecutionInfo={
-                        'ExecutionTransType': 'UROut',
-                        'CancelType': 'ClientCancel'}))),
+                ('a trans-type at the top', with_(
+                    lambda d: d.update(ExecutionTransType='UROut'))),
+                ('a cancel type at the top', with_(
+                    lambda d: d.update(CancelType='ClientCancel'))),
+                ('a lowercase cancel type', with_(
+                    lambda d: d.update(cancelType='ClientCancel'))),
+                ('a lowercase trans-type', with_(
+                    lambda d: d.update(Other={
+                        'executionTransType': 'UROut'}))),
+                ('an empty execution info', with_(
+                    lambda d: d['BaseEvent'][block].update(
+                        ExecutionInfo={}))),
+                ('a zero quantity', with_(
+                    lambda d: d['BaseEvent'][block]['ExecutionInfo'].update(
+                        ExecutionQuantity=ZERO))),
+                ('a second block without an execution info', with_(
+                    lambda d: d['BaseEvent'].update(
+                        OrderFillCompletedEventOther={'Note': 'x'}))),
+                ('the execution info outside the block', with_(
+                    lambda d: d.update(ExecutionInfo=d['BaseEvent'][
+                        block].pop('ExecutionInfo')))),
+                ('a second execution info', with_(
+                    lambda d: d.update(Other={'ExecutionInfo': {
+                        'ExecutionTransType': 'Fill'}}))),
+                ('an event type deeper down', with_(
+                    lambda d: d['BaseEvent'][block].update(
+                        EventType='ExecutionCreated'))),
+                ('a cancel quantity', with_(
+                    lambda d: d['BaseEvent'][block].update(
+                        CancelQuantity=ONE))),
+                ('a cancelled leg', with_(
+                    lambda d: d['BaseEvent'][block].update(
+                        LegSubStatus='LegSubStatusCancelled'))),
+                ('a negative quantity', with_(
+                    lambda d: d['BaseEvent'][block]['ExecutionInfo'].update(
+                        ExecutionQuantity=dec(1000000, 13)))),
                 ('a second block', with_(
                     lambda d: d['BaseEvent'].update(
                         OrderFillCompletedEventExecutionInfo={
@@ -369,6 +401,18 @@ class NeverAFillTest(unittest.TestCase):
                 event = read_account_activity(item('ExecutionCreated', data))
                 self.assertIsNotNone(event.cancel,
                                      'a cancel trans-type was not a cancel')
+
+    @no_duplicates
+    def test_what_real_fills_carry_keeps_them_fills(self):
+        # Every real fill counted carried EventType twice, its own both
+        # times, and a LegSubStatus of filled or partially filled.
+        for sub in ('LegSubStatusFilled', 'LegSubStatusPartiallyFilled'):
+            with self.subTest(sub):
+                data = fill(extra_block={'LegSubStatus': sub,
+                                         'EventType': 'OrderFillCompleted'})
+                self.assertIs(K.FILL, read_account_activity(
+                        item('OrderFillCompleted', data)).kind,
+                        'a real shape of fill was refused')
 
     @no_duplicates
     def test_a_fill_without_a_trans_type_is_a_fill(self):
@@ -535,8 +579,24 @@ class KindsTest(unittest.TestCase):
     def test_it_does_not_log(self):
         with self.assertNoLogs(level=logging.DEBUG):
             for given in (item('OrderFillCompleted', fill()),
+                          item('OrderFillCompleted', fill(price={
+                              'lo': '1', 'SignScale': 12})),
                           item('SomethingNew', {}), {'1': 'x'}):
                 read_account_activity(given)
+
+    @no_duplicates
+    def test_a_decimal_with_an_unknown_key_is_none(self):
+        event = read_account_activity(item('OrderFillCompleted', fill(
+                price={'lo': '1', 'SignScale': 12})))
+        self.assertIs(K.FILL, event.kind)
+        self.assertIsNone(event.execution.execution_price)
+
+    @no_duplicates
+    def test_a_long_text_value_is_bounded(self):
+        data = fill()
+        data['note'] = 'x' * (aa.MAX_TEXT + 1)
+        event = read_account_activity(item('OrderFillCompleted', data))
+        self.assertEqual('too_large', event.problem)
 
 
 class IdsAndSymbolsTest(unittest.TestCase):
@@ -558,6 +618,15 @@ class IdsAndSymbolsTest(unittest.TestCase):
         self.assertIsNone(read_account_activity(
                 item('OrderFillCompleted', ending)).order_id,
                 'a key that only ends in SchwabOrderID was read as the id')
+
+    @no_duplicates
+    def test_a_fill_holding_two_legs_symbols_names_none(self):
+        data = fill()
+        block = data['BaseEvent']['OrderFillCompletedEventOrderLegQuantityInfo']
+        del block['Symbol']
+        block['Legs'] = [{'Symbol': 'AAPL_C200'}, {'Symbol': 'AAPL_C210'}]
+        event = read_account_activity(item('OrderFillCompleted', data))
+        self.assertIsNone(event.symbol, "a fill took one leg's symbol of two")
 
     @no_duplicates
     def test_a_quotes_symbol_is_not_the_events(self):

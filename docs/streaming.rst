@@ -1476,9 +1476,18 @@ before, and call it on each item of ``msg['content']`` if they want it.
 It neither logs nor keeps state, and it never raises on what an item holds.
 Every number is a :class:`~decimal.Decimal` or ``None``, never a float, and
 ``None`` means Schwab sent nothing or an empty object. It does not mean zero:
-read a ``leaves_quantity`` of ``None`` as unknown, not as filled.
-``execution_id`` has been present on every real fill counted, so
-de-duplicate on it first.
+read a ``leaves_quantity`` of ``None`` as unknown, not as filled. A zero
+commission has been seen sent as an empty object, so a charge of ``None`` is
+unknown too, not a charge. ``execution_id`` has been present on every real
+fill counted, so de-duplicate on it first.
+
+The rules that keep an item off ``FILL`` were checked against 682 real fills
+one consumer recorded: each had one event block and one ``ExecutionInfo``,
+every ``EventType`` and ``ExecutionTransType`` was the fill's own, every
+quantity was above zero, none carried a cancel key, and every
+``LegSubStatus`` was filled or partially filled. Every one of them reads as
+a fill. A fill of an option order, or of an order of several legs, was not
+among them.
 
 .. autofunction:: schwaby.contrib.account_activity.read_account_activity
 .. autoclass:: schwaby.contrib.account_activity.AccountActivityKind
