@@ -575,6 +575,45 @@ class SuccessionTest(SharedTokenTestCase):
                          'a client took back the sign-in it had replaced')
 
     @no_duplicates
+    def test_a_refresh_over_another_sign_in_keeps_its_own_record(self):
+        # When the client refreshes, the file holds another sign-in's token,
+        # as an older version writes one back by date: only the client's own
+        # record can go with its refresh. It knew its sign-in by signing in,
+        # by loading the token, or by taking it.
+        for how in ('signed in', 'loaded', 'took it'):
+            with self.subTest(how):
+                st.write_token_file(self.path, created_days_ago=0,
+                                    expires_in=-60)
+                self.date_ahead(1800)
+                s1 = self.stored()
+                if how == 'took it':
+                    b = self.client()
+                    self.sign_in('B')
+                    self.quote(b)
+                    self.assertEqual('B', b.token_metadata.token['access_token'])
+                else:
+                    b = self.sign_in('B', expires_in=-60)
+                    if how == 'loaded':
+                        b = self.client()
+                older = dict(s1, token=st.token(access_token='S1-REFRESHED'))
+                older['token']['expires_at'] = time.time() + 86400
+                with open(self.path, 'w') as f:
+                    json.dump(older, f)
+                self.endpoint.answer_refresh(st.token(access_token='B2'))
+                later = time.time() + (1900 if how == 'took it' else 0)
+                with patch('time.time', return_value=later):
+                    self.quote(b)
+                # Without its own record, the refresh loses to the replaced
+                # sign-in, dated ahead, and is not written at all.
+                self.assertEqual('B2', self.stored()['token']['access_token'],
+                                 'a refresh over another sign-in dropped its '
+                                 'own record')
+                self.assertEqual([s1['creation_timestamp']],
+                                 self.stored().get('replaces'),
+                                 'a refresh over another sign-in dropped its '
+                                 'own record')
+
+    @no_duplicates
     def test_a_refresh_keeps_its_sign_ins_record(self):
         # By a client that loaded the token, and by the one that signed in.
         for loaded in (True, False):
