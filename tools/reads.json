@@ -28,6 +28,18 @@
   "tests/orders/__init__.py",
   "tests/utils.py"
  ],
+ "tests/contrib/account_activity_test.py": [
+  "schwaby/__init__.py",
+  "schwaby/contrib/__init__.py",
+  "schwaby/contrib/account_activity.py",
+  "setup.cfg",
+  "tests/__init__.py",
+  "tests/conftest.py",
+  "tests/contrib/__init__.py",
+  "tests/contrib/account_activity_test.py",
+  "tests/contrib/conftest.py",
+  "tests/utils.py"
+ ],
  "tests/contrib/util_test.py": [
   "schwaby/__init__.py",
   "schwaby/contrib/__init__.py",

@@ -1438,6 +1438,56 @@ Account Activity
 
 .. autoattribute:: schwaby.streaming::StreamClient.ACCOUNT_ACTIVITY_MESSAGE_TYPES
 
+-----------------------
+Reading an item, typed
+-----------------------
+
+:func:`~schwaby.contrib.account_activity.read_account_activity` reads one
+content item of an account-activity message into an
+:class:`~schwaby.contrib.account_activity.AccountActivityEvent`, from the
+shapes recorded below. It is opt-in: handlers still receive the message as
+before, and call it on each item of ``msg['content']`` if they want it.
+
+.. code-block:: python
+
+  from schwaby.contrib.account_activity import (
+          AccountActivityKind, read_account_activity)
+
+  def on_activity(msg):
+      for item in msg['content']:
+          event = read_account_activity(item)
+          if event.kind is AccountActivityKind.FILL:
+              book(event.order_id, event.execution)
+
+.. danger::
+
+   **Only** :attr:`~schwaby.contrib.account_activity.AccountActivityKind.FILL`
+   **is a fill.** It is ``OrderFillCompleted`` with no sign of a cancel, one
+   per execution. ``ExecutionCreated`` is
+   :attr:`~schwaby.contrib.account_activity.AccountActivityKind.EXECUTION`
+   whatever it carries, since a cancel emits one with a non-zero quantity.
+   Anything doubtful is
+   :attr:`~schwaby.contrib.account_activity.AccountActivityKind.UNKNOWN`,
+   never a fill: under-counting is recoverable from the REST API, and
+   over-counting is not. Book ``execution.execution_quantity`` per fill, and
+   read ``execution.cumulative_quantity`` as the running total; never sum the
+   cumulative quantities, since one order can fill in many executions.
+
+It neither logs nor keeps state, and it never raises on what an item holds.
+Every number is a :class:`~decimal.Decimal` or ``None``, never a float, and
+``None`` means Schwab sent nothing or an empty object. It does not mean zero:
+read a ``leaves_quantity`` of ``None`` as unknown, not as filled.
+``execution_id`` has been present on every real fill counted, so
+de-duplicate on it first.
+
+.. autofunction:: schwaby.contrib.account_activity.read_account_activity
+.. autoclass:: schwaby.contrib.account_activity.AccountActivityKind
+  :members:
+  :undoc-members:
+.. autoclass:: schwaby.contrib.account_activity.AccountActivityEvent
+.. autoclass:: schwaby.contrib.account_activity.Execution
+.. autoclass:: schwaby.contrib.account_activity.Cancel
+
 ----------------------------------------
 What the payload looks like, as observed
 ----------------------------------------
