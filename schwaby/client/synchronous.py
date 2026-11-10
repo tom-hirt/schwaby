@@ -51,6 +51,14 @@ class Client(BaseClient):
         refresh within that anyway. Two calls of it at once refresh once:
         the second finds the token fresh.
 
+        With a shared token file it may take another client's newer token
+        instead of sending, and then refreshes once more if that one is still
+        inside ``margin``. Should that refresh in turn take a token still
+        inside it, it sends nothing and says :attr:`TokenFreshness.FRESH
+        <schwaby.utils.TokenFreshness.FRESH>` although less than ``margin``
+        is left; call it again if the margin matters. That takes two other
+        clients writing tokens inside the margin within one call.
+
         :param margin: seconds; the token is refreshed when it has this long
                        left or less.
         :return: :attr:`TokenFreshness.REFRESHED
