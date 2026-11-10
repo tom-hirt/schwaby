@@ -1493,9 +1493,10 @@ fill counted, so de-duplicate on it first.
 
 The rules that keep an item off ``FILL`` were checked against 682 real fills
 one consumer recorded: each had one event block and one ``ExecutionInfo``,
-every ``EventType`` and ``ExecutionTransType`` was the fill's own, every
-quantity and price was above zero, no execution exceeded its cumulative
-quantity, none carried a cancel key, and every
+every ``EventType`` and ``ExecutionTransType`` was the fill's own, the
+``ExecutionQuantity``, ``ExecutionPrice``, ``AveragePrice`` and
+``CumulativeQuantity`` were all above zero, no execution exceeded its
+cumulative quantity, none carried a cancel key, and every
 ``LegSubStatus`` was filled or partially filled. Those are counts of the keys
 the rules read; the fills themselves have not been run through this
 function. A fill of an option order, or of an order of several legs, was not

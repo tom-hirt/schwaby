@@ -377,7 +377,8 @@ def _doubtful_fill(data, message_type, blocks):
         value = _decimal(_get(blocks[0], *path))
         if value is None or value <= 0:
             return True
-    cumulative = _decimal(_get(blocks[0], 'QuantityInfo', 'CumulativeQuantity'))
+    cumulative = _decimal(
+            _get(blocks[0], 'QuantityInfo', 'CumulativeQuantity'))
     # The quantity is above zero, so a cumulative no smaller is too.
     if cumulative is None or quantity > cumulative:
         return True
@@ -514,10 +515,10 @@ def read_account_activity(item):
     ``ExecutionInfo`` with an ``ExecutionQuantity`` and an ``ExecutionPrice``
     above zero and a ``QuantityInfo`` with an ``AveragePrice`` and a
     ``CumulativeQuantity`` above zero, the cumulative no less than the
-    execution, and exactly one ``ExecutionInfo`` in the item. At least one ``EventType``,
-    ``ExecutionTransType`` and ``LegSubStatus`` must be present, and every one
-    of them must be the fill's own type, ``Fill``, and filled or partially
-    filled. No ``CancelType``, ``OutCancelType``, ``CancelRequestType``,
+    execution, and exactly one ``ExecutionInfo`` in the item. At least one
+    ``EventType``, ``ExecutionTransType`` and ``LegSubStatus`` must be
+    present, and every one of them must be the fill's own type, ``Fill``, and
+    filled or partially filled. No ``CancelType``, ``OutCancelType``, ``CancelRequestType``,
     ``CancelQuantity`` or ``LegCancelRequestInfoList`` may appear at all; those
     keys are matched whatever their case, while the paths read for values are
     matched as Schwab spells them. A fragment of a type never makes anything a
