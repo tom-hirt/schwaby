@@ -2768,10 +2768,15 @@ class StreamClient(EnumEnforcer):
             raise UnexpectedResponse(
                     r, 'the preferences call answered {}, not 200'.format(
                         r.status_code))
-        r = r.json()
-
-        await self._init_from_preferences(
-                r, websocket_connect_args if websocket_connect_args else {})
+        try:
+            r = r.json()
+            await self._init_from_preferences(
+                    r, websocket_connect_args if websocket_connect_args else {})
+        except Exception:
+            # Preferences that do not read, or a socket that does not open:
+            # a failed login, said as one.
+            await self._login_failed(StreamCloseKind.CONNECTION_LOST)
+            raise
 
         # Build and send the request object
         _redact.register(self._client.token_metadata.token['access_token'],
@@ -2799,8 +2804,10 @@ class StreamClient(EnumEnforcer):
             raise StreamLoginRefused(
                     e.response, *e.args, service=e.service,
                     command=e.command, code=e.code, msg=e.msg) from None
-        # Connected: nothing has closed on this connection yet.
-        self.last_close = None
+        # Connected: nothing has closed on this connection yet, unless a
+        # reader in another task read its close before this resumed.
+        if self._close_said_for is not self._socket:
+            self.last_close = None
         self._logins += 1
 
     ##########################################################################

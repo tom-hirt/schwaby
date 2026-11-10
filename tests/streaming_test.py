@@ -6553,7 +6553,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         self.assertEqual(['queued', ('close', 'connection_lost')], events,
                          "a reader's login during the reports cancelled the "
                          "close")
-        self.assertIsNone(self.client.last_close, 'the login did not succeed')
+        self.assertIsNone(self.client.last_close,
+                          'a login that succeeded left the old close')
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
@@ -6630,6 +6631,63 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         with self.assertRaises(Exception):
             await self.client.handle_message()
         return events
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_close_read_before_login_resumes_is_kept(self, ws_connect):
+        # A reader in another task reads the LOGIN's answer, then the new
+        # socket's close, before login() resumes: last_close keeps it.
+        a = await self.login_and_get_socket(ws_connect)
+        a_closed = asyncio.Event()
+
+        async def a_recv():
+            await a_closed.wait()
+            raise self.closed(1000)
+        a.recv.side_effect = a_recv
+        a.close.side_effect = lambda: a_closed.set()
+        b = AsyncMock()
+        sent = {}
+        sent_now = asyncio.Event()
+
+        async def b_send(text):
+            sent['id'] = json.loads(text)['requests'][0]['requestid']
+            sent_now.set()
+        b.send.side_effect = b_send
+        reads = []
+
+        async def b_recv():
+            reads.append(True)
+            if len(reads) == 1:
+                await sent_now.wait()
+                return json.dumps(self.success_response(
+                        sent['id'], 'ADMIN', 'LOGIN'))
+            raise self.closed(1006)
+        b.recv.side_effect = b_recv
+        seen = []
+        self.client.add_close_handler(lambda c: seen.append(c.close_code))
+        reader = asyncio.ensure_future(self.client.handle_message())
+        await asyncio.sleep(0)
+        ws_connect.return_value = b
+        await self.client.login()
+        with self.assertRaises(Exception):
+            await reader
+        self.assertEqual([1006], seen)
+        self.assertIsNotNone(self.client.last_close,
+                             'last_close says connected on a closed socket')
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_socket_that_does_not_open_is_a_failed_login(
+            self, ws_connect):
+        await self.login_and_get_socket(ws_connect)
+        self.http_client.get_user_preferences.return_value = MockResponse(
+                account_preferences(), 200)
+        ws_connect.side_effect = OSError('refused')
+        with self.assertRaises(OSError):
+            await self.client.login()
+        self.assertEqual('connection_lost', self.client.last_close.kind)
+        self.assertIsNone(self.client.last_close.close_code,
+                          "a login that failed did not say so")
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)

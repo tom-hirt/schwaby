@@ -538,7 +538,9 @@ not. A close handler that reconnects may skip it when ``client.last_close is
 None``; in any other case it should reconnect. If the call is cancelled
 while the reports go out, a ``wait_for`` around ``handle_message`` say, the
 close is left for the next call that finds it, unless a login has succeeded
-in the meantime.
+in the meantime. A login that failed after closing the socket leaves none to
+find it: the next call raises that the socket is not open, and the next
+login starts afresh.
 
 A close the client makes itself is not said: :meth:`~schwaby.streaming.StreamClient.close`,
 :meth:`~schwaby.streaming.StreamClient.logout`, or a new
