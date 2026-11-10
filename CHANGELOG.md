@@ -26,6 +26,90 @@ what each entry says changed, is the same.
 
 ---
 
+## 5.5.0
+
+*2026-11-09*
+
+A minor release: what is added is off or invisible until used, and three
+things that were silently wrong now raise or say so (below, under
+**Changed**). The streaming client says how a stream ended and how lively it
+is, never holds data behind a subscribe's answer, and refuses keys it would
+have sent wrongly; a shared token file is locked safely and always takes a
+fresh sign-in.
+
+### How a stream ends
+
+A closed stream still raises the websockets exception it always has. Beside
+it, `StreamClient.last_close` holds a `StreamClose` once a connection ends:
+its `kind` (`bumped`, `login_refused`, `dead_token`, `stopped`,
+`server_closed` or `connection_lost`), the close code and reason, and the
+notice that came first. `add_close_handler` registers a handler called once
+for each connection that ends, before the call that found the close raises;
+a close the client makes itself, by `close()`, `logout()` or a new login, is
+not one. A notice from Schwab's ADMIN service, or one carrying a severing
+code, reaches the error handlers as `StreamNotice` instead of being dropped.
+Any refused LOGIN raises `StreamLoginRefused`, an `UnexpectedResponseCode`,
+with its socket closed, and `UnexpectedResponseCode` carries the refusal's
+`service`, `command`, `code` and `msg`.
+
+**A bump is not yet told apart from Schwab cycling the server:** whether
+Schwab sends a notice before one is unmeasured, so a bump may read
+`server_closed`.
+
+### Liveness
+
+`last_frame_at` and `last_heartbeat_at` say, as `time.monotonic()`, when the
+last frame of any kind and the last heartbeat arrived, and
+`add_heartbeat_handler` registers a handler for each heartbeat. Schwab
+documents no heartbeat interval, so no threshold is built in.
+
+### No data held behind a subscribe's answer
+
+A `subs`, `add` or `unsubs` waiting for its answer hands every other frame
+it reads to the handlers there and then, each once, in arrival order, beside
+a `handle_message` in another task. Before, a slow answer held every data
+frame for up to `response_timeout` and delivered them in a burst. Handler
+time does not count against the timeout, and a handler's error is logged
+and reported as in `handle_message`, never raised out of the subscribe.
+Frames read but not yet handled are delivered when a socket is replaced or
+closed, never dropped.
+
+### Keys
+
+`keys_per_request`, on the `StreamClient` or on one call, sends keys in
+batches, a SUBS becoming one SUBS and then ADDs; a refusal part-way says
+what was sent. It is off by default.
+
+### The shared token file
+
+Its lock file is opened only inside a directory that is the user's alone,
+and through no symlink, or `UnsafeTokenLockFile` is raised, when the client
+or the writer is built. A fresh sign-in is written whatever the file holds,
+and a login dated more than an hour ahead ranks oldest, so a wrong clock
+cannot outrank one. `token_file_created_at` and `refresh_token_expires_at`
+take the stored token itself as well as a path.
+
+### Changed
+
+- **Empty keys, or one string, now raise** (`ValueError`, `TypeError`)
+  before anything is sent; they were sent as `""`, or a letter at a time.
+  A `fields` list passed in is no longer changed.
+- **A frame arriving during a subscribe goes to the handlers registered at
+  that moment**: register handlers before subscribing.
+- **A 400 or 401 refusal with no error code** in its body is now
+  `refused_no_body`, not `transient`.
+- **A shared token file's lock directory must be writable by its owner
+  only.** One made under a 0002 umask is 775 and is refused; check with
+  `stat -c %a`, fix with `chmod go-w`.
+- **A failed `login()`** sets `last_close` and calls no close handler.
+- **`lock_timeout` is checked even without `shared`**, so a value it cannot
+  use raises at startup.
+- **`ensure_token_fresh`** answers `FRESH` after taking another client's
+  token from a shared file, and refreshes once more when that token is
+  inside its margin.
+- The dependencies are bounded above: `authlib<2`, `httpx2<3`,
+  `websockets<18`. The suite passes on each floor.
+
 ## 5.4.0
 
 *2026-11-09*
