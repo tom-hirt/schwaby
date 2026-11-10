@@ -1197,7 +1197,10 @@ class StreamClient(EnumEnforcer):
             if (running is not None and not running.is_set()
                     and _in_close_handlers.get() is not running):
                 await running.wait()
-            return
+            if not self._close_due:
+                return
+            # The run it waited on was cancelled before its handlers, and
+            # left the close due: this call says it.
         self._close_due = False
         close = self._due_close
         logins = self._logins
@@ -2737,8 +2740,8 @@ class StreamClient(EnumEnforcer):
         # keeps the last connection's end until this login succeeds: one in
         # flight, or cancelled, has connected nothing.
         await self._deliver_set_aside()
-        self._close_due = False
         self._last_notice = None
+        old_socket = self._socket
 
         # Fetch required data and initialize the client
         try:
@@ -2773,10 +2776,13 @@ class StreamClient(EnumEnforcer):
             await self._init_from_preferences(
                     r, websocket_connect_args if websocket_connect_args else {})
         except Exception:
-            # Preferences that do not read, or a socket that does not open:
-            # a failed login, said as one.
-            await self._login_failed(StreamCloseKind.CONNECTION_LOST)
+            # A socket that does not open, once the old one is gone: a
+            # failed login, said as one. Preferences that do not read leave
+            # the old connection as it was.
+            if self._socket is not old_socket:
+                await self._login_failed(StreamCloseKind.CONNECTION_LOST)
             raise
+        opened = self._socket
 
         # Build and send the request object
         _redact.register(self._client.token_metadata.token['access_token'],
@@ -2805,9 +2811,12 @@ class StreamClient(EnumEnforcer):
                     e.response, *e.args, service=e.service,
                     command=e.command, code=e.code, msg=e.msg) from None
         # Connected: nothing has closed on this connection yet, unless a
-        # reader in another task read its close before this resumed.
-        if self._close_said_for is not self._socket:
+        # reader in another task read its close before this resumed, or
+        # another login has replaced it since. A close still due is an
+        # earlier connection's.
+        if self._socket is opened and self._close_said_for is not opened:
             self.last_close = None
+            self._close_due = False
         self._logins += 1
 
     ##########################################################################

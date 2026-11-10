@@ -528,7 +528,9 @@ the close; a second call that found it too waits for the handlers before
 raising, unless it is that close's own handlers, or a task they started,
 finding it again. A failed :meth:`login
 <schwaby.streaming.StreamClient.login>` sets ``last_close`` but calls no close
-handler: no connection ended, and its caller has the error. A close handler
+handler: no connection ended, and its caller has the error. One whose
+preferences do not read leaves the connection, and ``last_close``, as they
+were. A close handler
 that logs in again should back off between tries.
 Reports from the moments before the close reach the error handlers first. An
 error handler that logs in again while they do so does not cancel the close:
