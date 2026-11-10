@@ -833,9 +833,11 @@ class TokenErrorKind(str, enum.Enum):
     #: means by it has not been observed, and it has not been seen to be
     #: final.
     APP_REFUSED = 'app_refused'
-    #: The token endpoint refused with a 400 or a 401 and no JSON body to say
-    #: why. What was seen, not a verdict: it has not been measured to mean
-    #: either a dead token or a passing failure.
+    #: The token endpoint refused with a 400 or a 401 and nothing in its
+    #: answer to say why: no JSON body, or one carrying no error code, a token
+    #: included, which is not kept. What was seen, not a verdict: it has not
+    #: been measured to mean either a dead token or a passing failure, so it
+    #: is not one to retry on a backoff.
     REFUSED_NO_BODY = 'refused_no_body'
     #: Anything else, a redirect included. It may clear on its own.
     TRANSIENT = 'transient'
@@ -858,7 +860,8 @@ class LoginErrorKind(str, enum.Enum):
     #: ``unauthorized_client``, the codes RFC 6749 gives for the app's own key
     #: and secret.
     APP_REFUSED = 'app_refused'
-    #: The token endpoint refused with a 400 or a 401 and no JSON body;
+    #: The token endpoint refused with a 400 or a 401 and nothing in its
+    #: answer to say why: no JSON body, or one carrying no error code;
     #: ``status_code`` says which.
     REFUSED_NO_BODY = 'refused_no_body'
     #: The person declined at Schwab's page (``access_denied``). Nothing was
@@ -913,6 +916,13 @@ class TokenFileLockTimeout(SchwabError, TimeoutError):
     ``lock_timeout``. A refresh that meets it raises
     :class:`TokenRefreshError`, with kind ``transient`` and this as its
     cause, having sent nothing; a login's write raises this itself.'''
+
+
+class UnsafeTokenLockFile(SchwabError, PermissionError):
+    '''A shared token file's lock file was refused: its directory is not this
+    user's alone (another user owns it, or a group or anyone else can write
+    to it), or the lock file or its directory is a symlink. A lock another
+    user could replace or redirect is no lock.'''
 
 
 class TokenFreshness(str, enum.Enum):
@@ -970,9 +980,12 @@ def _sent_code(error):
 
 
 def _no_body(error, status):
-    '''Whether the token endpoint refused with a 400 or a 401 and no JSON
-    body.'''
-    return (vars(error).get('_no_json_body') is True
+    '''Whether the token endpoint refused with a 400 or a 401 and nothing in
+    its answer to say why: no JSON body, or one with no error code, a token
+    included, which is not kept.'''
+    fields = vars(error)
+    return ((fields.get('_no_json_body') is True
+             or fields.get('_no_error_code') is True)
             and status in (400, 401))
 
 

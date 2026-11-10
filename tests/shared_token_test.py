@@ -319,6 +319,84 @@ class LockTest(SharedTokenTestCase):
         release()
 
 
+@unittest.skipIf(os.name == 'nt', 'Windows has no owner or mode to check')
+class SafeLockFileTest(SharedTokenTestCase):
+
+    def refused(self, **kwargs):
+        st.write_token_file(self.path, expires_in=-60)
+        # Answered, so a lock let through goes on to refresh and the test
+        # fails on the refusal it expected, not on an unanswered request.
+        self.endpoint.answer_refresh(st.token())
+        client = self.client(**kwargs)
+        with self.assertRaises(schwaby.UnsafeTokenLockFile) as cm:
+            self.quote(client)
+        self.assertEqual([], self.endpoint.requests,
+                         'something was sent past an unsafe lock')
+        return cm.exception
+
+    @no_duplicates
+    def test_a_directory_others_can_write_is_refused(self):
+        for mode in (0o770, 0o707, 0o777):
+            with self.subTest(mode=oct(mode)):
+                os.chmod(self.dir, mode)
+                try:
+                    self.refused()
+                finally:
+                    os.chmod(self.dir, 0o700)
+
+    @no_duplicates
+    def test_a_symlinked_lock_file_is_refused(self):
+        elsewhere = os.path.join(self.dir, 'elsewhere')
+        open(elsewhere, 'w').close()
+        os.symlink(elsewhere, self.lock)
+        self.refused()
+
+    @no_duplicates
+    def test_a_lock_in_a_symlinked_directory_is_refused(self):
+        real = os.path.join(self.dir, 'real')
+        os.mkdir(real, 0o700)
+        linked = os.path.join(self.dir, 'linked')
+        os.symlink(real, linked)
+        self.refused(lock_path=os.path.join(linked, 'token.lock'))
+
+    @no_duplicates
+    def test_a_safe_lock_is_taken(self):
+        st.write_token_file(self.path, expires_in=-60)
+        self.endpoint.answer_refresh(st.token())
+        self.quote(self.client())
+        self.assertEqual(0o600, os.stat(self.lock).st_mode & 0o777)
+
+
+class SignInTest(SharedTokenTestCase):
+
+    @no_duplicates
+    def test_a_sign_in_replaces_a_token_dated_in_the_future(self):
+        future = st.write_token_file(self.path, created_days_ago=0)
+        stored = self.stored()
+        stored['creation_timestamp'] = future['creation_timestamp'] + 86400
+        with open(self.path, 'w') as f:
+            json.dump(stored, f)
+        self.endpoint.answer_exchange(st.token(access_token='SIGNED-IN'))
+        context = auth.get_auth_context(API_KEY, CALLBACK_URL)
+        auth.client_from_received_url(
+                API_KEY, APP_SECRET, context, st.received_url(context),
+                auth.token_file_writer(self.path, shared=True),
+                transport=self.endpoint)
+        self.assertEqual('SIGNED-IN', self.stored()['token']['access_token'],
+                         'a token dated in the future swallowed a sign-in')
+
+    @no_duplicates
+    def test_a_writer_takes_sign_in(self):
+        newer = st.write_token_file(self.path, created_days_ago=0)
+        older = {'creation_timestamp': newer['creation_timestamp'] - 86400,
+                 'token': st.token(access_token='OLDER')}
+        write = auth.token_file_writer(self.path, shared=True)
+        write(older)
+        self.assertNotEqual('OLDER', self.stored()['token']['access_token'])
+        write(older, sign_in=True)
+        self.assertEqual('OLDER', self.stored()['token']['access_token'])
+
+
 class NewestWinsTest(SharedTokenTestCase):
 
     @staticmethod
@@ -541,3 +619,9 @@ class ArgumentsTest(SharedTokenTestCase):
         self.assertAlmostEqual(time.time() - 2 * 86400, created, delta=5)
         self.assertEqual(created + 7 * 86400,
                          auth.refresh_token_expires_at(self.path))
+        # Or from the stored token itself, read by the caller.
+        with open(self.path) as f:
+            stored = json.load(f)
+        self.assertEqual(created, auth.token_file_created_at(stored))
+        self.assertEqual(created + 7 * 86400,
+                         auth.refresh_token_expires_at(stored))

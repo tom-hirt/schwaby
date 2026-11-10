@@ -165,6 +165,12 @@ class _TestClient:
             ('403 with no body', self.hook_refusal(403), K.TRANSIENT, None),
             ('a token at 302', self.hook_refusal(302, token), K.TRANSIENT,
              None),
+            # A 400 or 401 saying nothing of why: a token in it is not a
+            # reason, nor is JSON with no error code.
+            ('a token at 401', self.hook_refusal(401, token),
+             K.REFUSED_NO_BODY, None),
+            ('a message at 400', self.hook_refusal(400, {'message': 'x'}),
+             K.REFUSED_NO_BODY, None),
             ('unusable', self.hook_refusal(200, {'message': 'x'}),
              K.TRANSIENT, None),
             ('slow_down', self.hook_refusal(400, {'error': 'slow_down'}),

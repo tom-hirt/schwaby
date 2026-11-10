@@ -1002,6 +1002,7 @@ class UtilsTest(unittest.TestCase):
             'StreamLoginRefused': (r(), 'm'),
             'StreamNotice': ({'service': 'ADMIN'}, 'm'),
             'TokenFileLockTimeout': ('m',),
+            'UnsafeTokenLockFile': ('m',),
             'TokenRefreshError': ('m',),
             'LoginExchangeError': ('invalid_grant', 'code already used'),
             'RedirectTimeoutError': ('m',),

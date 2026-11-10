@@ -2693,9 +2693,11 @@ CASES = [
 
     Case('auth/an-unusable-response-carries-its-status',
          'schwaby/auth.py',
-         "    refusal._described_by_this_library = True\n"
-         "    refusal._token_endpoint_status = response.status_code\n",
-         "    refusal._described_by_this_library = True\n",
+         "    refusal._no_error_code = True\n"
+         "    refusal._token_endpoint_status = response.status_code\n"
+         "    raise refusal\n\n\ndef _stored_token_for_session",
+         "    refusal._no_error_code = True\n"
+         "    raise refusal\n\n\ndef _stored_token_for_session",
          'tests/utils_test.py::TokenEndpointStatusTest'
          '::test_an_unusable_token_response_carries_its_status',
          '200 != None'),
@@ -8856,9 +8858,8 @@ CASES += [
          'a refusal was given the wrong kind'),
     Case('token-kind/no-body-is-only-a-400-or-401-with-no-body',
          'schwaby/utils.py',
-         "    return (vars(error).get('_no_json_body') is True\n"
          '            and status in (400, 401))\n',
-         '    return status in (400, 401)\n',
+         '            or True)\n',
          'tests/client_test.py::ClientTest'
          '::test_each_refresh_refusal_has_its_kind',
          'a refusal was given the wrong kind'),
@@ -9754,6 +9755,53 @@ CASES += [
          '            await socket.send(json.dumps(obj))\n        except ConnectionClosed as exc:\n',
          'tests/streaming_test.py::StreamClientTest::test_a_close_found_sending_is_said_once',
          'was not said once'),
+]
+
+# The shared token file's lock opened safely, and a sign-in written
+# whatever the file holds (5.5.0).
+CASES += [
+    Case('shared/the-lock-directory-is-the-users-alone',
+         'schwaby/_shared_token.py',
+         '        if st.st_uid != os.getuid() or st.st_mode & 0o022:\n',
+         '        if False:\n',
+         'tests/shared_token_test.py::SafeLockFileTest::test_a_directory_others_can_write_is_refused',
+         'UnsafeTokenLockFile not raised'),
+    Case('shared/the-lock-file-is-not-followed',
+         'schwaby/_shared_token.py',
+         '                         os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600,\n',
+         '                         os.O_RDWR | os.O_CREAT, 0o600,\n',
+         'tests/shared_token_test.py::SafeLockFileTest::test_a_symlinked_lock_file_is_refused',
+         'UnsafeTokenLockFile not raised'),
+    Case('shared/the-lock-directory-is-not-followed',
+         'schwaby/_shared_token.py',
+         '                         os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)\n',
+         '                         os.O_RDONLY | os.O_DIRECTORY)\n',
+         'tests/shared_token_test.py::SafeLockFileTest::test_a_lock_in_a_symlinked_directory_is_refused',
+         'UnsafeTokenLockFile not raised'),
+    Case('shared/a-sign-in-skips-the-newness-check',
+         'schwaby/_shared_token.py',
+         '            current = None if sign_in else self._read_or_none()\n',
+         '            current = self._read_or_none()\n',
+         'tests/shared_token_test.py::SignInTest::test_a_writer_takes_sign_in',
+         'OLDER'),
+    Case('shared/a-logins-exchange-is-a-sign-in',
+         'schwaby/auth.py',
+         '        shared_writer(metadata_manager.wrap_token_in_metadata(token),\n                      sign_in=True)\n',
+         '        shared_writer(metadata_manager.wrap_token_in_metadata(token),\n                      sign_in=False)\n',
+         'tests/shared_token_test.py::SignInTest::test_a_sign_in_replaces_a_token_dated_in_the_future',
+         'swallowed a sign-in'),
+]
+
+# A 400 or 401 that says nothing of why is refused_no_body, whatever its body
+# holds instead of an error code (5.5.0).
+CASES += [
+    Case('token-kind/a-refusal-with-no-error-code-is-refused-no-body',
+         'schwaby/auth.py',
+         '        # A refusal with no code of its own to say why, as one with no body.\n'
+         '        refusal._no_error_code = True\n',
+         '        # A refusal with no code of its own to say why, as one with no body.\n',
+         'tests/client_test.py::ClientTest::test_each_refresh_refusal_has_its_kind',
+         'a refusal was given the wrong kind', subtest='a token at 401'),
 ]
 
 # Out of the release red-proof (2026-11-09): entries on tooling, test

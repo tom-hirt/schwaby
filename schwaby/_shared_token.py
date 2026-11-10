@@ -22,11 +22,13 @@ import contextvars
 import json
 import math
 import os
+import stat
 import threading
 import time
 
 from . import _redact
-from .utils import TokenErrorKind, TokenFileLockTimeout, TokenRefreshError
+from .utils import (TokenErrorKind, TokenFileLockTimeout, TokenRefreshError,
+                    UnsafeTokenLockFile)
 
 
 def get_logger():
@@ -103,6 +105,48 @@ def _unlock_fd(fd):
         return
     import fcntl
     fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+def _open_lock_file(path):
+    """Opens the lock file safely: inside a directory that is this user's
+    alone, and never through a symlink. Raises UnsafeTokenLockFile
+    otherwise. Windows has no owner ids or modes to check."""
+    if os.name == 'nt':  # pragma: no cover
+        return os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    directory = os.path.dirname(os.path.abspath(path))
+    try:
+        dir_fd = os.open(directory,
+                         os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as e:
+        raise UnsafeTokenLockFile(
+                'The lock file\'s directory {!r} cannot be opened as a '
+                'directory without following a symlink: {}'.format(
+                    directory, e.strerror)) from None
+    try:
+        st = os.fstat(dir_fd)
+        if st.st_uid != os.getuid() or st.st_mode & 0o022:
+            raise UnsafeTokenLockFile(
+                    'The lock file\'s directory {!r} must belong to this '
+                    'user and be writable by no one else; it is {:o}, owned '
+                    'by uid {}.'.format(directory, st.st_mode & 0o777,
+                                        st.st_uid))
+        try:
+            fd = os.open(os.path.basename(path),
+                         os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600,
+                         dir_fd=dir_fd)
+        except OSError as e:
+            raise UnsafeTokenLockFile(
+                    'The lock file {!r} cannot be opened without following a '
+                    'symlink: {}'.format(path, e.strerror)) from None
+    finally:
+        os.close(dir_fd)
+    st = os.fstat(fd)
+    if st.st_uid != os.getuid() or not stat.S_ISREG(st.st_mode):
+        os.close(fd)
+        raise UnsafeTokenLockFile(
+                'The lock file {!r} must be a regular file belonging to this '
+                'user.'.format(path))
+    return fd
 
 
 def _number(value):
@@ -211,7 +255,7 @@ class SharedTokenFile:
         if not process_lock.acquire(timeout=self.lock_timeout):
             raise self._timed_out()
         try:
-            fd = os.open(self._lock_file(key), os.O_RDWR | os.O_CREAT, 0o600)
+            fd = _open_lock_file(self._lock_file(key))
         except BaseException:
             process_lock.release()
             raise
@@ -329,13 +373,14 @@ class SharedTokenFile:
         except (ValueError, RecursionError):
             return None
 
-    def write(self, wrapped, *args, **kwargs):
+    def write(self, wrapped, *args, sign_in=False, **kwargs):
         '''Writes the stored token ``wrapped`` under the lock, if it is at
-        least as new as the file's; whether it did.'''
+        least as new as the file's, or whatever the file holds when
+        ``sign_in`` says it is a fresh sign-in's; whether it did.'''
         wrapped = dict(wrapped)
         wrapped['received_at'] = time.time()
         with self.lock():
-            current = self._read_or_none()
+            current = None if sign_in else self._read_or_none()
             if not is_at_least_as_new(wrapped, current):
                 get_logger().info(
                         'Kept the newer token in %s: the token it would have '

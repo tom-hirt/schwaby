@@ -313,7 +313,17 @@ With it:
   login it came from, then its access token's expiry. A fresh login always
   wins over a refresh of the old token;
 - the lock is a file beside the token file's real path, ``token.json.lock``,
-  created readable only by you, or ``lock_path``;
+  created readable only by you, or ``lock_path``. Its directory must be
+  yours alone (no group or other write) and neither it nor the lock file may
+  be a symlink, or :class:`~schwaby.utils.UnsafeTokenLockFile` is raised: a
+  lock someone else could replace or redirect is no lock;
+- a fresh sign-in is written whatever the file holds: the exchange
+  :func:`~schwaby.auth.client_from_received_url` makes, and with it every
+  login function, writes its token unconditionally, so a token dated in the
+  future by a wrong clock cannot outrank it. A writer from
+  :func:`~schwaby.auth.token_file_writer` or
+  :func:`~schwaby.auth.shared_token_file` takes ``sign_in=True`` for a sign-in
+  you write yourself;
 - the wait for the lock is bounded by ``lock_timeout``, 10 seconds by
   default. Past it a refresh raises
   :class:`~schwaby.utils.TokenRefreshError` with kind ``transient``, having
@@ -342,6 +352,7 @@ library's.
 
 .. autofunction:: schwaby.auth.shared_token_file
 .. autoexception:: schwaby.utils.TokenFileLockTimeout
+.. autoexception:: schwaby.utils.UnsafeTokenLockFile
 
 
 ++++++++++++++++++++++++++

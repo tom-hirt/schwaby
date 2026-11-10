@@ -2108,6 +2108,8 @@ class LoginExchangeErrorTest(unittest.TestCase):
             (401, None, K.REFUSED_NO_BODY, None),
             (403, None, K.TRANSIENT, None),
             (302, token, K.TRANSIENT, None),
+            (401, token, K.REFUSED_NO_BODY, None),
+            (401, {'message': 'Unauthorized'}, K.REFUSED_NO_BODY, None),
             (200, {'message': 'Unauthorized'}, K.TRANSIENT, None))
         for status, body, kind, code in answered:
             with self.subTest(status=status, body=body):

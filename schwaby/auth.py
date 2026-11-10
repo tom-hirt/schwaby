@@ -291,6 +291,8 @@ def _refuse_unusable_token_response(response):
                             'token, which was not stored: a token is kept '
                             'only from a success'.format(response.status_code))
         refusal._described_by_this_library = True
+        # A refusal with no code of its own to say why, as one with no body.
+        refusal._no_error_code = True
         refusal._token_endpoint_status = response.status_code
         raise refusal
     refusal = OAuthError(
@@ -305,6 +307,7 @@ def _refuse_unusable_token_response(response):
     # as TokenRefreshError's cause, and the docs are searched by the line its
     # traceback prints.
     refusal._described_by_this_library = True
+    refusal._no_error_code = True
     refusal._token_endpoint_status = response.status_code
     raise refusal
 
@@ -506,9 +509,9 @@ def _shared_file(token_path, *, read_bytes=None, write_bytes=None,
 
 
 def _shared_writer(shared):
-    def update_token(t, *args, **kwargs):
+    def update_token(t, *args, sign_in=False, **kwargs):
         get_logger().info('Updating token to file %s', shared.token_path)
-        shared.write(t)
+        shared.write(t, sign_in=sign_in)
     update_token._schwaby_shared_token_file = shared
     return update_token
 
@@ -811,11 +814,17 @@ def token_file_created_at(token_path):
     seconds since the epoch: the ``creation_timestamp`` this library stores
     in the file, read as :func:`token_file_age` reads it.
 
+    ``token_path`` may instead be the stored token itself, a mapping as read
+    from a token file, for a token kept somewhere this library does not open.
+
     :raises ValueError: as :func:`token_file_age` does.
     :raises OSError: The file cannot be read.
     '''
-    metadata = TokenMetadata.from_loaded_token(
-            __token_loader(token_path, level=logging.DEBUG)(), None)
+    if issubclass(type(token_path), collections.abc.Mapping):
+        stored = token_path
+    else:
+        stored = __token_loader(token_path, level=logging.DEBUG)()
+    metadata = TokenMetadata.from_loaded_token(stored, None)
     _stored_token_for_session(metadata.token)
     return float(metadata.creation_timestamp)
 
@@ -827,7 +836,7 @@ REFRESH_TOKEN_LIFETIME = 7 * 24 * 60 * 60
 def refresh_token_expires_at(token_path):
     '''When the refresh token in ``token_path`` expires, in seconds since the
     epoch: :func:`token_file_created_at` plus the seven days Schwab
-    documents.
+    documents. ``token_path`` may be the stored token itself, as there.
 
     .. note:: Schwab has not always held to the seven days, so a refresh can
        fail before this, and a token is best replaced with a login a little
@@ -1703,7 +1712,17 @@ def client_from_received_url(
     shared_writer = token_write_func
     metadata_manager = TokenMetadata(token, int(time.time()), token_write_func)
     token_write_func = metadata_manager.wrapped_token_write_func()
-    token_write_func(token)
+    shared = getattr(shared_writer, '_schwaby_shared_token_file', None)
+    if shared is not None:
+        # A fresh sign-in replaces whatever the shared file holds: one dated
+        # in the future, by a clock that was wrong, would otherwise outrank
+        # it for good.
+        _register_token(token)
+        shared_writer(metadata_manager.wrap_token_in_metadata(token),
+                      sign_in=True)
+        metadata_manager.token = token
+    else:
+        token_write_func(token)
 
     # The synchronous and asynchronous versions of the OAuth2Client are similar
     # enough that can mostly be used interchangeably. The one currently known

@@ -11,7 +11,8 @@ from .version import version as __version__
 from .utils import (
         LoginErrorKind, LoginExchangeError, NoBrowserAvailable, PaceRequest,
         TokenErrorKind, TokenFileLockTimeout, TokenFreshness,
-        TokenRefreshError, find_token_error, server_error_code)
+        TokenRefreshError, UnsafeTokenLockFile, find_token_error,
+        server_error_code)
 
 LOG_REDACTOR = debug.LogRedactor()
 
@@ -23,6 +24,7 @@ __all__ = [
     'LOG_REDACTOR', 'LoginErrorKind', 'LoginExchangeError',
     'NoBrowserAvailable', 'PaceRequest', 'TokenErrorKind',
     'TokenFileLockTimeout', 'TokenFreshness',
-    'TokenRefreshError', 'auth', 'client', 'debug', 'find_token_error',
+    'TokenRefreshError', 'UnsafeTokenLockFile', 'auth', 'client', 'debug',
+    'find_token_error',
     'orders', 'server_error_code', 'streaming', 'utils', 'version',
 ]
