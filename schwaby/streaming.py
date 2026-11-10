@@ -841,7 +841,8 @@ class StreamClient(EnumEnforcer):
 
         #: How the last connection ended, a :class:`StreamClose`, or None
         #: while it has not, and before the first. Set before the call that
-        #: finds the close raises, and reset by :meth:`login`.
+        #: finds the close raises, and reset to None when :meth:`login`
+        #: succeeds.
         self.last_close = None
         #: ``time.monotonic()`` when the last frame of any kind arrived, one
         #: that did not parse included, or None. A plain attribute, safe to
@@ -853,7 +854,13 @@ class StreamClient(EnumEnforcer):
         self._heartbeat_handlers = []
         self._close_said_for = None
         self._close_due = False
+        # The close the handlers are due to be given: last_close may have
+        # moved on by the time they run.
+        self._due_close = None
         self._close_running = None
+        # How many logins have succeeded: a close claimed before one is that
+        # connection's past, and not due again.
+        self._logins = 0
         self._last_notice = None
         # How many handle_message calls are dispatching a frame now.
         self._dispatching = 0
@@ -1163,7 +1170,8 @@ class StreamClient(EnumEnforcer):
         self._set_close(kind, code, getattr(rcvd, 'reason', None), notice)
 
     def _set_close(self, kind, code=None, reason=None, notice=None):
-        self.last_close = StreamClose(kind, code, reason, notice)
+        self.last_close = self._due_close = StreamClose(kind, code, reason,
+                                                        notice)
         self._close_due = True
 
     async def _login_failed(self, kind):
@@ -1179,7 +1187,9 @@ class StreamClient(EnumEnforcer):
         ``drain_first``, the reports queued before the close go out first.
         The close is claimed before them, so an error handler that logs in
         again while they go out cannot cancel it: the handlers still run,
-        given this close, though ``last_close`` is the new connection's.'''
+        given this close, though ``last_close`` then says how that login
+        went. Cancelled while they go out, the close is due again, unless a
+        login has succeeded since.'''
         if not self._close_due:
             if drain_first:
                 await self._drain_pending_reports()
@@ -1189,7 +1199,8 @@ class StreamClient(EnumEnforcer):
                 await running.wait()
             return
         self._close_due = False
-        close = self.last_close
+        close = self._due_close
+        logins = self._logins
         running = self._close_running = asyncio.Event()
         token = _in_close_handlers.set(running)
         try:
@@ -1199,8 +1210,11 @@ class StreamClient(EnumEnforcer):
                 except BaseException:
                     # Cancelled, say, by a wait_for around handle_message:
                     # the close is due again for the next call that finds it,
-                    # unless a login since has made it another connection's.
-                    if self.last_close is close:
+                    # unless a login since has succeeded, which makes it an
+                    # earlier connection's. A login that failed, or was itself
+                    # cancelled, connected nothing.
+                    if self._logins == logins:
+                        self._due_close = close
                         self._close_due = True
                     raise
             for handler in list(self._close_handlers):
@@ -2719,9 +2733,10 @@ class StreamClient(EnumEnforcer):
         '''
 
         # What the connection being replaced set aside is delivered, not
-        # dropped; then nothing has closed on the new one yet.
+        # dropped; then nothing has closed on the new one yet. last_close
+        # keeps the last connection's end until this login succeeds: one in
+        # flight, or cancelled, has connected nothing.
         await self._deliver_set_aside()
-        self.last_close = None
         self._close_due = False
         self._last_notice = None
 
@@ -2784,6 +2799,9 @@ class StreamClient(EnumEnforcer):
             raise StreamLoginRefused(
                     e.response, *e.args, service=e.service,
                     command=e.command, code=e.code, msg=e.msg) from None
+        # Connected: nothing has closed on this connection yet.
+        self.last_close = None
+        self._logins += 1
 
     ##########################################################################
     # LOGOUT

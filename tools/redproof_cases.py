@@ -9657,8 +9657,8 @@ CASES += [
          'dead_token', subtest='TokenRefreshError'),
     Case('stream-login/login-resets-the-last-close',
          'schwaby/streaming.py',
-         '        await self._deliver_set_aside()\n        self.last_close = None\n',
-         '        await self._deliver_set_aside()\n',
+         '        self.last_close = None\n        self._logins += 1\n',
+         '        self._logins += 1\n',
          'tests/streaming_test.py::StreamClientTest::test_login_resets_the_last_close',
          'a new login kept the old close'),
     Case('stream-refusal/carries-its-parts',
@@ -10015,7 +10015,7 @@ CASES += [
          'a client took back the sign-in it had replaced'),
     Case('stream-close/a-cancelled-drain-leaves-the-close-due',
          'schwaby/streaming.py',
-         '                    if self.last_close is close:\n                        self._close_due = True\n',
+         '                    if self._logins == logins:\n                        self._due_close = close\n                        self._close_due = True\n',
          '                    pass\n',
          'tests/streaming_test.py::StreamClientTest::test_a_drain_cancelled_leaves_the_close_for_the_next_call',
          'a drain cancelled lost the close'),
@@ -10025,6 +10025,29 @@ CASES += [
          "                if False:\n                    wrapped['replaces'] = list(record)",
          'tests/shared_token_test.py::SuccessionTest::test_a_client_with_its_own_reader_carries_the_record_on',
          "a refresh by its own reader's client dropped the record"),
+]
+
+# Round three: a login in the reports that fails or is cancelled leaves the
+# close due; last_close is reset only by a login that succeeds (5.5.1).
+CASES += [
+    Case('stream-close/a-failed-login-leaves-the-close-due',
+         'schwaby/streaming.py',
+         '                    if self._logins == logins:\n',
+         '                    if self.last_close is close:\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_login_failed_in_the_reports_leaves_the_close_due',
+         'a login failed in the reports lost the close'),
+    Case('stream-close/a-login-in-flight-keeps-last-close',
+         'schwaby/streaming.py',
+         '        await self._deliver_set_aside()\n        self._close_due = False\n        self._last_notice = None\n',
+         '        await self._deliver_set_aside()\n        self.last_close = None\n        self._close_due = False\n        self._last_notice = None\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_login_cancelled_in_the_reports_leaves_the_close_due',
+         'last_close says connected, with no connection'),
+    Case('stream-close/a-login-that-succeeds-says-connected',
+         'schwaby/streaming.py',
+         '        # Connected: nothing has closed on this connection yet.\n        self.last_close = None\n',
+         '',
+         'tests/streaming_test.py::StreamClientTest::test_an_error_handler_logging_in_does_not_cancel_the_close',
+         "last_close is not the new connection's"),
 ]
 
 # Out of the release red-proof (2026-11-09): entries on tooling, test

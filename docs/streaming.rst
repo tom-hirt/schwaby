@@ -519,8 +519,9 @@ A closed connection still raises the websockets exception it always has, a
 clean close as ``ConnectionClosedOK``. Beside it, the stream says how it ended:
 ``last_close`` holds a
 :class:`~schwaby.streaming.StreamClose` once a connection has ended, set
-before the call that finds the close raises, and reset by
-:meth:`~schwaby.streaming.StreamClient.login`. A handler registered with
+before the call that finds the close raises, and reset to ``None`` when a
+:meth:`~schwaby.streaming.StreamClient.login` succeeds. A login still in
+flight, or cancelled, leaves it as it was. A handler registered with
 :meth:`~schwaby.streaming.StreamClient.add_close_handler` is called with it
 once for each connection that ends, before that raise, whichever call found
 the close; a second call that found it too waits for the handlers before
@@ -534,7 +535,10 @@ error handler that logs in again while they do so does not cancel the close:
 its handlers are still called, with that close, though ``last_close`` then
 says how that login went: ``None`` if it succeeded, its failure if it did
 not. A close handler that reconnects may skip it when ``client.last_close is
-None``; in any other case it should reconnect.
+None``; in any other case it should reconnect. If the call is cancelled
+while the reports go out, a ``wait_for`` around ``handle_message`` say, the
+close is left for the next call that finds it, unless a login has succeeded
+in the meantime.
 
 A close the client makes itself is not said: :meth:`~schwaby.streaming.StreamClient.close`,
 :meth:`~schwaby.streaming.StreamClient.logout`, or a new
