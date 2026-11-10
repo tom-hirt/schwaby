@@ -184,11 +184,10 @@ raised out of the ``subs``.
 
   **Register handlers before you subscribe.** A frame that arrives while a
   ``subs`` waits goes to the handlers registered at that moment, not to ones
-  added after it returns. And **a synchronous handler must not issue a
-  stream command**: it would wait on the request its own caller is in the
-  middle of. A coroutine handler, a heartbeat one included, runs as a task
-  and may, and so may an error handler: a report made during the wait is
-  delivered once the request has finished.
+  added after it returns. A coroutine handler, a heartbeat one included, runs
+  as a task, so it may issue stream commands, and so may an error handler: a
+  report made during the wait is delivered once the request has finished.
+  A synchronous handler cannot await one.
 
 .. _stream_keys:
 
@@ -523,15 +522,20 @@ clean close as ``ConnectionClosedOK``. Beside it, the stream says how it ended:
 before the call that finds the close raises, and reset by
 :meth:`~schwaby.streaming.StreamClient.login`. A handler registered with
 :meth:`~schwaby.streaming.StreamClient.add_close_handler` is called with it
-once for each connection, before that raise, whichever call found the close;
-a second call that found it too waits for the handlers before raising.
+once for each connection that ends, before that raise, whichever call found
+the close; a second call that found it too waits for the handlers before
+raising, unless it is a close handler's own. A failed :meth:`login
+<schwaby.streaming.StreamClient.login>` sets ``last_close`` but calls no close
+handler: no connection ended, and its caller has the error. A close handler
+that logs in again should back off between tries.
 Reports from the moments before the close reach the error handlers first.
 
 A close the client makes itself is not said: :meth:`~schwaby.streaming.StreamClient.close`,
 :meth:`~schwaby.streaming.StreamClient.logout`, or a new
 :meth:`~schwaby.streaming.StreamClient.login` replacing the socket. A
 ``handle_message`` that was reading the socket a login replaced reads on
-from the new one rather than raising. Frames read but not yet handled when
+from the new one once it is open; one that reads while the login is still
+connecting raises, as before. Frames read but not yet handled when
 a socket is replaced or closed are delivered first, never dropped.
 
 .. code-block:: python
@@ -542,7 +546,8 @@ a socket is replaced or closed are delivered first, never dropped.
 
   stream_client.add_close_handler(on_close)
 
-A login that fails sets it too: ``login_refused`` when Schwab refuses the
+A login that fails sets it too, without calling the close handlers:
+``login_refused`` when Schwab refuses the
 LOGIN, which raises :class:`~schwaby.streaming.StreamLoginRefused` with its
 socket closed; ``dead_token`` when the preferences call finds the refresh
 token dead, the :class:`~schwaby.utils.TokenRefreshError` propagating as it

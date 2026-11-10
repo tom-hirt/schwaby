@@ -11,6 +11,7 @@ import time
 
 import websockets.asyncio.client as ws_client
 from websockets.exceptions import ConnectionClosed
+import contextvars
 
 from . import _redact
 from .utils import (EnumEnforcer, LazyLog, SchwabError, TokenErrorKind,
@@ -511,6 +512,12 @@ def _int_or_none(value):
 def _text_or_none(value):
     return value if isinstance(value, str) else None
 
+
+# Set while a client's close handlers run, in their task and any task they
+# start: their own calls find the close again, and must not wait for the run
+# they are part of.
+_in_close_handlers = contextvars.ContextVar('schwaby_in_close_handlers',
+                                            default=False)
 
 #: The codes Schwab documents as severing the stream, which a notice carries.
 _SEVERING_CODES = frozenset({12, 30})
@@ -1159,24 +1166,30 @@ class StreamClient(EnumEnforcer):
         self._close_due = True
 
     async def _login_failed(self, kind):
-        self._set_close(kind, notice=self._last_notice)
-        await self._run_close_handlers()
+        '''Says how a login failed, in last_close. The close handlers are not
+        called: no connection ended, the caller of login() gets the error,
+        and a handler that logged in again would call itself until the stack
+        ran out.'''
+        self.last_close = StreamClose(kind, notice=self._last_notice)
 
     async def _run_close_handlers(self):
         '''Runs the close handlers once for the close found, and makes any
         other call that found it wait for them before it raises too.'''
         if not self._close_due:
             running = self._close_running
-            if running is not None and not running.is_set():
+            if (running is not None and not running.is_set()
+                    and not _in_close_handlers.get()):
                 await running.wait()
             return
         self._close_due = False
         close = self.last_close
         running = self._close_running = asyncio.Event()
+        token = _in_close_handlers.set(True)
         try:
             for handler in list(self._close_handlers):
                 await self._call_user_handler(handler, close, 'Close handler')
         finally:
+            _in_close_handlers.reset(token)
             running.set()
 
     async def _deliver_set_aside(self):
@@ -2818,10 +2831,17 @@ class StreamClient(EnumEnforcer):
         operations.
         '''
         socket, self._socket = self._socket, None
-        # Frames read but not yet handled are delivered before the rest is
-        # cleared: a fill from a session being torn down is still a fill.
-        await self._deliver_set_aside()
+        try:
+            # Frames read but not yet handled are delivered before the rest
+            # is cleared: a fill from a session being torn down is still a
+            # fill.
+            await self._deliver_set_aside()
+        finally:
+            await self._close_socket(socket)
 
+    async def _close_socket(self, socket):
+        '''The rest of close(), whatever delivering what was set aside raised:
+        a socket left open would go on holding the user's one stream.'''
         # Anything still queued belongs to the session being torn down. Its
         # exception carries a frame from that connection, so delivering it
         # after a later login() would report a dead session's rejection against

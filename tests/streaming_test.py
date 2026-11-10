@@ -6231,8 +6231,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
                 self.assertEqual(('ADMIN', 'LOGIN'),
                                  (cm.exception.service, cm.exception.command))
                 socket.close.assert_awaited()
-                self.assertEqual(
-                        [(StreamCloseKind.LOGIN_REFUSED, None, True)], seen)
+                # Said in last_close; no close handler for a login's failure.
+                self.assertEqual([], seen)
+                self.assertIs(StreamCloseKind.LOGIN_REFUSED,
+                              self.client.last_close.kind)
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
@@ -6264,7 +6266,9 @@ class StreamClientTest(IsolatedAsyncioTestCase):
                 if result is dead:
                     self.assertIs(dead, cm.exception,
                                   'the token error was not raised unchanged')
-                self.assertEqual([(kind, None, True)], seen)
+                self.assertEqual([], seen, 'a failed login called a close '
+                                 'handler')
+                self.assertIs(kind, self.client.last_close.kind)
         self.http_client.get_user_preferences.side_effect = None
 
     @no_duplicates
@@ -6471,6 +6475,66 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         await self.client.close()
         self.assertEqual(['FILL'], seen,
                          'a frame set aside was dropped at close')
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_close_handler_that_issues_a_command_does_not_hang(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        outcomes = []
+
+        async def handler(close):
+            try:
+                await self.client.chart_equity_add(['A'])
+            except Exception as e:
+                outcomes.append(type(e).__name__)
+        self.client.add_close_handler(handler)
+        socket.recv.side_effect = self.closed(1006)
+        socket.send.side_effect = self.closed(1006)
+        with self.assertRaises(Exception):
+            await asyncio.wait_for(self.client.handle_message(), 5)
+        self.assertEqual(['ConnectionClosedError'], outcomes,
+                         "a close handler's own command waited on its run")
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_cancelled_close_still_closes_the_socket(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+
+        def handler(m):
+            # As a close() cancelled while it delivers would.
+            raise asyncio.CancelledError()
+        self.client.add_chart_equity_handler(handler)
+        self.client._overflow_items.appendleft(self.streaming_entry(
+                'CHART_EQUITY', 'SUBS', [{'key': 'X'}]))
+        with self.assertRaises(asyncio.CancelledError):
+            await self.client.close()
+        socket.close.assert_awaited()
+        self.assertIsNone(self.client._socket)
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_close_handler_that_logs_in_does_not_recurse(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        calls = []
+
+        async def reconnect(close):
+            calls.append(close.kind)
+            try:
+                await self.client.login()
+            except Exception:
+                pass
+        self.client.add_close_handler(reconnect)
+        self.http_client.get_user_preferences.side_effect = RuntimeError(
+                'down')
+        socket.recv.side_effect = [self.closed(1006)]
+        with self.assertRaises(Exception):
+            await asyncio.wait_for(self.client.handle_message(), 5)
+        self.http_client.get_user_preferences.side_effect = None
+        self.assertEqual(1, len(calls),
+                         'a failed login called the close handlers again')
 
     ##########################################################################
     # No frame held behind a request's answer

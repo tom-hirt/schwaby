@@ -17,6 +17,7 @@ import textwrap
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 import schwaby
 import schwaby.testing as st
@@ -327,9 +328,10 @@ class SafeLockFileTest(SharedTokenTestCase):
         # Answered, so a lock let through goes on to refresh and the test
         # fails on the refusal it expected, not on an unanswered request.
         self.endpoint.answer_refresh(st.token())
-        client = self.client(**kwargs)
         with self.assertRaises(schwaby.UnsafeTokenLockFile) as cm:
-            self.quote(client)
+            # Refused when the client is built, before anything is sent or
+            # a sign-in spent, or at the latest when the lock is taken.
+            self.quote(self.client(**kwargs))
         self.assertEqual([], self.endpoint.requests,
                          'something was sent past an unsafe lock')
         return cm.exception
@@ -343,6 +345,29 @@ class SafeLockFileTest(SharedTokenTestCase):
                     self.refused()
                 finally:
                     os.chmod(self.dir, 0o700)
+
+    @no_duplicates
+    def test_the_directory_is_refused_before_anything_starts(self):
+        os.chmod(self.dir, 0o775)
+        try:
+            for build in (
+                    lambda: auth.token_file_writer(self.path, shared=True),
+                    lambda: auth.shared_token_file(self.path),
+                    lambda: self.client()):
+                with self.subTest(build=build):
+                    st.write_token_file(self.path)
+                    with self.assertRaises(schwaby.UnsafeTokenLockFile):
+                        build()
+        finally:
+            os.chmod(self.dir, 0o700)
+        self.assertEqual([], self.endpoint.requests)
+
+    @no_duplicates
+    def test_a_directory_another_user_owns_is_refused(self):
+        with patch('os.getuid', return_value=os.getuid() + 1):
+            with self.assertRaises(schwaby.UnsafeTokenLockFile) as cm:
+                auth.shared_token_file(self.path)
+        self.assertIn('owned by uid', str(cm.exception))
 
     @no_duplicates
     def test_a_symlinked_lock_file_is_refused(self):
@@ -420,6 +445,10 @@ class NewestWinsTest(SharedTokenTestCase):
                 (w(1, 5, 7.0), w(1, 5), True),    # only when both have it
                 (w(1, 5), w(1, 5, 9.0), True),
                 (w(1, 5), w(1, 5), True),         # a tie is written
+                # A login dated more than an hour ahead is a wrong clock's:
+                # it ranks oldest, so it outranks nothing, ever.
+                (w(1, 5), w(time.time() + 7200, 9), True),
+                (w(time.time() + 7200, 9), w(1, 5), False),
                 (w(1, 5), None, True),            # no file
                 (w(1, 5), 'not a token', True)):
             with self.subTest(ours=ours, theirs=theirs):

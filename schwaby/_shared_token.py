@@ -107,6 +107,39 @@ def _unlock_fd(fd):
     fcntl.flock(fd, fcntl.LOCK_UN)
 
 
+def _check_lock_directory(path):
+    """Refuses, before anything is sent or signed in, a lock file whose
+    directory is not this user's alone or is a symlink: the check the lock
+    makes each time, made once when the shared file is set up."""
+    if os.name == 'nt':  # pragma: no cover
+        return
+    directory = os.path.dirname(os.path.abspath(path))
+    try:
+        dir_fd = os.open(directory,
+                         os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return
+    except OSError as e:
+        raise UnsafeTokenLockFile(
+                'The lock file\'s directory {!r} cannot be opened as a '
+                'directory without following a symlink: {}'.format(
+                    directory, e.strerror)) from None
+    try:
+        _check_directory_fd(dir_fd, directory)
+    finally:
+        os.close(dir_fd)
+
+
+def _check_directory_fd(dir_fd, directory):
+    st = os.fstat(dir_fd)
+    if st.st_uid != os.getuid() or st.st_mode & 0o022:
+        raise UnsafeTokenLockFile(
+                'The lock file\'s directory {!r} must belong to this user '
+                'and be writable by no one else (chmod go-w); it is {:o}, '
+                'owned by uid {}.'.format(
+                    directory, st.st_mode & 0o777, st.st_uid))
+
+
 def _open_lock_file(path):
     """Opens the lock file safely: inside a directory that is this user's
     alone, and never through a symlink. Raises UnsafeTokenLockFile
@@ -123,13 +156,7 @@ def _open_lock_file(path):
                 'directory without following a symlink: {}'.format(
                     directory, e.strerror)) from None
     try:
-        st = os.fstat(dir_fd)
-        if st.st_uid != os.getuid() or st.st_mode & 0o022:
-            raise UnsafeTokenLockFile(
-                    'The lock file\'s directory {!r} must belong to this '
-                    'user and be writable by no one else; it is {:o}, owned '
-                    'by uid {}.'.format(directory, st.st_mode & 0o777,
-                                        st.st_uid))
+        _check_directory_fd(dir_fd, directory)
         try:
             fd = os.open(os.path.basename(path),
                          os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600,
@@ -156,14 +183,23 @@ def _number(value):
     return value if math.isfinite(value) else -math.inf
 
 
+#: A login dated further ahead than this is a wrong clock's, not newer.
+_FUTURE_SLACK = 60 * 60
+
+
 def _order(wrapped):
     '''What a stored token is ordered by: its login's creation time, then
-    its access token's expiry.'''
+    its access token's expiry. A login dated more than an hour ahead ranks
+    oldest, so a wrong clock's token cannot outrank every sign-in after it,
+    nor its own refreshes outrank a sign-in.'''
     if not isinstance(wrapped, dict):
         return (-math.inf, -math.inf)
     token = wrapped.get('token')
     expires_at = token.get('expires_at') if isinstance(token, dict) else None
-    return (_number(wrapped.get('creation_timestamp')), _number(expires_at))
+    created = _number(wrapped.get('creation_timestamp'))
+    if created > time.time() + _FUTURE_SLACK:
+        return (-math.inf, -math.inf)
+    return (created, _number(expires_at))
 
 
 def is_at_least_as_new(ours, theirs):
@@ -234,6 +270,7 @@ class SharedTokenFile:
         self.token_path = token_path
         self.lock_path = lock_path
         self.lock_timeout = _check_timeout(lock_timeout)
+        _check_lock_directory(self._lock_file(self._key()))
         self.read_bytes = read_bytes or _default_read_bytes
         self.write_bytes = write_bytes or default_write
         # When the client's current token arrived, as written or loaded.
