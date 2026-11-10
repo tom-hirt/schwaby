@@ -141,6 +141,18 @@ _KNOWN_SERVICES = frozenset((
     'SCREENER_OPTION',
 ))
 
+def _is_known_service(service):
+    '''Whether ``service`` is one this client dispatches to. A notice on any
+    other -- ``Invalid Service``, a name this version does not know, something
+    that is not a name -- is dispatched as well, and so reported as an
+    :class:`UnusableMessage` beside the notice, as every element was before
+    notices were told apart.'''
+    try:
+        return service in _KNOWN_SERVICES
+    except TypeError:
+        return False
+
+
 #: What Schwab has sent in place of a service name: an error label, not a
 #: service. Seen once, in the second before Schwab closed the connection, and
 #: documented nowhere. Matched exactly, since a real service could one day
@@ -451,7 +463,9 @@ class StreamNotice(SchwabError):
     connection at any given time from a given user") or 30 (stopped
     streaming). An element whose content is a list (or a custom decoder's
     tuple) is still dispatched to its service's handlers, with the notice
-    beside it. It reaches the
+    beside it; one on a service this client does not know is also reported
+    as an :class:`UnusableMessage`, as before notices were told apart. It
+    reaches the
     error handlers, and when the connection then
     closes it is the :class:`StreamClose`'s ``notice``.'''
 
@@ -2705,7 +2719,8 @@ class StreamClient(EnumEnforcer):
                 # a severing code beside, say, a fill cannot lose the fill.
                 # Schwab documents no such element; it costs nothing to be
                 # safe.
-                if not _is_sequence(d.get('content')):
+                if (not _is_sequence(d.get('content'))
+                        and _is_known_service(d.get('service'))):
                     continue
             await self._dispatch_to_handlers(
                     d.get('service'), d, relabel=True)
@@ -2719,8 +2734,10 @@ class StreamClient(EnumEnforcer):
             if notice is not None:
                 await self._report_notice(notice, d)
                 # As on the data channel: content beside a notice is still
-                # dispatched.
-                if not _is_sequence(d.get('content')):
+                # dispatched, and so is a notice on a service the client does
+                # not know.
+                if (not _is_sequence(d.get('content'))
+                        and _is_known_service(d.get('service'))):
                     continue
             # Not every notify message is guaranteed to name a service, and
             # one that does not must not raise out of here.

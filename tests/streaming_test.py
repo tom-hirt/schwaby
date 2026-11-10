@@ -6226,6 +6226,46 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_notice_on_an_unknown_service_is_also_unusable(
+            self, ws_connect):
+        for name, frame, expected in (
+                ('a name this version does not know',
+                 {'data': [{'service': 'BOGUS', 'code': 12}]},
+                 ['StreamNotice', 'UnusableMessage']),
+                ('Invalid Service',
+                 {'notify': [{'service': 'Invalid Service', 'code': 12,
+                              'content': {'msg': 'x'}}]},
+                 ['StreamNotice', 'UnusableMessage']),
+                ('not a name', {'notify': [{'service': ['x'], 'code': 30}]},
+                 ['StreamNotice', 'UnusableMessage']),
+                ('ADMIN', {'notify': [{'service': 'ADMIN', 'content': {
+                    'code': 12, 'msg': 'bumped'}}]}, ['StreamNotice']),
+                ('no service', {'notify': [{'code': 12}]}, ['StreamNotice']),
+                ('a known service without a content list',
+                 {'data': [{'service': 'ACCT_ACTIVITY', 'code': 12,
+                            'content': {'x': 1}}]}, ['StreamNotice'])):
+            with self.subTest(name):
+                self.setUp()
+                socket = await self.login_and_get_socket(ws_connect)
+                handled = []
+                self.client.add_account_activity_handler(handled.append)
+                reported = []
+                self.client.add_error_handler(
+                        lambda service, exc, message: reported.append(
+                            type(exc).__name__))
+                socket.recv.side_effect = [
+                        json.dumps(frame),
+                        json.dumps({'notify': [{'heartbeat': '1'}]})]
+                await self.client.handle_message()
+                await self.client.handle_message()
+                self.assertEqual(expected, reported,
+                                 'an unknown service was not reported as '
+                                 'unusable beside its notice')
+                self.assertEqual([], handled,
+                                 'a notice without content reached a handler')
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_an_admin_notice_is_reported_not_dropped(self, ws_connect):
         from schwaby.streaming import StreamNotice
         socket = await self.login_and_get_socket(ws_connect)

@@ -10486,24 +10486,43 @@ CASES += [
 CASES += [
     Case('stream-notice/a-data-notice-still-dispatches-its-content',
          'schwaby/streaming.py',
-         "                if not _is_sequence(d.get('content')):\n                    continue\n            await self._dispatch_to_handlers(\n                    d.get('service'), d, relabel=True)",
+         "                if (not _is_sequence(d.get('content'))\n                        and _is_known_service(d.get('service'))):\n                    continue\n            await self._dispatch_to_handlers(\n                    d.get('service'), d, relabel=True)",
          "                continue\n            await self._dispatch_to_handlers(\n                    d.get('service'), d, relabel=True)",
          'tests/streaming_test.py::StreamClientTest::test_a_notice_on_a_data_element_does_not_take_its_content',
          'a notice on a data element took its content away'),
     Case('stream-notice/a-tuple-of-content-is-still-dispatched',
          'schwaby/streaming.py',
-         "                if not _is_sequence(d.get('content')):\n                    continue\n            await self._dispatch_to_handlers(\n                    d.get('service'), d, relabel=True)",
-         "                if not isinstance(d.get('content'), list):\n                    continue\n            await self._dispatch_to_handlers(\n                    d.get('service'), d, relabel=True)",
+         "                if (not _is_sequence(d.get('content'))\n                        and _is_known_service(d.get('service'))):\n                    continue\n            await self._dispatch_to_handlers(\n                    d.get('service'), d, relabel=True)",
+         "                if (not isinstance(d.get('content'), list)\n                        and _is_known_service(d.get('service'))):\n                    continue\n            await self._dispatch_to_handlers(\n                    d.get('service'), d, relabel=True)",
          'tests/streaming_test.py::StreamClientTest::test_a_notice_does_not_take_content_on_any_channel_or_shape',
          'a notice took its content away',
          subtest='a tuple'),
     Case('stream-notice/a-notify-notice-still-dispatches-its-content',
          'schwaby/streaming.py',
-         "                # As on the data channel: content beside a notice is still\n                # dispatched.\n                if not _is_sequence(d.get('content')):\n                    continue\n",
+         "                # As on the data channel: content beside a notice is still\n                # dispatched, and so is a notice on a service the client does\n                # not know.\n                if (not _is_sequence(d.get('content'))\n                        and _is_known_service(d.get('service'))):\n                    continue\n",
          "                continue\n",
          'tests/streaming_test.py::StreamClientTest::test_a_notice_does_not_take_content_on_any_channel_or_shape',
          'a notice took its content away',
          subtest='the notify channel'),
+]
+
+# A notice on a service the client does not know is also reported as
+# unusable, as every element was before notices were told apart.
+CASES += [
+    Case('stream-notice/an-unknown-services-notice-is-also-unusable',
+         'schwaby/streaming.py',
+         '    try:\n        return service in _KNOWN_SERVICES\n    except TypeError:\n        return False\n',
+         '    return True\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_notice_on_an_unknown_service_is_also_unusable',
+         'an unknown service was not reported as unusable beside its notice',
+         subtest='Invalid Service'),
+    Case('stream-notice/a-known-services-notice-is-not-unusable',
+         'schwaby/streaming.py',
+         '    try:\n        return service in _KNOWN_SERVICES\n    except TypeError:\n        return False\n',
+         '    return False\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_notice_on_an_unknown_service_is_also_unusable',
+         '!=',
+         subtest='a known service without a content list'),
 ]
 
 # Out of the release red-proof (2026-11-09): entries on tooling, test
