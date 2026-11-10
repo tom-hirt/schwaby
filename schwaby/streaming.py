@@ -888,6 +888,8 @@ class StreamClient(EnumEnforcer):
         # durable record, and the callback is the convenience, so dropping the
         # oldest loses nothing that was not already written down.
         self._pending_reports = deque(maxlen=64)
+        # Set while a request holding the locks dispatches a frame.
+        self._defer_reports = False
 
         # How many messages this connection could not use, in total and by
         # kind. The count is per kind so that a flood of one does not silence
@@ -1792,13 +1794,26 @@ class StreamClient(EnumEnforcer):
                         self._fail_pending_request(exc)
                         raise
                     if frame is not ROUTED:
-                        # Not ours, so it belongs to handle_message. Set it
-                        # aside as it arrives rather than at the end: a
-                        # concurrent handle_message reads between our reads, so
-                        # holding frames back would let a later one be
-                        # dispatched first. appendleft here, pop from the right
-                        # in _receive, so arrival order is preserved.
-                        self._overflow_items.appendleft(frame)
+                        if self._overflow_items:
+                            # Frames are set aside already: this one goes
+                            # behind them, so they are dispatched in arrival
+                            # order. appendleft here, pop from the right in
+                            # _receive.
+                            self._overflow_items.appendleft(frame)
+                        else:
+                            # Dispatched now, still holding the read lock, so
+                            # no other reader can read and dispatch the next
+                            # frame first: each frame once, in arrival order.
+                            # The time the handlers take is not the
+                            # request's: the deadline moves by it.
+                            started = loop.time()
+                            self._defer_reports = True
+                            try:
+                                await self._process(frame)
+                            finally:
+                                self._defer_reports = False
+                            if deadline is not None:
+                                deadline += loop.time() - started
                 elif not done:
                     raise timed_out()
             finally:
@@ -2216,6 +2231,12 @@ class StreamClient(EnumEnforcer):
         against a second closer, or skip the report it exists to protect.
         Awaiting needs none of that.
         '''
+        if self._defer_reports:
+            # Made while a request that holds the locks dispatches a frame: an
+            # error handler may log in, which needs them. The request delivers
+            # these once it has released them, as it does its other reports.
+            self._pending_reports.append((exception, service, message))
+            return
         for error_handler in self._error_handlers:
             try:
                 result = error_handler(service, exception, message)
@@ -2444,6 +2465,14 @@ class StreamClient(EnumEnforcer):
             if msg is not ROUTED:
                 break
 
+        await self._process(msg)
+
+    async def _process(self, msg):
+        '''Dispatches one frame that is not the answer to a request: to its
+        handlers, its notices and heartbeats, a late answer's report.
+        ``handle_message`` calls it for each frame it reads, and so does a
+        request reading while it waits for its own answer, so that no frame
+        waits behind that answer.'''
         # Every read below assumes a mapping. `'data' in msg` tolerates a
         # top-level JSON array or string; `msg.get('data')` does not, so a
         # non-dict frame would raise. Guarded once, here, rather than at each

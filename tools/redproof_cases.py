@@ -9680,6 +9680,33 @@ CASES += [
          'NoneType'),
 ]
 
+# No frame held behind a request's answer (5.5.0): a request reading while
+# it waits dispatches each other frame as it arrives; the handlers' time is
+# not the request's; reports made in that dispatch wait for its locks to go.
+CASES += [
+    Case('stream-dispatch/a-waiting-request-dispatches-what-it-reads',
+         'schwaby/streaming.py',
+         '                                await self._process(frame)\n',
+         '                                self._overflow_items.appendleft(frame)\n',
+         'tests/streaming_test.py::StreamClientTest::test_messages_received_while_awaiting_response',
+         'called once'),
+    Case('stream-dispatch/handler-time-is-not-the-requests',
+         'schwaby/streaming.py',
+         '                            if deadline is not None:\n'
+         '                                deadline += loop.time() - started\n',
+         '',
+         'tests/streaming_test.py::StreamClientTest::test_handler_time_is_not_the_requests',
+         'timed out'),
+    Case('stream-dispatch/reports-in-a-wait-are-delivered-after-it',
+         'schwaby/streaming.py',
+         '        if self._defer_reports:\n'
+         '            # Made while a request that holds the locks dispatches a frame: an\n',
+         '        if False:\n'
+         '            # Made while a request that holds the locks dispatches a frame: an\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_handler_error_in_a_wait_is_reported_after_it',
+         'TimeoutError'),
+]
+
 # Out of the release red-proof (2026-11-09): entries on tooling, test
 # scaffolding, docs and CI, which leave it while their tests stay in the
 # gate, run on every merge; entries already removed or declared GREEN; and

@@ -172,6 +172,23 @@ is reading the socket hands the response to whoever is waiting for it, so a
 subscription made against a quiet stream is sent immediately rather than waiting
 for a message to arrive first.
 
+**Nothing waits behind a request's answer.** A ``subs``, ``add`` or ``unsubs``
+that reads the socket while it waits for its own answer hands every other
+frame it reads to your handlers there and then, as ``handle_message`` would:
+each frame once, in the order it arrived, whichever coroutine read it. The
+time your handlers take does not count against ``response_timeout``, and a
+handler that raises is logged and reported to your error handlers, never
+raised out of the ``subs``.
+
+.. note::
+
+  **Register handlers before you subscribe.** A frame that arrives while a
+  ``subs`` waits goes to the handlers registered at that moment, not to ones
+  added after it returns. And **a handler must not issue a stream command**:
+  it would wait on the request its own caller is in the middle of. Error
+  handlers may: a report made during the wait is delivered once the request
+  has finished.
+
 .. _stream_keys:
 
 **The keys.** Each ``subs``, ``add`` and ``unsubs`` takes a list or a tuple of

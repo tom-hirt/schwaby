@@ -671,7 +671,7 @@ class StreamClientTest(IsolatedAsyncioTestCase):
                                       [{'key': 'SECOND'}])
 
         # A request is in flight, so it is the one reading. The message it
-        # reads is not its response, so it sets it aside for handle_message.
+        # reads is not its response, so it dispatches it there and then.
         subscribe = asyncio.create_task(
                 self.client.chart_equity_subs(['GOOG']))
         await asyncio.sleep(0)
@@ -689,12 +689,16 @@ class StreamClientTest(IsolatedAsyncioTestCase):
             self.success_response(1, 'CHART_EQUITY', 'SUBS')))
 
         await asyncio.wait_for(subscribe, timeout=5)
+        # Whichever reader took SECOND, the listener gets this one.
+        await inbound.put(json.dumps(self.streaming_entry(
+                'CHART_EQUITY', 'SUBS', [{'key': 'THIRD'}])))
         await asyncio.wait_for(listener, timeout=5)
-        await asyncio.wait_for(self.client.handle_message(), timeout=5)
 
         # The message which arrived first must be handled first, even though a
         # request was reading when it arrived and a consumer read the next one.
-        self.assertEqual(['FIRST', 'SECOND'], seen)
+        self.assertEqual(['FIRST', 'SECOND'], seen[:2])
+        self.assertEqual(len(seen), len(set(seen)),
+                         'a frame was dispatched twice')
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
@@ -6323,6 +6327,88 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         self.assertEqual(beat_at, self.client.last_heartbeat_at)
 
     ##########################################################################
+    # No frame held behind a request's answer
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_frames_go_once_in_order_beside_a_concurrent_reader(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        inbound = asyncio.Queue()
+
+        async def recv():
+            return await inbound.get()
+        socket.recv.side_effect = recv
+        seen = []
+        self.client.add_chart_equity_handler(
+                lambda m: seen.append(m['content'][0]['key']))
+
+        async def reader():
+            while True:
+                await self.client.handle_message()
+        listening = asyncio.create_task(reader())
+        subscribe = asyncio.create_task(
+                self.client.chart_equity_add(['GOOG']))
+        keys = ['K%02d' % n for n in range(30)]
+        for n, key in enumerate(keys):
+            await inbound.put(json.dumps(self.streaming_entry(
+                    'CHART_EQUITY', 'SUBS', [{'key': key}])))
+            if n == 15:
+                await inbound.put(json.dumps(
+                    self.success_response(1, 'CHART_EQUITY', 'ADD')))
+            await asyncio.sleep(0)
+        await asyncio.wait_for(subscribe, timeout=5)
+        for _ in range(50):
+            if len(seen) == len(keys):
+                break
+            await asyncio.sleep(0.01)
+        listening.cancel()
+        self.assertEqual(keys, seen,
+                         'a frame was lost, doubled or reordered')
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_handler_error_in_a_wait_is_reported_after_it(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        mine = RuntimeError('mine')
+
+        def broken(msg):
+            raise mine
+        self.client.add_chart_equity_handler(broken)
+        reported = []
+
+        async def on_error(service, exc, message):
+            reported.append(exc)
+            # A stream command from the report: the request that read the
+            # frame has let its locks go by now.
+            await self.client.chart_equity_add(['MORE'])
+        self.client.add_error_handler(on_error)
+        socket.recv.side_effect = [
+            json.dumps(self.streaming_entry('CHART_EQUITY', 'SUBS')),
+            json.dumps(self.success_response(1, 'CHART_EQUITY', 'ADD')),
+            json.dumps(self.success_response(2, 'CHART_EQUITY', 'ADD'))]
+        with self.assertLogs('schwaby.streaming', 'ERROR'):
+            # Not raised from the subscribe.
+            await asyncio.wait_for(
+                    self.client.chart_equity_add(['INTC']), timeout=5)
+        self.assertEqual([mine], reported,
+                         'a handler error in a wait was not reported')
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_handler_time_is_not_the_requests(self, ws_connect):
+        self.client = StreamClient(self.http_client, response_timeout=0.3)
+        socket = await self.login_and_get_socket(ws_connect)
+        self.client.add_chart_equity_handler(lambda m: time.sleep(0.2))
+        socket.recv.side_effect = [
+            json.dumps(self.streaming_entry('CHART_EQUITY', 'SUBS')),
+            json.dumps(self.streaming_entry('CHART_EQUITY', 'SUBS')),
+            json.dumps(self.success_response(1, 'CHART_EQUITY', 'ADD'))]
+        # 0.4 s in handlers against a 0.3 s timeout.
+        await self.client.chart_equity_add(['INTC'])
+
+    ##########################################################################
     # Keys: refused when empty or one string, and batched when asked
 
     def sent_requests(self, socket):
@@ -6853,6 +6939,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         socket = await self.login_and_get_socket(ws_connect)
 
         stream_item = self.streaming_entry('CHART_EQUITY', 'SUBS')
+        handler = Mock()
+        async_handler = AsyncMock()
+        self.client.add_chart_equity_handler(handler)
+        self.client.add_chart_equity_handler(async_handler)
 
         socket.recv.side_effect = [
             json.dumps(self.success_response(1, 'CHART_EQUITY', 'SUBS')),
@@ -6862,11 +6952,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         await self.client.chart_equity_subs(['GOOG,MSFT'])
         await self.client.chart_equity_add(['INTC'])
 
-        handler = Mock()
-        async_handler = AsyncMock()
-        self.client.add_chart_equity_handler(handler)
-        self.client.add_chart_equity_handler(async_handler)
-        await self.client.handle_message()
+        # Dispatched while the request waited, not held for a later
+        # handle_message.
         handler.assert_called_once_with(stream_item['data'][0])
         async_handler.assert_called_once_with(stream_item['data'][0])
 
@@ -6877,6 +6964,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         socket = await self.login_and_get_socket(ws_connect)
 
         stream_item = self.streaming_entry('CHART_EQUITY', 'SUBS')
+        handler = Mock()
+        async_handler = AsyncMock()
+        self.client.add_chart_equity_handler(handler)
+        self.client.add_chart_equity_handler(async_handler)
 
         failed_add_response = self.success_response(2, 'CHART_EQUITY', 'ADD')
         failed_add_response['response'][0]['content']['code'] = 21
@@ -6890,11 +6981,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         with self.assertRaises(schwaby.streaming.UnexpectedResponseCode):
             await self.client.chart_equity_add(['INTC'])
 
-        handler = Mock()
-        async_handler = AsyncMock()
-        self.client.add_chart_equity_handler(handler)
-        self.client.add_chart_equity_handler(async_handler)
-        await self.client.handle_message()
+        # Dispatched while the request waited, not held for a later
+        # handle_message.
         handler.assert_called_once_with(stream_item['data'][0])
         async_handler.assert_called_once_with(stream_item['data'][0])
 
@@ -6905,6 +6993,10 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         socket = await self.login_and_get_socket(ws_connect)
 
         stream_item = self.streaming_entry('CHART_EQUITY', 'SUBS')
+        handler = Mock()
+        async_handler = AsyncMock()
+        self.client.add_chart_equity_handler(handler)
+        self.client.add_chart_equity_handler(async_handler)
 
         failed_add_response = self.success_response(999, 'CHART_EQUITY', 'ADD')
         failed_add_response['response'][0]['content']['code'] = 21
@@ -6918,11 +7010,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         with self.assertRaises(schwaby.streaming.UnexpectedResponse):
             await self.client.chart_equity_add(['INTC'])
 
-        handler = Mock()
-        async_handler = AsyncMock()
-        self.client.add_chart_equity_handler(handler)
-        self.client.add_chart_equity_handler(async_handler)
-        await self.client.handle_message()
+        # Dispatched while the request waited, not held for a later
+        # handle_message.
         handler.assert_called_once_with(stream_item['data'][0])
         async_handler.assert_called_once_with(stream_item['data'][0])
 
