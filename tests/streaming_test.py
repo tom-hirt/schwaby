@@ -6194,6 +6194,38 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_notice_does_not_take_content_on_any_channel_or_shape(
+            self, ws_connect):
+        # Content a decoder returns as a tuple, and content on the notify
+        # channel, are delivered as a list on the data channel is.
+        from schwaby.streaming import StreamJsonDecoder
+        fill = {'seq': 1, 'key': 'k', '1': '<ACCOUNT>',
+                '2': 'OrderFillCompleted', '3': '{}'}
+        for name, frame in (
+                ('a tuple', {'data': [{'service': 'ACCT_ACTIVITY',
+                                       'command': 'SUBS', 'code': 12,
+                                       'content': (fill,)}]}),
+                ('the notify channel', {'notify': [{
+                    'service': 'ACCT_ACTIVITY', 'code': 30,
+                    'content': [fill]}]})):
+            with self.subTest(name):
+                self.setUp()
+                socket = await self.login_and_get_socket(ws_connect)
+                seen = []
+                self.client.add_account_activity_handler(seen.append)
+                self.client.add_error_handler(lambda *a: None)
+
+                class Decoder(StreamJsonDecoder):
+                    def decode_json_string(self, raw):
+                        return frame
+                self.client.set_json_decoder(Decoder())
+                socket.recv.side_effect = ['frame']
+                await self.client.handle_message()
+                self.assertEqual(1, len(seen),
+                                 'a notice took its content away')
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_an_admin_notice_is_reported_not_dropped(self, ws_connect):
         from schwaby.streaming import StreamNotice
         socket = await self.login_and_get_socket(ws_connect)

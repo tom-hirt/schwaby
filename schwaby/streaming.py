@@ -445,11 +445,13 @@ class StreamLoginRefused(UnexpectedResponseCode):
 
 
 class StreamNotice(SchwabError):
-    '''A notice from Schwab's streaming server about the connection itself
-    rather than any data: one on the ``ADMIN`` service, or carrying a code
+    '''A notice from Schwab's streaming server about the connection itself:
+    one on the ``ADMIN`` service, or carrying a code
     Schwab documents as severing the stream, 12 ("a limit of 1 Streamer
     connection at any given time from a given user") or 30 (stopped
-    streaming). It reaches the error handlers, and when the connection then
+    streaming). An element that carries content as well is still
+    dispatched to its handlers, with the notice beside it. It reaches the
+    error handlers, and when the connection then
     closes it is the :class:`StreamClose`'s ``notice``.'''
 
     def __init__(self, frame, *args, code=None, msg=None, channel=None,
@@ -2702,7 +2704,7 @@ class StreamClient(EnumEnforcer):
                 # a severing code beside, say, a fill cannot lose the fill.
                 # Schwab documents no such element; it costs nothing to be
                 # safe.
-                if not isinstance(d.get('content'), list):
+                if not _is_sequence(d.get('content')):
                     continue
             await self._dispatch_to_handlers(
                     d.get('service'), d, relabel=True)
@@ -2715,11 +2717,14 @@ class StreamClient(EnumEnforcer):
             notice = self._notice_from(d, d.get('content'), 'notify')
             if notice is not None:
                 await self._report_notice(notice, d)
-            else:
-                # Not every notify message is guaranteed to name a service,
-                # and one that does not must not raise out of here.
-                await self._dispatch_to_handlers(
-                        d.get('service'), d, relabel=False)
+                # As on the data channel: content beside a notice is still
+                # dispatched.
+                if not _is_sequence(d.get('content')):
+                    continue
+            # Not every notify message is guaranteed to name a service, and
+            # one that does not must not raise out of here.
+            await self._dispatch_to_handlers(
+                    d.get('service'), d, relabel=False)
 
     ##########################################################################
     # LOGIN
