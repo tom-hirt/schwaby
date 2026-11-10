@@ -381,7 +381,7 @@ CASES = [
         if socket is not None:""",
          'tests/streaming_test.py::StreamClientTest'
          '::test_close_discards_unhandled_frames_from_the_dead_session',
-         '0 != 2'),
+         '0 != 1'),
 
     Case('streaming/data-channel-guard',
          'schwaby/streaming.py',

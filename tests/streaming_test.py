@@ -8773,19 +8773,24 @@ class StreamClientTest(IsolatedAsyncioTestCase):
             self, ws_connect):
         # _overflow_items holds frames read but not yet handled -- including
         # the late rejections the orphan path reports and data frames handlers
-        # would be given. Clearing only _pending_reports would leave the
-        # standalone framing leaking across sessions while the batched one did
-        # not, which is the asymmetry clearing both prevents.
+        # would be given. close() delivers them first; what a delivery cut
+        # short leaves is cleared, as the reports are, or it would leak into
+        # the next session.
         await self.login_and_get_socket(ws_connect)
 
+        def handler(m):
+            # As a close() cancelled while it delivers would be.
+            raise asyncio.CancelledError()
+        self.client.add_chart_equity_handler(handler)
+        self.client._overflow_items.appendleft(self.streaming_entry(
+                'CHART_EQUITY', 'SUBS', [{'key': 'X'}]))
         self.client._overflow_items.appendleft(
                 {'response': [{'service': 'ACCT_ACTIVITY', 'command': 'SUBS',
                                'requestid': '77',
                                'content': {'code': 21, 'msg': 'dead session'}}]})
-        self.client._overflow_items.appendleft(
-                self.streaming_entry('LEVELONE_EQUITIES', 'SUBS'))
 
-        await self.client.close()
+        with self.assertRaises(asyncio.CancelledError):
+            await self.client.close()
 
         self.assertEqual(0, len(self.client._overflow_items))
 

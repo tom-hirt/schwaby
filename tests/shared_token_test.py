@@ -398,7 +398,10 @@ class SignInTest(SharedTokenTestCase):
     def test_a_sign_in_replaces_a_token_dated_in_the_future(self):
         future = st.write_token_file(self.path, created_days_ago=0)
         stored = self.stored()
-        stored['creation_timestamp'] = future['creation_timestamp'] + 86400
+        # Ten minutes ahead: inside the hour a wrong clock is allowed, so it
+        # still outranks a sign-in by date. Only the sign-in's own say-so lets
+        # the sign-in through. (One a day ahead ranks oldest, and would.)
+        stored['creation_timestamp'] = future['creation_timestamp'] + 600
         with open(self.path, 'w') as f:
             json.dump(stored, f)
         self.endpoint.answer_exchange(st.token(access_token='SIGNED-IN'))
