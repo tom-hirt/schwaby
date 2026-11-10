@@ -1114,8 +1114,10 @@ class StreamClient(EnumEnforcer):
         # with nothing closing it. Failure to close is logged, not raised: the
         # login is the operation the caller asked for.
         previous, self._socket = self._socket, None
-        # A notice is its connection's: the old one's goes with it, and not
-        # before, so a login that fails first keeps a bump said as one.
+        # A notice is its connection's: cleared here, not when the login
+        # starts, so a login that fails first keeps a bump said as one; and
+        # again once the new socket is open, for one the old socket gave a
+        # reader while this waited.
         self._last_notice = None
         if previous is not None:
             try:
@@ -1127,6 +1129,7 @@ class StreamClient(EnumEnforcer):
 
         self._socket = await ws_client.connect(
                 wss_url, **websocket_connect_args)
+        self._last_notice = None
 
         # Cleared *after* the new socket is in place, not before. Anything
         # still queued belongs to the connection being replaced: its exception
@@ -1192,12 +1195,15 @@ class StreamClient(EnumEnforcer):
                                                         notice)
         self._close_due = True
 
-    async def _login_failed(self, kind):
+    async def _login_failed(self, kind, *, before_the_swap=False):
         '''Says how a login failed, in last_close. The close handlers are not
         called: no connection ended, the caller of login() gets the error,
         and a handler that logged in again would call itself until the stack
         ran out.'''
-        self.last_close = StreamClose(kind, notice=self._last_notice)
+        # Before the socket is swapped, the notice is the old connection's,
+        # and kept for its close: not this failure's.
+        self.last_close = StreamClose(
+                kind, notice=None if before_the_swap else self._last_notice)
 
     async def _run_close_handlers(self, *, drain_first=False):
         '''Runs the close handlers once for the close found, and makes any
@@ -2761,18 +2767,22 @@ class StreamClient(EnumEnforcer):
             await self._login_failed(
                     StreamCloseKind.DEAD_TOKEN
                     if e.kind == TokenErrorKind.DEAD_TOKEN
-                    else StreamCloseKind.CONNECTION_LOST)
+                    else StreamCloseKind.CONNECTION_LOST,
+                    before_the_swap=True)
             raise
         except Exception:
-            await self._login_failed(StreamCloseKind.CONNECTION_LOST)
+            await self._login_failed(StreamCloseKind.CONNECTION_LOST,
+                                     before_the_swap=True)
             raise
         # Not an assert, which -O strips. A refusal is the HTTPStatusError it
         # always was; a success other than 200 is not one this reads.
         if not 200 <= r.status_code < 300:
-            await self._login_failed(StreamCloseKind.CONNECTION_LOST)
+            await self._login_failed(StreamCloseKind.CONNECTION_LOST,
+                                     before_the_swap=True)
             r.raise_for_status()
         if r.status_code != httpx2.codes.OK:
-            await self._login_failed(StreamCloseKind.CONNECTION_LOST)
+            await self._login_failed(StreamCloseKind.CONNECTION_LOST,
+                                     before_the_swap=True)
             raise UnexpectedResponse(
                     r, 'the preferences call answered {}, not 200'.format(
                         r.status_code))

@@ -9825,8 +9825,8 @@ CASES += [
          'close to have been awaited'),
     Case('stream-login/a-failed-login-calls-no-close-handler',
          'schwaby/streaming.py',
-         '        self.last_close = StreamClose(kind, notice=self._last_notice)',
-         '        self.last_close = StreamClose(kind, notice=self._last_notice)\n        self._close_due = True\n        await self._run_close_handlers()',
+         '                kind, notice=None if before_the_swap else self._last_notice)',
+         '                kind, notice=None if before_the_swap else self._last_notice)\n        self._close_due = True\n        await self._run_close_handlers()',
          'tests/streaming_test.py::StreamClientTest::test_a_close_handler_that_logs_in_does_not_recurse',
          'called the close handlers again'),
     Case('shared/the-lock-directory-is-checked-up-front',
@@ -9978,8 +9978,7 @@ CASES += [
 
 # Round-one fixes to 5.5.1: a sign-in reads the file best-effort; a time too
 # large for a float, a record too long, or two records naming each other
-# decide nothing; a client's own record is compared; a cancelled drain
-# leaves the close due.
+# decide nothing; a client's own record is compared.
 CASES += [
     Case('shared/a-sign-in-reads-the-file-best-effort',
          'schwaby/_shared_token.py',
@@ -10021,8 +10020,7 @@ CASES += [
          "a refresh by its own reader's client dropped the record"),
 ]
 
-# Round three: a login in the reports that fails or is cancelled leaves the
-# close due; last_close is reset only by a login that succeeds (5.5.1).
+# Round three: last_close is reset only by a login that succeeds (5.5.1).
 CASES += [
     Case('stream-close/a-login-in-flight-keeps-last-close',
          'schwaby/streaming.py',
@@ -10037,6 +10035,12 @@ CASES += [
          '        await self._deliver_set_aside()\n        self._last_notice = None\n        old_socket = self._socket\n',
          'tests/streaming_test.py::StreamClientTest::test_a_login_that_fails_keeps_the_notice_before_it',
          'a failed login lost the bump before it'),
+    Case('stream-login/a-failure-before-the-swap-takes-no-old-notice',
+         'schwaby/streaming.py',
+         '                kind, notice=None if before_the_swap else self._last_notice)',
+         '                kind, notice=self._last_notice)',
+         'tests/streaming_test.py::StreamClientTest::test_a_login_failing_first_does_not_take_the_old_notice',
+         "a failed login took the old connection's notice"),
     Case('stream-notice/says-its-channel',
          'schwaby/streaming.py',
          "                code=code, msg=msg, channel=channel, requestid=requestid)",
@@ -10069,9 +10073,8 @@ CASES += [
          'AttributeError'),
 ]
 
-# Round five: only a login that succeeds clears a close still due; a call
-# that waited on a cancelled run says the close; preferences that do not
-# read leave the old connection as it was (5.5.1).
+# Round five: preferences that do not read leave the old connection as it
+# was (5.5.1).
 CASES += [
     Case('stream-login/unreadable-preferences-leave-the-connection',
          'schwaby/streaming.py',

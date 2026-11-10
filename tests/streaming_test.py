@@ -6621,10 +6621,26 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         self.assertEqual('bumped', self.client.last_close.kind,
                          'a failed login lost the bump before it')
 
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_login_failing_first_does_not_take_the_old_notice(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        notice = {'notify': [{'service': 'ADMIN',
+                              'content': {'code': 12, 'msg': 'bumped'}}]}
+        socket.recv.side_effect = [json.dumps(notice)]
+        await self.client.handle_message()
+        self.http_client.get_user_preferences.side_effect = RuntimeError(
+                'down')
+        with self.assertRaises(RuntimeError):
+            await self.client.login()
+        self.assertIsNone(self.client.last_close.notice,
+                          "a failed login took the old connection's notice")
+
     async def cancel_a_login_in_the_reports(self, ws_connect, fails):
         '''A close found while a report is queued; the error handler logs in
         again, and its login, or the wait after it fails, is cancelled by a
-        wait_for. Returns what the handlers saw.'''
+        wait_for.'''
         socket = await self.login_and_get_socket(ws_connect)
         events = []
 
@@ -6646,8 +6662,6 @@ class StreamClientTest(IsolatedAsyncioTestCase):
                         lambda: hang())
                 await self.client.login()
         self.client.add_error_handler(relogin)
-        self.client.add_close_handler(
-                lambda close: events.append(('close', close.close_code)))
         queued = []
 
         def closing():
@@ -6659,7 +6673,6 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         socket.recv.side_effect = closing
         with self.assertRaises(asyncio.TimeoutError):
             await asyncio.wait_for(self.client.handle_message(), 0.2)
-        return events
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)

@@ -501,14 +501,17 @@ reported, so an ``except`` clause for it never runs. Every one inherits
 .. autoexception:: schwaby.streaming.UnexpectedResponseCode
 .. autoexception:: schwaby.streaming.StreamLoginRefused
 .. autoexception:: schwaby.streaming.StreamNotice
-
-A notice's ``channel`` tells a refused answer to a request the client no
-longer waits on (``'response'``, with its ``requestid``) from a notice Schwab
-volunteered (``'notify'`` or ``'data'``).
-
-.. autofunction:: schwaby.streaming.is_success_code
 .. autoexception:: schwaby.streaming.UnparsableMessage
 .. autoexception:: schwaby.streaming.UnusableMessage
+
+A notice's ``channel`` says where it came. ``'response'`` is an answer to no
+request the client is waiting on, with its ``requestid``: an ``ADMIN`` one
+other than to a login or logout, whatever its code, or one carrying a
+severing code. ``'notify'`` and ``'data'`` are notices Schwab volunteered. A
+late refusal on any other service is not a notice: it reaches the error
+handlers as :class:`~schwaby.streaming.UnexpectedResponseCode`.
+
+.. autofunction:: schwaby.streaming.is_success_code
 
 ``UnexpectedResponseCode``, and ``StreamLoginRefused`` with it, carries the
 refusal's parts read from the element that refused: ``service`` and
