@@ -17,22 +17,30 @@ inside a content item. An item it cannot place is :attr:`UNKNOWN
 <AccountActivityKind.UNKNOWN>`, and a doubtful one is never a fill.
 '''
 
+import collections.abc
 import dataclasses
 import enum
 
 from .util import UnparsableMessageData, decode_decimal, parse_message_data
 
 
-#: The most nodes of ``MESSAGE_DATA`` read, and the deepest nesting. A payload
-#: past either is :attr:`AccountActivityKind.UNKNOWN`, ``problem='too_large'``.
+#: The most nodes of ``MESSAGE_DATA`` read, the deepest nesting, and the most
+#: characters of keys and text. A payload past any is
+#: :attr:`AccountActivityKind.UNKNOWN`, ``problem='too_large'``.
 MAX_NODES = 4000
 MAX_DEPTH = 64
+MAX_TEXT = 1_000_000
+#: The most symbols listed in :attr:`AccountActivityEvent.symbols`.
+MAX_SYMBOLS = 32
 
 _SYMBOL_KEYS = ('Symbol', 'PrimaryMarketSymbol', 'UnderlyingSymbol')
 _RELATED_ORDER_KEYS = ('ParentSchwabOrderID', 'LifecycleSchwabOrderID',
                        'LegParentSchwabOrderID')
 # Fragments of an ExecutionTransType that say the execution filled nothing.
 _NOT_A_FILL = ('UROUT', 'CANCEL', 'BUST', 'REJECT')
+# Keys that only a cancel's events have carried. On an item that says it is
+# a fill, any of them anywhere, whatever its value, makes it doubtful.
+_CANCEL_KEYS = ('CancelType', 'OutCancelType', 'CancelRequestType')
 
 
 class AccountActivityKind(str, enum.Enum):
@@ -165,7 +173,7 @@ class Cancel:
     leg_sub_status: object = None
 
 
-@dataclasses.dataclass(frozen=True, repr=False)
+@dataclasses.dataclass(frozen=True, repr=False, eq=False)
 class AccountActivityEvent:
     '''One ``ACCT_ACTIVITY`` content item, read. Its ``repr`` and ``str``
     leave out the account, ``data`` and ``raw``, which carry account numbers
@@ -189,7 +197,8 @@ class AccountActivityEvent:
     #: :func:`read_account_activity`), else None.
     symbol: object = None
     #: Every ``Symbol``, ``PrimaryMarketSymbol`` and ``UnderlyingSymbol`` in
-    #: the item, as ``(path, value)`` pairs.
+    #: the item, as ``(path, value)`` pairs, the path a tuple of keys: at most
+    #: :data:`MAX_SYMBOLS` of them.
     symbols: tuple = ()
     #: ``BuySellCode``, as sent, or None.
     side: object = None
@@ -238,7 +247,8 @@ def _id(value):
 def _int(value):
     if isinstance(value, int) and not isinstance(value, bool):
         return value
-    if isinstance(value, str) and value.isdigit() and value.isascii():
+    if (isinstance(value, str) and value.isascii() and value.isdigit()
+            and len(value) <= 18):
         return int(value)
     return None
 
@@ -268,16 +278,21 @@ def _get(mapping, *path):
 
 
 def _within_bounds(value):
-    '''Whether ``value`` has at most MAX_NODES nodes and MAX_DEPTH levels.'''
+    '''Whether ``value`` has at most MAX_NODES nodes, MAX_DEPTH levels and
+    MAX_TEXT characters of keys and text.'''
     stack = [(value, 0)]
-    nodes = 0
+    nodes = text = 0
     while stack:
         node, depth = stack.pop()
         nodes += 1
-        if nodes > MAX_NODES or depth > MAX_DEPTH:
+        if isinstance(node, str):
+            text += len(node)
+        if nodes > MAX_NODES or depth > MAX_DEPTH or text > MAX_TEXT:
             return False
         if isinstance(node, dict):
-            stack.extend((v, depth + 1) for v in node.values())
+            for key, child in node.items():
+                text += len(key) if isinstance(key, str) else 0
+                stack.append((child, depth + 1))
         elif isinstance(node, list):
             stack.extend((v, depth + 1) for v in node)
     return True
@@ -314,19 +329,41 @@ def _first_leg(data):
     return None
 
 
-def _event_block(data, message_type):
-    '''The event's own block under ``BaseEvent``: the one whose key begins
+def _event_blocks(data, message_type):
+    '''The event's own blocks under ``BaseEvent``: those whose key begins
     with the event's type, such as
-    ``OrderFillCompletedEventOrderLegQuantityInfo``.'''
+    ``OrderFillCompletedEventOrderLegQuantityInfo``. One is expected.'''
     base = _get(data, 'BaseEvent')
     if not isinstance(base, dict) or not isinstance(message_type, str):
-        return None
+        return []
     folded = message_type.casefold().replace(' ', '')
-    for key, value in base.items():
-        if (isinstance(key, str) and isinstance(value, dict)
-                and key.casefold().replace(' ', '').startswith(folded)):
-            return value
-    return None
+    return [value for key, value in base.items()
+            if isinstance(key, str) and isinstance(value, dict)
+            and key.casefold().replace(' ', '').startswith(folded)]
+
+
+def _doubtful_fill(data, message_type, blocks):
+    '''Whether an item that says it is a fill shows any sign that it is not
+    one, anywhere in it: so that a doubtful item is never a fill.'''
+    if len(blocks) != 1 or not isinstance(_get(blocks[0], 'ExecutionInfo'),
+                                         dict):
+        return True
+    event_type = _get(data, 'BaseEvent', 'EventType')
+    if event_type is not None and not (
+            isinstance(event_type, str)
+            and _fold(event_type) == _fold(message_type)):
+        return True
+    for _, key, child in _walk(data):
+        if key in _CANCEL_KEYS:
+            return True
+        if key == 'ExecutionTransType' and not (
+                isinstance(child, str) and _fold(child) == 'FILL'):
+            return True
+    return False
+
+
+def _fold(text):
+    return text.upper().replace(' ', '')
 
 
 def _cancel_signal(info):
@@ -370,7 +407,10 @@ def _execution(block):
             leaves_quantity=_decimal(leaves),
             average_price=_decimal(_get(quantity, 'AveragePrice')),
             principal=_decimal(principal),
-            price_improvement=_decimal(_get(info, 'PriceImprovement')),
+            price_improvement=_decimal(
+                _get(info, 'PriceImprovement')
+                if _get(info, 'PriceImprovement') is not None
+                else _get(block, 'PriceImprovement')),
             commission=_decimal(commission),
             sec_fee=_decimal(_get(fees, 'SECFees')),
             taf=_decimal(_get(fees, 'TAF')),
@@ -414,18 +454,25 @@ def read_account_activity(item):
     :attr:`AccountActivityKind.UNKNOWN`.
 
     **A fill is** ``OrderFillCompleted`` **and nothing else**, and then only
-    with no sign of a cancel: no ``ExecutionTransType`` of UROut, Cancel,
-    Bust or Reject, and no ``CancelType``. A fragment of a type never makes
-    anything a fill, and ``ExecutionCreated`` is
-    :attr:`~AccountActivityKind.EXECUTION` whatever it carries, so summing
+    with no sign anywhere in the item that it is not one: exactly one event
+    block of that type, carrying an ``ExecutionInfo``; no ``EventType`` that
+    names another; every ``ExecutionTransType`` ``Fill``; and no
+    ``CancelType``, ``OutCancelType`` or ``CancelRequestType`` at all. A
+    fragment of a type never makes anything a fill, and ``ExecutionCreated``
+    is :attr:`~AccountActivityKind.EXECUTION` whatever it carries, so summing
     ``execution.execution_quantity`` over fills counts each execution once.
 
     ``symbol`` is the first order leg's ``Security/Symbol`` on
     ``OrderCreated``, and otherwise the shallowest ``Symbol`` in the event
     outside any ``QuoteOnOrderAcceptance``, when it is a non-empty ``str``.
-    ``symbols`` lists every symbol in the item, for a caller that must refuse
-    an ambiguous one.
+    ``side`` and ``asset_type`` come from the order leg on ``OrderCreated``
+    only: on a fill they are the fill's own, or None, since an order's first
+    leg need not be the leg that filled. ``symbols`` lists the symbols in the
+    item, for a caller that must refuse an ambiguous one.
     '''
+    if isinstance(item, collections.abc.Mapping) and not isinstance(
+            item, dict):
+        item = dict(item)
     if not isinstance(item, dict):
         raise TypeError('an ACCT_ACTIVITY content item is a mapping, not '
                         '{}'.format(type(item).__name__))
@@ -452,10 +499,13 @@ def _read(item):
         return AccountActivityEvent(AccountActivityKind.UNKNOWN,
                                     problem='unparsable_message_data',
                                     **common)
-    folded = (message_type.upper().replace(' ', '')
-              if isinstance(message_type, str) else None)
+    # A type outside ASCII folds unpredictably (a dotless i, a ligature), so
+    # it is never matched against the known ones.
+    folded = (_fold(message_type)
+              if isinstance(message_type, str) and message_type.isascii()
+              else None)
     if isinstance(data, str):
-        if not folded:
+        if isinstance(message_type, str) and not message_type.strip():
             return AccountActivityEvent(AccountActivityKind.NOTICE,
                                         notice=data, data=data, **common)
         return AccountActivityEvent(AccountActivityKind.UNKNOWN, data=data,
@@ -470,25 +520,27 @@ def _read(item):
         return AccountActivityEvent(AccountActivityKind.UNKNOWN, data=data,
                                     **common)
 
-    block = _event_block(data, message_type)
+    blocks = _event_blocks(data, message_type)
+    block = blocks[0] if blocks else None
     info = _get(block, 'ExecutionInfo')
-    if kind is AccountActivityKind.FILL:
-        trans = _get(info, 'ExecutionTransType')
-        if (block is None or _cancel_signal(info)
-                or (trans is not None and not (
-                    isinstance(trans, str)
-                    and trans.upper().replace(' ', '') == 'FILL'))):
-            kind = AccountActivityKind.UNKNOWN
+    if kind is AccountActivityKind.FILL and _doubtful_fill(
+            data, message_type, blocks):
+        kind = AccountActivityKind.UNKNOWN
 
-    leg = _first_leg(data)
+    leg = (_first_leg(data) if kind is AccountActivityKind.ORDER_CREATED
+           else None)
     if kind is AccountActivityKind.ORDER_CREATED:
         symbol = _text(_get(leg, 'Security', 'Symbol'))
     else:
         symbol = _text(_first(block, 'Symbol',
                               outside=('QuoteOnOrderAcceptance',)))
-    symbols = tuple(('/'.join(at + (name,)), child)
-                    for at, name, child in _walk(data)
-                    if name in _SYMBOL_KEYS and _text(child))
+    symbols = []
+    for at, name, child in _walk(data):
+        if name in _SYMBOL_KEYS and _text(child):
+            symbols.append((at + (name,), child))
+            if len(symbols) == MAX_SYMBOLS:
+                break
+    symbols = tuple(symbols)
     related = {}
     for key in _RELATED_ORDER_KEYS:
         value = _id(_first(data, key))
