@@ -26,6 +26,59 @@ what each entry says changed, is the same.
 
 ---
 
+## 5.7.0
+
+*2026-11-10*
+
+A minor release: one fix that 5.5.0 and 5.6.0 users need, and a new,
+opt-in module that reads account activity into typed events. Nothing
+public is removed.
+
+### Fixed: data beside a stream notice is always delivered
+
+**Upgrade from 5.5.0 or 5.6.0.** Since 5.5.0, a data or notify element
+carrying a severing code (12 or 30) at its own level was reported to the
+error handlers as a `StreamNotice`, and its content was not dispatched. On
+`ACCT_ACTIVITY` that content would be a fill, which then never reached the
+handler. Schwab documents no such element and none has been captured, but
+nothing rules it out. An element whose content is a list, or a custom
+decoder's tuple, is now dispatched to its handlers, with the notice
+reported beside it.
+
+A notice on a service the client does not know -- `Invalid Service`, a name
+this version does not know, or something that is not a name -- is again
+reported as an `UnusableMessage` beside the `StreamNotice`, as every such
+element was before 5.5.0 told notices apart.
+
+### Added: a typed account-activity event
+
+`schwaby.contrib.account_activity.read_account_activity(item)` reads one
+`ACCT_ACTIVITY` content item into an `AccountActivityEvent`:
+- its kind;
+- the top-level order id;
+- the symbol, side and asset type;
+- on a fill or an execution, every quantity, price, charge and timestamp.
+It is opt-in: handlers still receive the message as before. It is pure,
+never raises on what an item holds, never logs, and keeps the account out
+of its repr. Every number is a `Decimal` or `None`, never a float, and
+`None` means absent, never zero.
+
+**Only `FILL` is a fill.** It is `OrderFillCompleted` carrying every sign
+of a fill and no sign of anything else. `ExecutionCreated` is never a fill,
+since a cancel emits one with a non-zero quantity, and anything doubtful is
+`UNKNOWN`. Each rule was checked against key counts over 682 real fills one
+consumer recorded, partial fills included. Option and multi-leg fills were
+not among them. De-duplicate on `execution.execution_id` before booking,
+since a replay delivers an item again.
+
+### Fixed: a shared token file's refresh
+
+`ensure_token_fresh` on a client sharing a token file sends nothing when
+another thread refreshed while it waited for the file's lock, and refreshes
+again only if the token it then holds is still inside its margin. A second
+refresh that took a newer token instead of sending is reported as `FRESH`,
+not `REFRESHED`.
+
 ## 5.6.0
 
 *2026-11-10*
