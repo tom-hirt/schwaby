@@ -482,8 +482,73 @@ reported, so an ``except`` clause for it never runs. Every one inherits
 .. autoexception:: schwaby.streaming.ResponseTimeoutError
 .. autoexception:: schwaby.streaming.UnexpectedResponse
 .. autoexception:: schwaby.streaming.UnexpectedResponseCode
+.. autoexception:: schwaby.streaming.StreamLoginRefused
+.. autoexception:: schwaby.streaming.StreamNotice
 .. autoexception:: schwaby.streaming.UnparsableMessage
 .. autoexception:: schwaby.streaming.UnusableMessage
+
+``UnexpectedResponseCode``, and ``StreamLoginRefused`` with it, carries the
+refusal's parts read from the element that refused: ``service`` and
+``command``, ``code`` (an ``int``, or ``None`` when the frame's is not one) and
+``msg`` (a ``str`` or ``None``). The whole frame stays in ``response``.
+
+.. _stream_close:
+
+~~~~~~~~~~~~~~~~~~~~~~~
+When the stream ends
+~~~~~~~~~~~~~~~~~~~~~~~
+
+A closed connection still raises the websockets exception it always has, a
+clean close as ``ConnectionClosedOK``. Beside it, the stream says how it ended:
+``last_close`` holds a
+:class:`~schwaby.streaming.StreamClose` once a connection has ended, set
+before the call that finds the close raises, and reset by
+:meth:`~schwaby.streaming.StreamClient.login`. A handler registered with
+:meth:`~schwaby.streaming.StreamClient.add_close_handler` is called with it
+once for each connection, before that raise, whichever call found the close.
+
+.. code-block:: python
+
+  def on_close(close):
+      if close.kind == 'bumped':
+          alert('another login took this Schwab user\'s stream')
+
+  stream_client.add_close_handler(on_close)
+
+A login that fails sets it too: ``login_refused`` when Schwab refuses the
+LOGIN, which raises :class:`~schwaby.streaming.StreamLoginRefused` with its
+socket closed; ``dead_token`` when the preferences call finds the refresh
+token dead, the :class:`~schwaby.utils.TokenRefreshError` propagating as it
+always has; ``connection_lost`` for any other failure there.
+
+.. warning::
+
+  **A bump is not yet told apart from Schwab cycling the server.** Measured,
+  another login taking the stream closes this one cleanly (1000). Whether
+  Schwab sends a notice first, which would make it ``bumped`` rather than
+  ``server_closed``, is unmeasured. A notice on the ``ADMIN`` service, or one
+  carrying a severing code (12 or 30), reaches the error handlers as a
+  :class:`~schwaby.streaming.StreamNotice` and is kept as the close's
+  ``notice``.
+
+``last_frame_at`` and
+``last_heartbeat_at`` say, as
+``time.monotonic()``, when the last frame and the last heartbeat arrived:
+plain attributes, safe to read from another thread, and any frame counts,
+one that will not parse included. A handler registered with
+:meth:`~schwaby.streaming.StreamClient.add_heartbeat_handler` is called with
+each heartbeat's value. **Schwab documents no heartbeat interval and none is
+measured**, so nothing here decides when a quiet stream is dead; a
+threshold is the caller's.
+
+.. automethod:: schwaby.streaming.StreamClient.add_close_handler
+.. automethod:: schwaby.streaming.StreamClient.add_heartbeat_handler
+.. autoclass:: schwaby.streaming.StreamClose
+  :members:
+.. autoclass:: schwaby.streaming.StreamCloseKind
+  :members:
+  :undoc-members:
+  :member-order: bysource
 
 .. _data_field_relabeling:
 

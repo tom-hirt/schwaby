@@ -999,6 +999,8 @@ class UtilsTest(unittest.TestCase):
             'UnusableAccountNumbersError': ('m',),
             'UnusableOrderActivityError': ('m',),
             'NoBrowserAvailable': ('m',),
+            'StreamLoginRefused': (r(), 'm'),
+            'StreamNotice': ({'service': 'ADMIN'}, 'm'),
             'TokenFileLockTimeout': ('m',),
             'TokenRefreshError': ('m',),
             'LoginExchangeError': ('invalid_grant', 'code already used'),

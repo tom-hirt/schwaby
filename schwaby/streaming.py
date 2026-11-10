@@ -7,12 +7,14 @@ import copy
 import httpx2
 import inspect
 import json
+import time
 
 import websockets.asyncio.client as ws_client
+from websockets.exceptions import ConnectionClosed
 
 from . import _redact
-from .utils import (EnumEnforcer, LazyLog, SchwabError, _is_instance,
-                    _printable)
+from .utils import (EnumEnforcer, LazyLog, SchwabError, TokenErrorKind,
+                    TokenRefreshError, _is_instance, _printable)
 
 
 class StreamJsonDecoder(ABC):
@@ -410,9 +412,108 @@ class UnexpectedResponseCode(SchwabError):
     Schwab's code and its own text, which is usually the part worth reading
     -- a screener subscription past its key limit, for one, says so there.
     '''
-    def __init__(self, response, *args, **kwargs):
+    def __init__(self, response, *args, service=None, command=None,
+                 code=None, msg=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.response = response
+        #: The refused request's service and command, as Schwab named them
+        #: in the element that refused it, or None.
+        self.service = _text_or_none(service)
+        self.command = _text_or_none(command)
+        #: Schwab's code, an int, or None when the frame's is not one.
+        self.code = _int_or_none(code)
+        #: Schwab's message, a str, or None.
+        self.msg = _text_or_none(msg)
+
+
+class StreamLoginRefused(UnexpectedResponseCode):
+    '''Schwab refused the stream's LOGIN: any reply to it other than
+    success, its ``code`` saying which. The socket is closed before it is
+    raised. Code 3 is the one documented ("Login Denied ... token is invalid
+    or has expired").'''
+
+
+class StreamNotice(SchwabError):
+    '''A notice from Schwab's streaming server about the connection itself
+    rather than any data: one on the ``ADMIN`` service, or carrying a code
+    Schwab documents as severing the stream, 12 ("a limit of 1 Streamer
+    connection at any given time from a given user") or 30 (stopped
+    streaming). It reaches the error handlers, and when the connection then
+    closes it is the :class:`StreamClose`'s ``notice``.'''
+
+    def __init__(self, frame, *args, code=None, msg=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        #: The element that carried it, as Schwab sent it.
+        self.frame = frame
+        #: Schwab's code, an int, or None.
+        self.code = _int_or_none(code)
+        #: Schwab's message, a str, or None.
+        self.msg = _text_or_none(msg)
+
+
+class StreamCloseKind(str, Enum):
+    '''How a stream ended, as :class:`StreamClose`'s ``kind`` says it. A
+    ``str``, whose words do not change.'''
+
+    __str__ = str.__str__
+    __format__ = str.__format__
+
+    #: A code-12 notice came first: another login for the same Schwab user
+    #: took the one stream a user may have.
+    BUMPED = 'bumped'
+    #: Schwab refused the LOGIN.
+    LOGIN_REFUSED = 'login_refused'
+    #: The login's preferences call found the refresh token dead.
+    DEAD_TOKEN = 'dead_token'
+    #: A code-30 notice came first: Schwab stopped streaming.
+    STOPPED = 'stopped'
+    #: Schwab closed the connection cleanly (1000) with no notice first.
+    #: **A bump has been seen to look like this**: whether Schwab sends a
+    #: notice before one is unmeasured.
+    SERVER_CLOSED = 'server_closed'
+    #: Anything else: an abnormal close, a ping unanswered, a login that
+    #: failed before a socket existed for a reason other than a dead token.
+    CONNECTION_LOST = 'connection_lost'
+
+
+class StreamClose:
+    '''How and when a stream ended: ``StreamClient.last_close``, and what
+    each close handler is called with.'''
+
+    __slots__ = ('kind', 'close_code', 'close_reason', 'notice', 'at')
+
+    def __init__(self, kind, close_code=None, close_reason=None, notice=None,
+                 at=None):
+        #: A :class:`StreamCloseKind`.
+        self.kind = StreamCloseKind(kind)
+        #: The websocket close code, or None when no close frame arrived.
+        self.close_code = _int_or_none(close_code)
+        #: The websocket close reason, or None.
+        self.close_reason = _text_or_none(close_reason)
+        #: The :class:`StreamNotice` that came before the close, or None.
+        self.notice = notice
+        #: ``time.time()`` when the close was found.
+        self.at = time.time() if at is None else at
+
+    def __repr__(self):
+        return ('StreamClose(kind={!r}, close_code={!r}, close_reason={!r}, '
+                'notice={})'.format(
+                    str(self.kind), self.close_code,
+                    _safe_value(self.close_reason),
+                    'None' if self.notice is None else self.notice.code))
+
+
+def _int_or_none(value):
+    return (value if isinstance(value, int) and not isinstance(value, bool)
+            else None)
+
+
+def _text_or_none(value):
+    return value if isinstance(value, str) else None
+
+
+#: The codes Schwab documents as severing the stream, which a notice carries.
+_SEVERING_CODES = frozenset({12, 30})
 
 
 class UnparsableMessage(SchwabError):
@@ -630,6 +731,15 @@ def _checked_batch_size(size):
     return size
 
 
+def _carries_a_heartbeat(frame):
+    try:
+        notify = frame.get('notify') if _is_mapping(frame) else None
+        return isinstance(notify, list) and any(
+                _is_mapping(d) and 'heartbeat' in d for d in notify)
+    except Exception:
+        return False
+
+
 def _is_mapping(obj):
     '''Whether ``obj`` can be read the way a decoded JSON object is read.
 
@@ -720,6 +830,22 @@ class StreamClient(EnumEnforcer):
 
         self._ssl_context = ssl_context
         self._client = client
+
+        #: How the last connection ended, a :class:`StreamClose`, or None
+        #: while it has not, and before the first. Set before the call that
+        #: finds the close raises, and reset by :meth:`login`.
+        self.last_close = None
+        #: ``time.monotonic()`` when the last frame of any kind arrived, one
+        #: that did not parse included, or None. A plain attribute, safe to
+        #: read from any thread.
+        self.last_frame_at = None
+        #: ``time.monotonic()`` when the last heartbeat arrived, or None.
+        self.last_heartbeat_at = None
+        self._close_handlers = []
+        self._heartbeat_handlers = []
+        self._close_found = False
+        self._close_due = False
+        self._last_notice = None
         self._response_timeout = response_timeout
 
         # Set by the login() function
@@ -863,14 +989,25 @@ class StreamClient(EnumEnforcer):
                 self.req_num(),
                 LazyLog(lambda: self._pretty(_redact.mask(obj))))
 
-        await self._socket.send(json.dumps(obj))
+        try:
+            await self._socket.send(json.dumps(obj))
+        except ConnectionClosed as exc:
+            self._found_close(exc)
+            raise
 
     async def _receive_from_socket(self):
         if self._socket is None:
             raise ValueError(
                 'Socket not open. Did you forget to call login()?')
 
-        raw = await self._socket.recv()
+        try:
+            raw = await self._socket.recv()
+        except ConnectionClosed as exc:
+            self._found_close(exc)
+            raise
+        # Any frame counts, one that will not parse included: the socket
+        # is alive.
+        self.last_frame_at = time.monotonic()
         try:
             ret = self.json_decoder.decode_json_string(raw)
         except (ValueError, RecursionError) as e:
@@ -891,6 +1028,8 @@ class StreamClient(EnumEnforcer):
         # logged, so this line carries it masked, and so does the copy inside
         # the message data, which repeats it.
         _redact.register_stream_accounts(ret)
+        if _carries_a_heartbeat(ret):
+            self.last_heartbeat_at = self.last_frame_at
 
         self.logger.debug(
             'Receive %s: Returning message from stream: %s',
@@ -965,6 +1104,98 @@ class StreamClient(EnumEnforcer):
         self._absorbed = 0
         self._absorbed_kinds.clear()
 
+
+    def add_close_handler(self, handler):
+        '''Has ``handler(close)`` called, with a :class:`StreamClose`, once
+        for each connection that ends: whichever call finds the close, and
+        before that call raises. A coroutine it returns is awaited. Its own
+        exception is logged and reported through the error handlers, and
+        does not stop the others. It may log in again: no lock is held.'''
+        self._close_handlers.append(handler)
+
+    def add_heartbeat_handler(self, handler):
+        '''Has ``handler(heartbeat_ms)`` called for each heartbeat Schwab
+        sends, with its value as an int, or None when it is not one. A
+        coroutine it returns is awaited, and its own exception is logged and
+        reported. Schwab documents no interval, and none is measured.'''
+        self._heartbeat_handlers.append(handler)
+
+    def _found_close(self, exc):
+        '''Records how the connection ended, once, where it is found: under
+        a lock, so nothing here calls user code.'''
+        if self._close_found:
+            return
+        rcvd = getattr(exc, 'rcvd', None)
+        code = getattr(rcvd, 'code', None)
+        notice = self._last_notice
+        if notice is not None and notice.code == 12:
+            kind = StreamCloseKind.BUMPED
+        elif notice is not None and notice.code == 30:
+            kind = StreamCloseKind.STOPPED
+        elif code == 1000:
+            kind = StreamCloseKind.SERVER_CLOSED
+        else:
+            kind = StreamCloseKind.CONNECTION_LOST
+        self._set_close(kind, code, getattr(rcvd, 'reason', None), notice)
+
+    def _set_close(self, kind, code=None, reason=None, notice=None):
+        self._close_found = True
+        self.last_close = StreamClose(kind, code, reason, notice)
+        self._close_due = True
+
+    async def _login_failed(self, kind):
+        self._set_close(kind, notice=self._last_notice)
+        await self._run_close_handlers()
+
+    async def _run_close_handlers(self):
+        if not self._close_due:
+            return
+        self._close_due = False
+        close = self.last_close
+        for handler in list(self._close_handlers):
+            await self._call_user_handler(handler, close, 'Close handler')
+
+    async def _run_heartbeat_handlers(self, value):
+        if isinstance(value, str) and value.isdigit():
+            value = int(value)
+        value = _int_or_none(value)
+        for handler in list(self._heartbeat_handlers):
+            await self._call_user_handler(handler, value, 'Heartbeat handler')
+
+    async def _call_user_handler(self, handler, argument, what):
+        try:
+            result = handler(argument)
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:
+            self.logger.error('%s raised %s. Ignoring it.', what,
+                              _type_name(exc), exc_info=exc)
+            await self._report_error(exc)
+
+    def _notice_from(self, element, content):
+        '''A :class:`StreamNotice` when ``element`` is one: on the ADMIN
+        service other than an answer to a login or logout, or carrying a
+        severing code. Otherwise None.'''
+        try:
+            service = element.get('service')
+            command = element.get('command')
+            content = content if _is_mapping(content) else {}
+            code = content.get('code', element.get('code'))
+            msg = content.get('msg', element.get('msg'))
+        except Exception:
+            return None
+        admin = service == 'ADMIN' and command not in ('LOGIN', 'LOGOUT')
+        if not admin and _int_or_none(code) not in _SEVERING_CODES:
+            return None
+        return StreamNotice(
+                element, 'Schwab sent a notice about the stream: code {}, '
+                'msg {}'.format(_safe_value(code), _safe_value(msg)),
+                code=code, msg=msg)
+
+    async def _report_notice(self, notice, element):
+        self._last_notice = notice
+        self.logger.warning('%s', notice)
+        await self._report_error(notice, service='ADMIN', message=element)
 
     def _make_request(self, *, service, command, parameters):
         request_id = self._request_id
@@ -1058,7 +1289,9 @@ class StreamClient(EnumEnforcer):
                 resp,
                 'unexpected response code: {}, msg is {}'.format(
                     _safe_value(resp_code),
-                    _safe_value(content.get('msg'))))
+                    _safe_value(content.get('msg'))),
+                service=resp_service, command=resp_command, code=resp_code,
+                msg=content.get('msg'))
 
         return None
 
@@ -1420,7 +1653,10 @@ class StreamClient(EnumEnforcer):
                             'Schwab rejected a request which had already '
                             'been abandoned: code {}, msg {}'.format(
                                 _safe_value(code),
-                                _safe_value(content.get('msg')))),
+                                _safe_value(content.get('msg'))),
+                            service=response.get('service'),
+                            command=response.get('command'), code=code,
+                            msg=content.get('msg')),
                         response.get('service'),
                         response))
 
@@ -1619,6 +1855,14 @@ class StreamClient(EnumEnforcer):
                 # -- blocking a close() or a TaskGroup shutdown for a user
                 # handler's full duration, which is exactly what the flag
                 # exists to prevent.
+                cancelled = True
+                raise
+            raise
+        except ConnectionClosed:
+            # The locks are released here, so a close handler may log in.
+            try:
+                await self._run_close_handlers()
+            except asyncio.CancelledError:
                 cancelled = True
                 raise
             raise
@@ -2192,6 +2436,10 @@ class StreamClient(EnumEnforcer):
                 # any user code runs.
                 await self._report_unparsable(exc)
                 raise
+            except ConnectionClosed:
+                # Likewise outside it: a close handler may log in again.
+                await self._run_close_handlers()
+                raise
 
             if msg is not ROUTED:
                 break
@@ -2241,6 +2489,10 @@ class StreamClient(EnumEnforcer):
             # the server is slow, which is when a stream is least worth
             # dropping. Log it and carry on.
             for response, code, content in self._iter_responses(msg):
+                notice = self._notice_from(response, content)
+                if notice is not None:
+                    await self._report_notice(notice, response)
+                    continue
                 # A late acknowledgement of something that worked is routine.
                 # A late *rejection* is not: the request was abandoned, so
                 # nothing else will ever report that Schwab refused it, and at
@@ -2281,20 +2533,31 @@ class StreamClient(EnumEnforcer):
                                 'Schwab rejected a request which had already '
                                 'been abandoned: code {}, msg {}'.format(
                                     _safe_value(code),
-                                    _safe_value(content.get('msg')))),
+                                    _safe_value(content.get('msg'))),
+                                service=response.get('service'),
+                                command=response.get('command'), code=code,
+                                msg=content.get('msg')),
                             service=response.get('service'),
                             message=response)
             return
 
         # data
         for d in self._iter_channel(msg, 'data'):
+            notice = self._notice_from(d, d.get('content'))
+            if notice is not None:
+                await self._report_notice(notice, d)
+                continue
             await self._dispatch_to_handlers(
                     d.get('service'), d, relabel=True)
 
         # notify
         for d in self._iter_channel(msg, 'notify'):
             if 'heartbeat' in d:
-                pass
+                await self._run_heartbeat_handlers(d.get('heartbeat'))
+                continue
+            notice = self._notice_from(d, d.get('content'))
+            if notice is not None:
+                await self._report_notice(notice, d)
             else:
                 # Not every notify message is guaranteed to name a service,
                 # and one that does not must not raise out of here.
@@ -2333,14 +2596,40 @@ class StreamClient(EnumEnforcer):
                                        other two saying there is none.
         '''
 
-        # Fetch required data and initialize the client
-        r = self._client.get_user_preferences()
+        # A new connection: nothing has closed on it yet.
+        self.last_close = None
+        self._close_found = False
+        self._close_due = False
+        self._last_notice = None
 
-        # We don't actually know whether the client is synchronous or
-        # asynchronous, so work around by awaiting the response if necessary
-        if inspect.iscoroutine(r):
-            r = await r
-        assert r.status_code == httpx2.codes.OK, r.raise_for_status()
+        # Fetch required data and initialize the client
+        try:
+            r = self._client.get_user_preferences()
+
+            # We don't actually know whether the client is synchronous or
+            # asynchronous, so work around by awaiting the response if
+            # necessary
+            if inspect.iscoroutine(r):
+                r = await r
+        except TokenRefreshError as e:
+            await self._login_failed(
+                    StreamCloseKind.DEAD_TOKEN
+                    if e.kind == TokenErrorKind.DEAD_TOKEN
+                    else StreamCloseKind.CONNECTION_LOST)
+            raise
+        except Exception:
+            await self._login_failed(StreamCloseKind.CONNECTION_LOST)
+            raise
+        # Not an assert, which -O strips. A refusal is the HTTPStatusError it
+        # always was; a success other than 200 is not one this reads.
+        if not 200 <= r.status_code < 300:
+            await self._login_failed(StreamCloseKind.CONNECTION_LOST)
+            r.raise_for_status()
+        if r.status_code != httpx2.codes.OK:
+            await self._login_failed(StreamCloseKind.CONNECTION_LOST)
+            raise UnexpectedResponse(
+                    r, 'the preferences call answered {}, not 200'.format(
+                        r.status_code))
         r = r.json()
 
         await self._init_from_preferences(
@@ -2358,7 +2647,20 @@ class StreamClient(EnumEnforcer):
         request, request_id = self._make_request(
             service='ADMIN', command='LOGIN',
             parameters=request_parameters)
-        await self._request_response(request, request_id, 'ADMIN', 'LOGIN')
+        try:
+            await self._request_response(request, request_id, 'ADMIN',
+                                         'LOGIN')
+        except UnexpectedResponseCode as e:
+            # Any refusal of the LOGIN: the socket is closed first.
+            try:
+                await self.close()
+            except Exception:
+                self.logger.exception('Closing a refused login\'s socket '
+                                      'failed. Ignoring it.')
+            await self._login_failed(StreamCloseKind.LOGIN_REFUSED)
+            raise StreamLoginRefused(
+                    e.response, *e.args, service=e.service,
+                    command=e.command, code=e.code, msg=e.msg) from None
 
     ##########################################################################
     # LOGOUT

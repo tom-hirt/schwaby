@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import io
 import json
+import time
 import os
 import logging
 import copy
@@ -6077,6 +6078,249 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
         self.assert_handler_called_once_with(handler, expected_item)
         self.assert_handler_called_once_with(async_handler, expected_item)
+
+    ##########################################################################
+    # How a stream ends, its notices, and its liveness
+
+    @staticmethod
+    def closed(code=1000, reason=''):
+        from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
+        from websockets.frames import Close
+        kind = ConnectionClosedOK if code == 1000 else ConnectionClosedError
+        return kind(Close(code, reason), None)
+
+    def record_closes(self, client):
+        seen = []
+
+        def on_close(close):
+            # Before the raise: last_close is already this close.
+            seen.append((close.kind, close.close_code,
+                         client.last_close is close))
+        client.add_close_handler(on_close)
+        return seen
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_clean_close_is_said_once_and_still_raised(
+            self, ws_connect):
+        from websockets.exceptions import ConnectionClosedOK
+        from schwaby.streaming import StreamCloseKind
+        socket = await self.login_and_get_socket(ws_connect)
+        seen = self.record_closes(self.client)
+        socket.recv.side_effect = [self.closed(1000), self.closed(1000)]
+        for _ in range(2):
+            with self.assertRaises(ConnectionClosedOK):
+                await self.client.handle_message()
+        self.assertEqual([(StreamCloseKind.SERVER_CLOSED, 1000, True)], seen,
+                         'a close was not said once, before the raise')
+        self.assertEqual(1000, self.client.last_close.close_code)
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_close_another_kind_is_connection_lost(self, ws_connect):
+        from websockets.exceptions import ConnectionClosedError
+        from schwaby.streaming import StreamCloseKind
+        socket = await self.login_and_get_socket(ws_connect)
+        socket.recv.side_effect = [self.closed(1011, 'ping timeout')]
+        with self.assertRaises(ConnectionClosedError):
+            await self.client.handle_message()
+        self.assertIs(StreamCloseKind.CONNECTION_LOST,
+                      self.client.last_close.kind)
+        self.assertEqual('ping timeout', self.client.last_close.close_reason)
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_severing_notice_names_the_close_and_is_reported(
+            self, ws_connect):
+        from websockets.exceptions import ConnectionClosedOK
+        from schwaby.streaming import StreamCloseKind, StreamNotice
+        for code, kind in ((12, StreamCloseKind.BUMPED),
+                           (30, StreamCloseKind.STOPPED)):
+            with self.subTest(code=code):
+                self.client = StreamClient(self.http_client)
+                socket = await self.login_and_get_socket(ws_connect)
+                reported = []
+                self.client.add_error_handler(
+                        lambda service, exc, message: reported.append(exc))
+                notice = {'notify': [{'service': 'ADMIN', 'command': 'LOGOUT',
+                                      'content': {'code': code,
+                                                  'msg': 'severed'}}]}
+                socket.recv.side_effect = [json.dumps(notice),
+                                           self.closed(1000)]
+                await self.client.handle_message()
+                with self.assertRaises(ConnectionClosedOK):
+                    await self.client.handle_message()
+                self.assertIs(kind, self.client.last_close.kind,
+                              'a severing notice did not name the close')
+                self.assertEqual(1, len(reported))
+                self.assertIsInstance(reported[0], StreamNotice)
+                self.assertEqual(code, reported[0].code)
+                self.assertIs(reported[0], self.client.last_close.notice)
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_an_admin_notice_is_reported_not_dropped(self, ws_connect):
+        from schwaby.streaming import StreamNotice
+        socket = await self.login_and_get_socket(ws_connect)
+        reported = []
+        self.client.add_error_handler(
+                lambda service, exc, message: reported.append((service, exc)))
+        socket.recv.side_effect = [json.dumps(
+                {'notify': [{'service': 'ADMIN', 'content': {'code': 9}}]})]
+        await self.client.handle_message()
+        self.assertEqual(1, len(reported), 'an ADMIN notice was dropped')
+        self.assertEqual('ADMIN', reported[0][0])
+        self.assertIsInstance(reported[0][1], StreamNotice)
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_close_handlers_error_is_reported(self, ws_connect):
+        from websockets.exceptions import ConnectionClosedOK
+        socket = await self.login_and_get_socket(ws_connect)
+        mine = RuntimeError('mine')
+
+        def broken(close):
+            raise mine
+        reported = []
+        self.client.add_close_handler(broken)
+        self.client.add_error_handler(
+                lambda service, exc, message: reported.append(exc))
+        socket.recv.side_effect = [self.closed(1000)]
+        with self.assertRaises(ConnectionClosedOK):
+            await self.client.handle_message()
+        self.assertEqual([mine], reported)
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_close_a_subscribe_finds_is_said_once(self, ws_connect):
+        from websockets.exceptions import ConnectionClosedOK
+        socket = await self.login_and_get_socket(ws_connect)
+        seen = self.record_closes(self.client)
+        socket.recv.side_effect = [self.closed(1000), self.closed(1000)]
+        with self.assertRaises(ConnectionClosedOK):
+            await self.client.level_one_equity_subs(['AAPL'])
+        self.assertEqual(1, len(seen), 'the subscribe did not say the close')
+        with self.assertRaises(ConnectionClosedOK):
+            await self.client.handle_message()
+        self.assertEqual(1, len(seen), 'one close was said twice')
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_any_refused_login_is_stream_login_refused(self, ws_connect):
+        from schwaby.streaming import StreamCloseKind, StreamLoginRefused
+        for code in (3, 21, 9):
+            with self.subTest(code=code):
+                self.client = StreamClient(self.http_client)
+                seen = self.record_closes(self.client)
+                self.http_client.get_user_preferences.return_value = \
+                        MockResponse(account_preferences(), 200)
+                socket = AsyncMock()
+                ws_connect.return_value = socket
+                response = self.success_response(0, 'ADMIN', 'LOGIN')
+                response['response'][0]['content'] = {
+                        'code': code, 'msg': 'Login Denied.'}
+                socket.recv.side_effect = [json.dumps(response)]
+                with self.assertRaises(StreamLoginRefused) as cm:
+                    await self.client.login()
+                self.assertEqual(code, cm.exception.code)
+                self.assertEqual('Login Denied.', cm.exception.msg)
+                self.assertEqual(('ADMIN', 'LOGIN'),
+                                 (cm.exception.service, cm.exception.command))
+                socket.close.assert_awaited()
+                self.assertEqual(
+                        [(StreamCloseKind.LOGIN_REFUSED, None, True)], seen)
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_failed_preferences_call_is_raised_as_it_was(
+            self, ws_connect):
+        import httpx2
+        from schwaby import TokenErrorKind, TokenRefreshError
+        from schwaby.streaming import StreamCloseKind, UnexpectedResponse
+        dead = TokenRefreshError('dead', kind=TokenErrorKind.DEAD_TOKEN)
+        for result, error, kind in (
+                (httpx2.Response(401, request=httpx2.Request(
+                    'GET', 'https://api.schwabapi.com/trader/v1/'
+                    'userPreference')), httpx2.HTTPStatusError,
+                 StreamCloseKind.CONNECTION_LOST),
+                (MockResponse({}, 204), UnexpectedResponse,
+                 StreamCloseKind.CONNECTION_LOST),
+                (dead, TokenRefreshError, StreamCloseKind.DEAD_TOKEN)):
+            with self.subTest(error=error.__name__):
+                self.client = StreamClient(self.http_client)
+                seen = self.record_closes(self.client)
+                if isinstance(result, BaseException):
+                    self.http_client.get_user_preferences.side_effect = result
+                else:
+                    self.http_client.get_user_preferences.side_effect = None
+                    self.http_client.get_user_preferences.return_value = \
+                            result
+                with self.assertRaises(error) as cm:
+                    await self.client.login()
+                if result is dead:
+                    self.assertIs(dead, cm.exception,
+                                  'the token error was not raised unchanged')
+                self.assertEqual([(kind, None, True)], seen)
+        self.http_client.get_user_preferences.side_effect = None
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_login_resets_the_last_close(self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        socket.recv.side_effect = [self.closed(1000)]
+        with self.assertRaises(Exception):
+            await self.client.handle_message()
+        self.assertIsNotNone(self.client.last_close)
+        # The same client logs in again, with the next request id.
+        socket = AsyncMock()
+        ws_connect.return_value = socket
+        socket.recv.side_effect = [json.dumps(self.success_response(
+            self.client._request_id, 'ADMIN', 'LOGIN'))]
+        await self.client.login()
+        self.assertIsNone(self.client.last_close,
+                          'a new login kept the old close')
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_refusal_carries_its_parts(self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        for n, (code, expected) in enumerate(
+                ((19, 19), ('19', None), (True, None)), start=1):
+            with self.subTest(code=code):
+                refused = self.success_response(
+                        n, 'LEVELONE_EQUITIES', 'SUBS')
+                refused['response'][0]['content'] = {
+                        'code': code, 'msg': 'REACHED_SYMBOL_LIMIT'}
+                socket.recv.side_effect = [json.dumps(refused)]
+                with self.assertRaises(
+                        schwaby.streaming.UnexpectedResponseCode) as cm:
+                    await self.client.level_one_equity_subs(['AAPL'])
+                e = cm.exception
+                self.assertEqual(
+                        ('LEVELONE_EQUITIES', 'SUBS', expected,
+                         'REACHED_SYMBOL_LIMIT'),
+                        (e.service, e.command, e.code, e.msg))
+                self.assertEqual(refused, e.response)
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_heartbeats_and_frames_are_stamped(self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        beats = []
+        self.client.add_heartbeat_handler(beats.append)
+        socket.recv.side_effect = [
+                json.dumps({'notify': [{'heartbeat': '1668715930582'}]}),
+                'not json at all']
+        before = time.monotonic()
+        await self.client.handle_message()
+        self.assertEqual([1668715930582], beats)
+        self.assertGreaterEqual(self.client.last_heartbeat_at, before)
+        beat_at = self.client.last_heartbeat_at
+        with self.assertRaises(schwaby.streaming.UnparsableMessage):
+            await self.client.handle_message()
+        # A frame that will not parse still says the socket is alive.
+        self.assertGreaterEqual(self.client.last_frame_at, beat_at)
+        self.assertEqual(beat_at, self.client.last_heartbeat_at)
 
     ##########################################################################
     # Keys: refused when empty or one string, and batched when asked
