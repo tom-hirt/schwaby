@@ -531,9 +531,10 @@ handler: no connection ended, and its caller has the error. A close handler
 that logs in again should back off between tries.
 Reports from the moments before the close reach the error handlers first. An
 error handler that logs in again while they do so does not cancel the close:
-its handlers are still called, with that close, though ``last_close`` is then
-the new connection's (``None``). A close handler can tell by comparing: it
-need not reconnect when ``client.last_close is not close``.
+its handlers are still called, with that close, though ``last_close`` then
+says how that login went: ``None`` if it succeeded, its failure if it did
+not. A close handler that reconnects may skip it when ``client.last_close is
+None``; in any other case it should reconnect.
 
 A close the client makes itself is not said: :meth:`~schwaby.streaming.StreamClient.close`,
 :meth:`~schwaby.streaming.StreamClient.logout`, or a new

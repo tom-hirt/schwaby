@@ -593,6 +593,28 @@ class SuccessionTest(SharedTokenTestCase):
                                  "a refresh dropped its sign-in's record")
 
     @no_duplicates
+    def test_a_client_with_its_own_reader_carries_the_record_on(self):
+        # Built with a reader that is not the shared file's: it never read
+        # the record, and its refresh carries the file's on.
+        st.write_token_file(self.path, created_days_ago=1)
+        replaced = self.stored()['creation_timestamp']
+        self.sign_in('B', expires_in=-60)
+
+        def read():
+            with open(self.path) as f:
+                return json.load(f)
+        client = auth.client_from_access_functions(
+                API_KEY, APP_SECRET, read,
+                auth.token_file_writer(self.path, shared=True),
+                transport=self.endpoint)
+        self.endpoint.answer_refresh(st.token(access_token='B2'))
+        self.quote(client)
+        self.assertEqual('B2', self.stored()['token']['access_token'])
+        self.assertEqual([replaced], self.stored().get('replaces'),
+                         "a refresh by its own reader's client dropped the "
+                         "record")
+
+    @no_duplicates
     def test_a_token_taken_keeps_its_sign_ins_record(self):
         st.write_token_file(self.path, expires_in=-60, created_days_ago=1,
                             token=st.token(access_token='A'))

@@ -520,6 +520,13 @@ class SharedTokenFile:
             elif (self.replaced and self.sign_in is not None
                     and _sign_in_of(wrapped)[0] == self.sign_in):
                 wrapped.setdefault('replaces', list(self.replaced))
+            elif 'replaces' not in wrapped:
+                # A client that never read its sign-in's record, as one
+                # built with a reader of its own: the file's, when it holds
+                # a token of the same sign-in, is carried on.
+                theirs, record = _sign_in_of(current)
+                if record and theirs == _sign_in_of(wrapped)[0]:
+                    wrapped['replaces'] = list(record)
             if not sign_in and not is_at_least_as_new(wrapped, current):
                 get_logger().info(
                         'Kept the newer token in %s: the token it would have '

@@ -10019,6 +10019,12 @@ CASES += [
          '                    pass\n',
          'tests/streaming_test.py::StreamClientTest::test_a_drain_cancelled_leaves_the_close_for_the_next_call',
          'a drain cancelled lost the close'),
+    Case('shared/a-refresh-carries-the-files-record-on',
+         'schwaby/_shared_token.py',
+         "                if record and theirs == _sign_in_of(wrapped)[0]:\n                    wrapped['replaces'] = list(record)",
+         "                if False:\n                    wrapped['replaces'] = list(record)",
+         'tests/shared_token_test.py::SuccessionTest::test_a_client_with_its_own_reader_carries_the_record_on',
+         "a refresh by its own reader's client dropped the record"),
 ]
 
 # Out of the release red-proof (2026-11-09): entries on tooling, test
