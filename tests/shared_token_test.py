@@ -521,6 +521,60 @@ class SuccessionTest(SharedTokenTestCase):
         self.assertEqual(stored['replaces'], self.stored()['replaces'])
 
     @no_duplicates
+    def test_a_sign_in_is_written_whatever_reading_the_file_does(self):
+        # A sign-in is the way out of a file that cannot be read: reading it
+        # for the record must not stop it.
+        huge = {'creation_timestamp': 10 ** 400, 'token': st.token()}
+        for name, read_bytes in (
+                ('missing from a store', lambda path: {}[path]),
+                ('unreadable', lambda path: (_ for _ in ()).throw(
+                    PermissionError(13, 'Permission denied'))),
+                ('a time too large for a float',
+                 lambda path: json.dumps(huge).encode())):
+            with self.subTest(name):
+                store = {}
+                _, write = auth.shared_token_file(
+                        self.path, read_bytes=read_bytes,
+                        write_bytes=store.__setitem__)
+                self.sign_in('SIGNED-IN', write)
+                self.assertEqual('SIGNED-IN', json.loads(
+                        store[self.path])['token']['access_token'],
+                        'reading the file stopped a sign-in')
+
+    @no_duplicates
+    def test_a_record_read_is_kept_to_its_length(self):
+        st.write_token_file(self.path, expires_in=-60)
+        stored = self.stored()
+        stored['replaces'] = list(range(100, 100 + 40))
+        with open(self.path, 'w') as f:
+            json.dump(stored, f)
+        client = self.client()
+        self.endpoint.answer_refresh(st.token(access_token='R'))
+        self.quote(client)
+        self.assertEqual('R', self.stored()['token']['access_token'])
+        self.assertEqual(_shared_token._REPLACED_KEPT,
+                         len(self.stored()['replaces']),
+                         'a record read from the file was not capped')
+
+    @no_duplicates
+    def test_a_client_does_not_take_the_sign_in_its_own_replaced(self):
+        # S1 was dated ahead; B signed in after it, and its record names S1.
+        # An older version then refreshes S1 into the file, by date alone.
+        # B's next refresh does not take S1 back.
+        st.write_token_file(self.path, created_days_ago=0)
+        self.date_ahead(1800)
+        s1 = self.stored()
+        b = self.sign_in('B', expires_in=-60)
+        older = dict(s1, token=st.token(access_token='S1-REFRESHED'))
+        older['token']['expires_at'] = time.time() + 1800
+        with open(self.path, 'w') as f:
+            json.dump(older, f)
+        self.endpoint.answer_refresh(st.token(access_token='B2'))
+        self.quote(b)
+        self.assertEqual('B2', b.token_metadata.token['access_token'],
+                         'a client took back the sign-in it had replaced')
+
+    @no_duplicates
     def test_a_refresh_keeps_its_sign_ins_record(self):
         # By a client that loaded the token, and by the one that signed in.
         for loaded in (True, False):
@@ -579,6 +633,14 @@ class SuccessionTest(SharedTokenTestCase):
         self.assertFalse(newer(a, b), 'a replaced sign-in outranked its next')
         self.assertTrue(newer(a, unrelated), 'unrelated sign-ins not by date')
         self.assertFalse(newer(unrelated, a))
+        # Each naming the other, as a clock set back by exactly the time
+        # between them could make: by date, so one order, not two.
+        x = {'creation_timestamp': 2000, 'token': {'expires_at': 9},
+             'replaces': [1000]}
+        y = {'creation_timestamp': 1000, 'token': {'expires_at': 9},
+             'replaces': [2000]}
+        self.assertNotEqual(newer(x, y), newer(y, x),
+                            'two sign-ins each outranked the other')
 
 
 class NewestWinsTest(SharedTokenTestCase):

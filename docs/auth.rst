@@ -315,7 +315,10 @@ With it:
   sign-in records the logins it replaced, by their creation times, and a
   token of a login another has replaced is the older, so a login dated ahead
   by a clock since set back gives way to the next. A token written by an
-  older version carries no record, and is ordered by date alone;
+  older version carries no record: it is ordered by date unless a record
+  names its login. Upgrade every client that shares a file together, as an
+  older one orders by date alone and can write back a login a newer one
+  knows was replaced;
 - a request's refresh that waited for the lock while another thread's
   refresh made the token fresh sends nothing. One that
   :meth:`~schwaby.client.Client.ensure_token_fresh` asks for is sent;

@@ -48,8 +48,9 @@ _held = contextvars.ContextVar('schwaby_token_lock_held', default=frozenset())
 
 # Set by a caller that wants to know whether its refresh took another
 # client's token instead of sending one: a list the refresh appends to. Only
-# ensure_token_fresh sets it, and it asks for the refresh: one is sent even
-# when the token has not expired, as a request's would not be.
+# the client's own refresh sets it -- ensure_token_fresh's, or a paced
+# request's -- and it asks for the refresh: one is sent even when the token
+# has not expired, as authlib's own call for a request would not be.
 _taken = contextvars.ContextVar('schwaby_token_taken', default=None)
 
 
@@ -194,9 +195,7 @@ def _open_lock_file(path):
 
 def _number(value):
     '''An ordering value: a finite real number, else lower than any.'''
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return -math.inf
-    return value if math.isfinite(value) else -math.inf
+    return value if _is_time(value) else -math.inf
 
 
 #: How many earlier sign-ins a sign-in remembers having replaced.
@@ -204,8 +203,14 @@ _REPLACED_KEPT = 16
 
 
 def _is_time(value):
-    return (isinstance(value, (int, float)) and not isinstance(value, bool)
-            and math.isfinite(value))
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        # An int too large for a float, as only a file not written here
+        # holds.
+        return False
 
 
 def _sign_in_of(wrapped):
@@ -220,7 +225,8 @@ def _sign_in_of(wrapped):
     replaced = wrapped.get('replaces')
     if not isinstance(replaced, (list, tuple)):
         replaced = ()
-    return sign_in, tuple(r for r in replaced if _is_time(r))
+    return sign_in, tuple(r for r in replaced[:_REPLACED_KEPT]
+                          if _is_time(r))
 
 
 def _replaces(current, own):
@@ -241,11 +247,13 @@ def _succession(ours, theirs):
     their_id, theirs_replaced = _sign_in_of(theirs)
     if our_id is None or their_id is None or our_id == their_id:
         return None
-    if their_id in ours_replaced:
-        return True
-    if our_id in theirs_replaced:
-        return False
-    return None
+    ours_after, theirs_after = (their_id in ours_replaced,
+                                our_id in theirs_replaced)
+    if ours_after == theirs_after:
+        # Neither names the other, or each does, as only a clock set back
+        # by exactly the time between them could make: the dates decide.
+        return None
+    return ours_after
 
 
 #: A login dated further ahead than this is a wrong clock's, not newer.
@@ -497,7 +505,15 @@ class SharedTokenFile:
         wrapped = dict(wrapped)
         wrapped['received_at'] = time.time()
         with self.lock():
-            current = self._read_or_none()
+            if sign_in:
+                # Read only for the record: a sign-in is the way out of a
+                # file that cannot be read, so nothing here may stop it.
+                try:
+                    current = self._read_or_none()
+                except Exception:
+                    current = None
+            else:
+                current = self._read_or_none()
             if sign_in:
                 wrapped['replaces'] = _replaces(
                         current, wrapped.get('creation_timestamp'))

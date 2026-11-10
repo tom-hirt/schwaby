@@ -6546,6 +6546,38 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_drain_cancelled_leaves_the_close_for_the_next_call(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        events = []
+        started = asyncio.Event()
+
+        async def slow(service, exc, message):
+            events.append('report')
+            started.set()
+            await asyncio.sleep(30)
+        self.client.add_error_handler(slow)
+        self.client.add_close_handler(
+                lambda close: events.append(('close', close.kind)))
+        queued = []
+
+        def closing():
+            if not queued:
+                queued.append(True)
+                self.client._pending_reports.append(
+                        (RuntimeError('queued'), 'CHART_EQUITY', None))
+            raise self.closed(1006)
+        socket.recv.side_effect = closing
+        with self.assertRaises(asyncio.TimeoutError):
+            await asyncio.wait_for(self.client.handle_message(), 0.2)
+        self.assertTrue(started.is_set())
+        with self.assertRaises(Exception):
+            await self.client.handle_message()
+        self.assertEqual(['report', ('close', 'connection_lost')], events,
+                         'a drain cancelled lost the close')
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_frames_set_aside_are_delivered_when_it_closes(
             self, ws_connect):
         await self.login_and_get_socket(ws_connect)

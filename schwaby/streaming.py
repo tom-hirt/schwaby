@@ -1194,7 +1194,15 @@ class StreamClient(EnumEnforcer):
         token = _in_close_handlers.set(running)
         try:
             if drain_first:
-                await self._drain_pending_reports()
+                try:
+                    await self._drain_pending_reports()
+                except BaseException:
+                    # Cancelled, say, by a wait_for around handle_message:
+                    # the close is due again for the next call that finds it,
+                    # unless a login since has made it another connection's.
+                    if self.last_close is close:
+                        self._close_due = True
+                    raise
             for handler in list(self._close_handlers):
                 await self._call_user_handler(handler, close, 'Close handler')
         finally:
