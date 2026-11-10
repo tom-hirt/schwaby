@@ -26,6 +26,69 @@ what each entry says changed, is the same.
 
 ---
 
+## 5.6.0
+
+*2026-11-10*
+
+A minor release: fixes to a shared token file's order and refreshes and to
+how a stream says it ended, and two additions to stream notices. Nothing
+public is removed. Every client sharing a token file should be upgraded
+together (below).
+
+### The shared token file
+
+- **A sign-in outranks the sign-ins it replaced, whatever the clocks say.**
+  Tokens were ordered by date alone, so a sign-in dated ahead by a clock
+  since set back went on outranking the next sign-in, and its refreshes
+  wrote over it: measured, a client whose sign-in was half an hour ahead
+  refreshed and replaced a fresh sign-in, and never took it. Each sign-in
+  now records, in the file, the creation times of the sign-ins it replaced,
+  and a token of a replaced sign-in is the older. A token written by an
+  older version carries no record and is ordered by date unless a record
+  names it.
+- **Upgrade every client that shares a file together.** An older version
+  orders by date alone and can write back a sign-in a newer one knows was
+  replaced; the two then overwrite each other at each refresh.
+- **A request's refresh that waited for the lock while another thread
+  refreshed sends nothing.** A refresh `ensure_token_fresh` or a paced
+  request asks for is still sent. A direct `session.refresh_token(...)` call
+  on a shared client whose token has not expired now sends nothing. A
+  client that shares no file is unchanged: authlib's own refresh, one per
+  thread.
+- A sign-in is never stopped by reading the file first: a store whose
+  missing key is not `FileNotFoundError`, an unreadable file, or a number too
+  large for a float.
+
+### How a stream says it ended
+
+- **An error handler that logs in again during the reports before a close
+  no longer cancels the close handlers.** They are called with that close.
+  A close handler that reconnects may skip it when `client.last_close is
+  None`; in any other case it should reconnect.
+- **`last_close` is reset to `None` only when a login succeeds,** on the
+  socket it opened and only if nothing has closed on it. A login in flight,
+  cancelled or failed no longer reads as connected, and one whose
+  preferences do not read leaves a live connection, and `last_close`, as
+  they were. A socket that does not open is a failed login.
+- **A bump survives a failed re-login:** the notice is kept until its socket
+  is replaced, so the old socket's close is still said as `bumped`.
+- **A known limit, documented:** a call cancelled while the reports before
+  a close go out, by a `wait_for` around `handle_message` say, calls no
+  close handler for that close. `last_close` still says how it ended. And a
+  login whose new socket closes before its LOGIN is answered says that close
+  from inside `login()`: reconnect from a task a close handler starts, not
+  by awaiting `login()` inside it.
+
+### Added
+
+- `StreamNotice.channel`: `'response'` (an answer to no request the client
+  waits on: a late `ADMIN` one other than to a login or logout, whatever its
+  code, or one with a severing code), `'notify'` or `'data'`; and
+  `StreamNotice.requestid`, a response element's, else `None`. A late
+  refusal on any other service is still `UnexpectedResponseCode`.
+- `schwaby.streaming.is_success_code(code)`: the one place the client
+  decides a streamer response code means success, now public.
+
 ## 5.5.0
 
 *2026-11-09*
