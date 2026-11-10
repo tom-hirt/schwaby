@@ -10482,6 +10482,16 @@ CASES += [
          subtest='an execution above its cumulative'),
 ]
 
+# A notice on a data element never takes its content from the handlers.
+CASES += [
+    Case('stream-notice/a-data-notice-still-dispatches-its-content',
+         'schwaby/streaming.py',
+         "                if not isinstance(d.get('content'), list):\n                    continue\n",
+         "                continue\n",
+         'tests/streaming_test.py::StreamClientTest::test_a_notice_on_a_data_element_does_not_take_its_content',
+         'a notice on a data element took its content away'),
+]
+
 # Out of the release red-proof (2026-11-09): entries on tooling, test
 # scaffolding, docs and CI, which leave it while their tests stay in the
 # gate, run on every merge; entries already removed or declared GREEN; and

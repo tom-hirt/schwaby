@@ -2697,7 +2697,13 @@ class StreamClient(EnumEnforcer):
             notice = self._notice_from(d, d.get('content'), 'data')
             if notice is not None:
                 await self._report_notice(notice, d)
-                continue
+                # A notice never takes data away from its handlers: an
+                # element that carries content is still dispatched, so that
+                # a severing code beside, say, a fill cannot lose the fill.
+                # Schwab documents no such element; it costs nothing to be
+                # safe.
+                if not isinstance(d.get('content'), list):
+                    continue
             await self._dispatch_to_handlers(
                     d.get('service'), d, relabel=True)
 

@@ -6173,6 +6173,27 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_notice_on_a_data_element_does_not_take_its_content(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        seen, reported = [], []
+        self.client.add_account_activity_handler(seen.append)
+        self.client.add_error_handler(
+                lambda service, exc, message: reported.append(
+                    type(exc).__name__))
+        frame = {'data': [{
+                'service': 'ACCT_ACTIVITY', 'timestamp': 1, 'command': 'SUBS',
+                'code': 12,
+                'content': [{'seq': 1, 'key': 'k', '1': '<ACCOUNT>',
+                             '2': 'OrderFillCompleted', '3': '{}'}]}]}
+        socket.recv.side_effect = [json.dumps(frame)]
+        await self.client.handle_message()
+        self.assertEqual(1, len(seen),
+                         "a notice on a data element took its content away")
+        self.assertEqual(['StreamNotice'], reported)
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_an_admin_notice_is_reported_not_dropped(self, ws_connect):
         from schwaby.streaming import StreamNotice
         socket = await self.login_and_get_socket(ws_connect)
