@@ -169,11 +169,21 @@ _KNOWN_CHANNELS = frozenset(('response', 'data', 'notify'))
 _SUCCESS_CODES = (0, 26, 27, 28, 29)
 
 
-def _is_success_code(code):
-    """Whether a response code means success. The one place that decides it:
-    the request path and both late-response paths ask here, so a code cannot
-    succeed on one path and be reported as a rejection on another."""
+def is_success_code(code):
+    '''Whether a response code Schwab's streamer sent means success: 0, or
+    one of the 26 to 29 Schwab's streamer documentation lists as
+    SUCCEEDED_COMMAND_SUBS, _UNSUBS, _ADD and _VIEW. Every success measured
+    against a live account has been 0. Any code is judged whatever command
+    it answers. A request this client sends fails on any other code, and a
+    late answer with any other code is reported as a refusal: the one place
+    this library decides it, so a host reading a code can agree with it.
+
+    :param code: the response's ``content`` ``code``, as Schwab sent it.
+    '''
     return code in _SUCCESS_CODES
+
+
+_is_success_code = is_success_code
 
 
 #: How many distinct (field table, field id) pairs to name before giving up.
@@ -442,7 +452,8 @@ class StreamNotice(SchwabError):
     streaming). It reaches the error handlers, and when the connection then
     closes it is the :class:`StreamClose`'s ``notice``.'''
 
-    def __init__(self, frame, *args, code=None, msg=None, **kwargs):
+    def __init__(self, frame, *args, code=None, msg=None, channel=None,
+                 requestid=None, **kwargs):
         super().__init__(*args, **kwargs)
         #: The element that carried it, as Schwab sent it.
         self.frame = frame
@@ -450,6 +461,13 @@ class StreamNotice(SchwabError):
         self.code = _int_or_none(code)
         #: Schwab's message, a str, or None.
         self.msg = _text_or_none(msg)
+        #: Where in the frame the element came: ``'response'``, an answer to
+        #: no request this client is waiting on, ``'notify'`` or ``'data'``.
+        #: None when made otherwise.
+        self.channel = _text_or_none(channel)
+        #: A response element's ``requestid``, a str, or None: always None on
+        #: ``notify`` and ``data``.
+        self.requestid = _text_or_none(requestid)
 
 
 class StreamCloseKind(str, Enum):
@@ -1248,16 +1266,18 @@ class StreamClient(EnumEnforcer):
                               _type_name(exc), exc_info=exc)
             await self._report_error(exc)
 
-    def _notice_from(self, element, content):
-        '''A :class:`StreamNotice` when ``element`` is one: on the ADMIN
-        service other than an answer to a login or logout, or carrying a
-        severing code. Otherwise None.'''
+    def _notice_from(self, element, content, channel):
+        '''A :class:`StreamNotice` when ``element``, from ``channel``, is one:
+        on the ADMIN service other than an answer to a login or logout, or
+        carrying a severing code. Otherwise None.'''
         try:
             service = element.get('service')
             command = element.get('command')
             content = content if _is_mapping(content) else {}
             code = content.get('code', element.get('code'))
             msg = content.get('msg', element.get('msg'))
+            requestid = (element.get('requestid') if channel == 'response'
+                         else None)
         except Exception:
             return None
         admin = service == 'ADMIN' and command not in ('LOGIN', 'LOGOUT')
@@ -1266,7 +1286,7 @@ class StreamClient(EnumEnforcer):
         return StreamNotice(
                 element, 'Schwab sent a notice about the stream: code {}, '
                 'msg {}'.format(_safe_value(code), _safe_value(msg)),
-                code=code, msg=msg)
+                code=code, msg=msg, channel=channel, requestid=requestid)
 
     async def _report_notice(self, notice, element):
         self._last_notice = notice
@@ -2614,7 +2634,7 @@ class StreamClient(EnumEnforcer):
             # the server is slow, which is when a stream is least worth
             # dropping. Log it and carry on.
             for response, code, content in self._iter_responses(msg):
-                notice = self._notice_from(response, content)
+                notice = self._notice_from(response, content, 'response')
                 if notice is not None:
                     await self._report_notice(notice, response)
                     continue
@@ -2668,7 +2688,7 @@ class StreamClient(EnumEnforcer):
 
         # data
         for d in self._iter_channel(msg, 'data'):
-            notice = self._notice_from(d, d.get('content'))
+            notice = self._notice_from(d, d.get('content'), 'data')
             if notice is not None:
                 await self._report_notice(notice, d)
                 continue
@@ -2680,7 +2700,7 @@ class StreamClient(EnumEnforcer):
             if 'heartbeat' in d:
                 await self._run_heartbeat_handlers(d.get('heartbeat'))
                 continue
-            notice = self._notice_from(d, d.get('content'))
+            notice = self._notice_from(d, d.get('content'), 'notify')
             if notice is not None:
                 await self._report_notice(notice, d)
             else:

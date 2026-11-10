@@ -501,6 +501,12 @@ reported, so an ``except`` clause for it never runs. Every one inherits
 .. autoexception:: schwaby.streaming.UnexpectedResponseCode
 .. autoexception:: schwaby.streaming.StreamLoginRefused
 .. autoexception:: schwaby.streaming.StreamNotice
+
+A notice's ``channel`` tells a refused answer to a request the client no
+longer waits on (``'response'``, with its ``requestid``) from a notice Schwab
+volunteered (``'notify'`` or ``'data'``).
+
+.. autofunction:: schwaby.streaming.is_success_code
 .. autoexception:: schwaby.streaming.UnparsableMessage
 .. autoexception:: schwaby.streaming.UnusableMessage
 

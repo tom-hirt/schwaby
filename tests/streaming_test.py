@@ -6188,6 +6188,36 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_notice_says_its_channel(self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        reported = []
+        self.client.add_error_handler(
+                lambda service, exc, message: reported.append(exc))
+        element = {'service': 'ADMIN', 'command': 'QOS',
+                   'content': {'code': 9, 'msg': 'm'}}
+        socket.recv.side_effect = [
+                json.dumps({'response': [dict(element, requestid='77')]}),
+                json.dumps({'notify': [element]}),
+                json.dumps({'data': [element]})]
+        for _ in range(3):
+            await self.client.handle_message()
+        self.assertEqual(
+                [('response', '77'), ('notify', None), ('data', None)],
+                [(n.channel, n.requestid) for n in reported],
+                'a notice did not say where it came from')
+        import pickle
+        copy = pickle.loads(pickle.dumps(reported[0]))
+        self.assertEqual(('response', '77'), (copy.channel, copy.requestid))
+
+    @no_duplicates
+    def test_is_success_code_is_the_clients_own(self):
+        from schwaby.streaming import is_success_code
+        self.assertEqual([0, 26, 27, 28, 29],
+                         [c for c in range(-1, 40) if is_success_code(c)])
+        self.assertIs(schwaby.streaming._is_success_code, is_success_code)
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_a_close_handlers_error_is_reported(self, ws_connect):
         from websockets.exceptions import ConnectionClosedOK
         socket = await self.login_and_get_socket(ws_connect)
