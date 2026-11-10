@@ -313,7 +313,8 @@ print('dies-after', sorted(got), flush=True)
                 open(os.path.join(tmp, 'err'), 'w') as err:
             proc = subprocess.Popen(
                 [sys.executable, '-I', script, os.path.join(
-                    os.path.dirname(__file__), '..', 'tools', 'redproof.py')],
+                    os.path.dirname(__file__), '..', '..', 'tools',
+                    'redproof.py')],
                 stdout=out, stderr=err, start_new_session=True)
         # Read while the script is this process's unreaped child, so the
         # pid is still its own.
