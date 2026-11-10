@@ -187,11 +187,12 @@ async def _refresh_unless(client, fresh, *, attempt):
                     # file holds nothing newer now, so this sends.
                     # Asked for, as the first was: sent though the token has
                     # not expired.
-                    with _shared_token.watching_for_a_taken_token(), \
+                    with _shared_token.watching_for_a_taken_token() as again, \
                             client._translate_token_errors():
                         await client.session.refresh_token(
                                 refresh_token=client._refresh_token_to_send())
-                    return waited, True
+                    # Sent, unless it too took a newer token instead.
+                    return waited, not again
             return waited, not taken
         finally:
             if client._refresh_flight is mine:

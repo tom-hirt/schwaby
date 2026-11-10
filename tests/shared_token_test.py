@@ -7,6 +7,7 @@ releases it when its stdin closes, so nothing is signalled.
 '''
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -921,6 +922,88 @@ class RefreshedMeanwhileTest(SharedTokenTestCase):
                 self.assertIs(schwaby.TokenFreshness.REFRESHED, result)
                 self.assertEqual(1, endpoint.posts('refresh_token'),
                                  'a refresh asked for was not sent')
+
+
+class AskedForMeanwhileTest(SharedTokenTestCase):
+    '''ensure_token_fresh's refresh, when another refresh does its work while
+    it waits for the lock, or when what it takes is itself replaced.'''
+
+    def stored_with(self, expires_in):
+        stored = self.stored()
+        stored['token'] = dict(stored['token'],
+                               expires_at=time.time() + expires_in)
+        return stored
+
+    @no_duplicates
+    def test_one_asked_for_sends_nothing_when_another_refreshed_meanwhile(
+            self):
+        # It found the token inside its margin, and while it waited for the
+        # lock a request's refresh in another thread replaced it.
+        for asyncio_ in (False, True):
+            with self.subTest(asyncio=asyncio_):
+                st.write_token_file(self.path, expires_in=400)
+                endpoint = st.FakeTokenEndpoint()
+                endpoint.answer_refresh(st.token(), repeat=True)
+                read, write = auth.shared_token_file(self.path)
+                client = auth.client_from_access_functions(
+                        API_KEY, APP_SECRET, read, write, asyncio=asyncio_,
+                        transport=endpoint)
+                shared = write._schwaby_shared_token_file
+                fresh = dict(client.session.token,
+                             access_token='ANOTHERS',
+                             expires_at=time.time() + 1800)
+
+                def replaced():
+                    client.session.token = fresh
+                if asyncio_:
+                    taking = shared.alock
+
+                    @contextlib.asynccontextmanager
+                    async def alock():
+                        replaced()
+                        async with taking():
+                            yield
+                    shared.alock = alock
+                    result = asyncio.run(client.ensure_token_fresh(600))
+                else:
+                    taking = shared.lock
+
+                    @contextlib.contextmanager
+                    def lock():
+                        replaced()
+                        with taking():
+                            yield
+                    shared.lock = lock
+                    result = client.ensure_token_fresh(600)
+                self.assertEqual(0, endpoint.posts('refresh_token'),
+                                 'it refreshed again what another refreshed')
+                self.assertIs(schwaby.TokenFreshness.FRESH, result)
+
+    @no_duplicates
+    def test_a_second_take_is_not_called_a_refresh(self):
+        # Inside the margin, it takes a newer token, refreshes once more, and
+        # that refresh takes a newer one still: nothing was sent.
+        for asyncio_ in (False, True):
+            with self.subTest(asyncio=asyncio_):
+                st.write_token_file(self.path, expires_in=100)
+                first = json.dumps(self.stored()).encode()
+                reads = [first, json.dumps(self.stored_with(400)).encode(),
+                         json.dumps(self.stored_with(450)).encode()]
+                endpoint = st.FakeTokenEndpoint()
+                endpoint.answer_refresh(st.token(), repeat=True)
+                read, write = auth.shared_token_file(
+                        self.path,
+                        read_bytes=lambda path: reads.pop(0) if reads
+                        else first)
+                client = auth.client_from_access_functions(
+                        API_KEY, APP_SECRET, read, write, asyncio=asyncio_,
+                        transport=endpoint)
+                result = client.ensure_token_fresh(600)
+                if asyncio.iscoroutine(result):
+                    result = asyncio.run(result)
+                self.assertEqual(0, endpoint.posts('refresh_token'))
+                self.assertIs(schwaby.TokenFreshness.FRESH, result,
+                              'a take was called a refresh')
 
 
 class AccessFunctionsTest(SharedTokenTestCase):

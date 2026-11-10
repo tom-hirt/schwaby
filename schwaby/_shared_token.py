@@ -585,35 +585,45 @@ def share_refresh(session, shared, metadata, adopt, *, is_async):
         kwargs['refresh_token'] = session.token.get('refresh_token')
         return False
 
-    def refreshed_meanwhile():
-        '''A request's refresh, made because the token had expired, that
-        waited for the lock while another thread's refresh, or a token
-        taken, made it fresh: it sends nothing. One asked for is sent.'''
-        return not _asked_for() and session.token is not None and not (
+    def refreshed_meanwhile(before):
+        '''Whether, while this refresh waited for the lock, another thread's
+        refresh, or a token taken, did its work: it then sends nothing. A
+        request's, made because the token had expired, when the token is no
+        longer expired. One asked for, when the token it was asked for has
+        been replaced: that counts as a token taken, and the caller, which
+        knows its margin, refreshes again if it is still due.'''
+        if _asked_for():
+            if session.token is not before:
+                _note_taken()
+                return True
+            return False
+        return session.token is not None and not (
                 session.token.is_expired(leeway=getattr(session, 'leeway', 0)))
 
     if is_async:
         async def shared_refresh(*args, **kwargs):
+            before = session.token
             try:
                 async with shared.alock():
                     stored = shared.newer_stored(metadata, session)
                     if stored is not None and taken(stored, kwargs):
                         _note_taken()
                         return session.token
-                    if stored is None and refreshed_meanwhile():
+                    if stored is None and refreshed_meanwhile(before):
                         return session.token
                     return await refresh(*args, **kwargs)
             except TokenFileLockTimeout as e:
                 raise _lock_timeout_error(e) from e
     else:
         def shared_refresh(*args, **kwargs):
+            before = session.token
             try:
                 with shared.lock():
                     stored = shared.newer_stored(metadata, session)
                     if stored is not None and taken(stored, kwargs):
                         _note_taken()
                         return session.token
-                    if stored is None and refreshed_meanwhile():
+                    if stored is None and refreshed_meanwhile(before):
                         return session.token
                     return refresh(*args, **kwargs)
             except TokenFileLockTimeout as e:

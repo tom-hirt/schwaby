@@ -111,11 +111,12 @@ class Client(BaseClient):
                     # file holds nothing newer now, so this sends.
                     # Asked for, as the first was: sent though the token has
                     # not expired.
-                    with _shared_token.watching_for_a_taken_token(), \
+                    with _shared_token.watching_for_a_taken_token() as again, \
                             self._translate_token_errors():
                         self.session.refresh_token(
                                 refresh_token=self._refresh_token_to_send())
-                    return waited, True
+                    # Sent, unless it too took a newer token instead.
+                    return waited, not again
                 return waited, not taken
             finally:
                 with self._refresh_lock:
