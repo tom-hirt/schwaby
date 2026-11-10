@@ -7436,14 +7436,14 @@ CASES.extend([
          '                    w.reap_groups()\n'
          '                    selector.unregister(w.results)\n',
          '                    selector.unregister(w.results)\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'the kill spy saw nothing, so it cannot say what was not killed'),
     Case('harness/a-dead-workers-item-is-reported',
          'tools/redproof.py',
          '                        yield failed(items[w.item], (',
          '                        failed(items[w.item], (',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'a dead worker was not reported'),
     Case('harness/a-dead-workers-place-is-taken',
@@ -7451,28 +7451,28 @@ CASES.extend([
          '                    if pending:\n                        start()\n'
          '                    continue\n',
          '                    continue\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'the pool waited on a dead or overdue worker'),
     Case('harness/a-stopped-worker-leaves-rather-than-raising',
          'tools/redproof.py',
          '            kill_group(pid)\n        os._exit(128 + signum)\n',
          '            kill_group(pid)\n        raise SystemExit(128 + signum)\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'the work after a stopped worker did not go on'),
     Case('harness/a-task-that-raises-fails-alone',
          'tools/redproof.py',
          "        except BaseException as e:\n            message = ('failed',",
          "        except Exception as e:\n            message = ('failed',",
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          "a task that raised ended its worker's work"),
     Case('harness/an-unpicklable-result-is-reported',
          'tools/redproof.py',
          '            pickle.dumps(message)\n',
          '',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'a result that cannot cross to the parent'),
     Case('harness/an-overdue-task-is-killed',
@@ -7480,7 +7480,7 @@ CASES.extend([
          '                if w.item is not None and now - w.since > TASK_LIMIT:\n',
          '                if w.item is not None and now - w.since > TASK_LIMIT * '
          '1000:\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'a task past its bound was not stopped'),
     Case('harness/an-abandoned-pools-busy-worker-is-told-to-stop',
@@ -7488,7 +7488,7 @@ CASES.extend([
          '                if w.item is not None:\n'
          '                    w.signal(signal.SIGTERM)\n',
          '                if w.item is not None:\n                    pass\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          "an abandoned pool's busy worker was not told to stop"),
     Case('harness/a-stuck-worker-is-killed-at-the-bound',
@@ -7497,7 +7497,7 @@ CASES.extend([
          '                    w.signal(signal.SIGKILL)\n',
          '                if _wait_gone(w.pid, deadline) is False:\n'
          '                    pass\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'a stuck worker was not killed at the bound'),
     Case('harness/what-a-worker-reports-last-is-read',
@@ -7506,14 +7506,14 @@ CASES.extend([
          'killed.\n                w.drain()\n',
          '                # it started just before it stopped is otherwise never '
          'killed.\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          "a dead worker's tests were left running (late-group)"),
     Case('harness/a-second-signal-does-not-cut-cleanup-short',
          'tools/redproof.py',
          '    if _stopping.is_set():\n        return\n',
          '',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_second_signal_does_not_cut_the_first_ones_cleanup_short',
          "a second signal raised into the first one's cleanup"),
     Case('harness/an-entry-that-never-ran-has-no-split',
@@ -7522,7 +7522,7 @@ CASES.extend([
          'split.\n    run.timing.__dict__.clear()\n',
          "    # an entry judged without running printed the first baseline's "
          'split.\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_an_entry_judged_without_running_has_no_split',
          "an entry that never ran printed another run's time split"),
 ])
@@ -7748,35 +7748,35 @@ CASES.extend([
          'tools/redproof.py',
          '        except OSError:\n            return False\n',
          '        except ValueError:\n            return False\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'a worker that died after its result lost the run'),
     Case('harness/a-frame-in-pieces-is-put-together',
          'tools/redproof.py',
          '                break\n            out.append(pickle.loads(',
          '                pass\n            out.append(pickle.loads(',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'a result larger than one read was lost'),
     Case('harness/a-reaped-group-is-not-killed-again',
          'tools/redproof.py',
          '            self.groups.discard(frame[1])\n',
          '            pass\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'a reaped group was killed again'),
     Case('harness/a-worker-says-when-a-group-is-reaped',
          'tools/redproof.py',
          "        _report(('reaped', pid))\n",
          '        pass\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'a reaped group was killed again'),
     Case('harness/an-idle-worker-leaves-when-its-pipe-closes',
          'tools/redproof.py',
          '            if not more:\n                os._exit(0)\n',
          '            if not more:\n                continue\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'the pool waited on a dead or overdue worker'),
 ])
@@ -7903,7 +7903,7 @@ CASES.extend([
          '        for pid in list(_live):\n            kill_group(pid)\n'
          '        os._exit(128 + signum)\n',
          '        os._exit(128 + signum)\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          "a dead worker's tests were left running (own-group)"),
     Case('harness/each-workers-reap-runs-on-its-own',
@@ -7911,21 +7911,21 @@ CASES.extend([
          '            try:\n                w.reap_groups()\n'
          '                os.close(w.results)\n',
          '            try:\n                os.close(w.results)\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          "a dead worker's tests were left running (wedged-group)"),
     Case('harness/a-failing-cleanup-is-raised',
          'tools/redproof.py',
          '        if failures:\n            raise failures[0]\n',
          '        if failures:\n            pass\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'a failing cleanup was swallowed'),
     Case('harness/an-item-not-taken-goes-back',
          'tools/redproof.py',
          '            pending.append(index)\n',
          '            pass\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'the pool waited on a dead or overdue worker'),
     Case('harness/an-item-is-the-workers-only-once-taken',
@@ -7933,7 +7933,7 @@ CASES.extend([
          "        try:\n            os.write(self.tasks, struct.pack('>q', index))\n",
          "        self.item, self.since = index, time.monotonic()\n"
          "        try:\n            os.write(self.tasks, struct.pack('>q', index))\n",
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'a worker that died after its result lost the run',
          also=('        self.item, self.since = index, time.monotonic()\n'
@@ -8099,7 +8099,7 @@ CASES.extend([
          '                    w.drain()\n',
          '                w.signal(signal.SIGKILL)\n                try:\n'
          '                    pass\n',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          "a dead worker's tests were left running (late2-group)"),
     Case('harness/a-copy-keeps-file-modes',
@@ -8670,7 +8670,7 @@ CASES.extend([
          'tests/redproof_tool_test.py',
          "        open(MARK + item, 'w').close()\n        time.sleep(30)",
          '        time.sleep(30)',
-         'tests/redproof_tool_test.py::WorkerTest'
+         'tests/signals/worker_test.py::WorkerTest'
          '::test_a_dead_worker_is_reported_and_its_tests_killed',
          'an abandoned run did not end on its quick item'),
     # A release is cut only from a commit main holds.

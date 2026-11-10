@@ -74,7 +74,11 @@ parent's pid without signalling it, and signal 0, are let through. Nor may a
 staged line delete in shared ``/tmp`` or the temp root itself; delete only
 your own run's temp directory. ``tests/testdata/blind_kill_shapes.txt``
 lists every shape the check is tested on, refused and let through. Signal
-only a pid or a process group you started and recorded. A commit that
+only a pid or a process group you started and recorded, and put a test that
+signals at all in ``tests/signals/``: its conftest skips those tests, saying
+why, unless ``REDPROOF_JOBS_ALL`` is set, as it is in a queued job, and a
+gate run (``SUITE_GATE`` set) without it fails rather than skip them. A
+commit that
 changes a file under ``tests/`` is also told which red-proof entries test or
 mutate it; the release red-proof runs them (``RELEASING.md`` says more).
 Every commit is told its touched

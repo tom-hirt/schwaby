@@ -279,7 +279,7 @@ def load_cases(snapshot):
 #: run on a shared machine, where a defect in the code it mutates could
 #: reach other processes. A queued job is told apart as the core count
 #: tells it: REDPROOF_JOBS_ALL=1.
-SIGNALLING = ('tests/redproof_tool_test.py::WorkerTest',)
+SIGNALLING = ('tests/signals/worker_test.py::WorkerTest',)
 
 
 def runs_signalling(test):

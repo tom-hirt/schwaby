@@ -26,6 +26,7 @@
   "tests/conftest.py",
   "tests/contrib/__init__.py",
   "tests/orders/__init__.py",
+  "tests/signals/__init__.py",
   "tests/utils.py"
  ],
  "tests/contrib/account_activity_test.py": [
@@ -82,6 +83,7 @@
   "tests/entrypoints_test.py",
   "tests/light_check_test.py",
   "tests/orders/__init__.py",
+  "tests/signals/__init__.py",
   "tests/test.py",
   "tests/utils.py",
   "tools/",
@@ -265,6 +267,8 @@
   "tests/orders/__init__.py",
   "tests/redproof_tool_test.py",
   "tests/secret_logging_test.py",
+  "tests/signals/",
+  "tests/signals/worker_test.py",
   "tests/test.py",
   "tests/testdata/preferences.json",
   "tests/utils.py",
@@ -306,6 +310,28 @@
   "tests/shared_token_test.py",
   "tests/utils.py"
  ],
+ "tests/signals/guard_test.py": [
+  "setup.cfg",
+  "tests/__init__.py",
+  "tests/conftest.py",
+  "tests/signals/__init__.py",
+  "tests/signals/conftest.py",
+  "tests/signals/guard_test.py",
+  "tests/signals/worker_test.py",
+  "tests/utils.py"
+ ],
+ "tests/signals/worker_test.py": [
+  "setup.cfg",
+  "tests/__init__.py",
+  "tests/conftest.py",
+  "tests/redproof_tool_test.py",
+  "tests/signals/__init__.py",
+  "tests/signals/conftest.py",
+  "tests/signals/worker_test.py",
+  "tests/utils.py",
+  "tools/",
+  "tools/redproof.py"
+ ],
  "tests/streaming_test.py": [
   "schwaby/__init__.py",
   "schwaby/_redact.py",
@@ -333,6 +359,7 @@
   "tests/__init__.py",
   "tests/conftest.py",
   "tests/reads_test.py",
+  "tests/signals/conftest.py",
   "tests/suite_config_test.py",
   "tests/test.py",
   "tests/utils.py"
