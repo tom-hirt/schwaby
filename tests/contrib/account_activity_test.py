@@ -5,6 +5,7 @@ Every fixture is synthetic, built from the key paths the streaming
 documentation records as observed. Ids are placeholders.
 '''
 
+import collections.abc
 import dataclasses
 import decimal
 import json
@@ -215,6 +216,12 @@ class FillTest(unittest.TestCase):
         self.assertEqual(decimal.Decimal('0.02'), x.price_improvement)
         self.assertEqual(decimal.Decimal(1), x.leaves_quantity,
                          "the block's own leaves were not read")
+        both = fill()
+        both['BaseEvent']['OrderFillCompletedEventOrderLegQuantityInfo'][
+                'PriceImprovement'] = dec(30000)
+        x = read_account_activity(item('OrderFillCompleted', both)).execution
+        self.assertEqual(decimal.Decimal('0.03'), x.price_improvement,
+                         "the block's own price improvement did not win")
 
     @no_duplicates
     def test_a_fills_side_is_never_another_legs(self):
@@ -385,7 +392,7 @@ class NeverAFillTest(unittest.TestCase):
                 base = data['BaseEvent']
                 base[message_type + 'EventOrderLegQuantityInfo'] = base.pop(
                         'OrderFillCompletedEventOrderLegQuantityInfo')
-                del base['EventType']
+                base['EventType'] = message_type
                 self.assertIs(K.UNKNOWN, read_account_activity(
                         item(message_type, data)).kind)
 
@@ -415,10 +422,35 @@ class NeverAFillTest(unittest.TestCase):
                         'a real shape of fill was refused')
 
     @no_duplicates
-    def test_a_fill_without_a_trans_type_is_a_fill(self):
-        event = read_account_activity(item('OrderFillCompleted',
-                                           fill(trans=None)))
-        self.assertIs(K.FILL, event.kind)
+    def test_a_fill_missing_a_sign_of_one_is_unknown(self):
+        # Every real fill counted carried each of these: an item without one
+        # lacks the signal that tells a fill from a cancel.
+        block = 'OrderFillCompletedEventOrderLegQuantityInfo'
+        no_event = fill()
+        del no_event['BaseEvent']['EventType']
+        no_leg = fill()
+        del no_leg['BaseEvent'][block]['LegSubStatus']
+        for name, data in (('no trans-type', fill(trans=None)),
+                           ('no event type', no_event),
+                           ('no leg sub-status', no_leg)):
+            with self.subTest(name):
+                self.assertIs(K.UNKNOWN, read_account_activity(
+                        item('OrderFillCompleted', data)).kind,
+                        'an item missing a sign of a fill was read as one')
+
+    @no_duplicates
+    def test_a_leg_that_ended_otherwise_is_not_a_fill(self):
+        for sub in ('LegSubStatusRejected', 'LegSubStatusBusted',
+                    'LegSubStatusUROut', 'LegSubStatusExpired',
+                    'LegSubStatusReplaced', 'LegSubStatusCancelledFilled'):
+            with self.subTest(sub):
+                data = fill(extra_block={'LegSubStatus': sub})
+                self.assertIs(K.UNKNOWN, read_account_activity(
+                        item('OrderFillCompleted', data)).kind,
+                        'a leg that ended otherwise was read as a fill')
+        data = fill(extra_block={'LegSubStatus': {'Value': 'Filled'}})
+        self.assertIs(K.UNKNOWN, read_account_activity(
+                item('OrderFillCompleted', data)).kind)
 
     @no_duplicates
     def test_no_fragment_makes_a_fill(self):
@@ -566,6 +598,21 @@ class KindsTest(unittest.TestCase):
         event = read_account_activity(item('OrderFillCompleted', many))
         self.assertEqual(aa.MAX_SYMBOLS, len(event.symbols))
         self.assertIsInstance(event.symbols[0][0], tuple)
+
+    @no_duplicates
+    def test_a_mapping_that_cannot_be_read_is_unknown(self):
+        class Broken(collections.abc.Mapping):
+            def __getitem__(self, key):
+                raise KeyError(key)
+
+            def __len__(self):
+                return 1
+
+            def __iter__(self):
+                raise RuntimeError('cannot iterate')
+        event = read_account_activity(Broken())
+        self.assertIs(K.UNKNOWN, event.kind)
+        self.assertEqual('unreadable', event.problem)
 
     @no_duplicates
     def test_any_mapping_is_read_and_the_event_hashes(self):

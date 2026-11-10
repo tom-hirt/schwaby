@@ -1462,8 +1462,9 @@ before, and call it on each item of ``msg['content']`` if they want it.
 .. danger::
 
    **Only** :attr:`~schwaby.contrib.account_activity.AccountActivityKind.FILL`
-   **is a fill.** It is ``OrderFillCompleted`` with no sign of a cancel, one
-   per execution. ``ExecutionCreated`` is
+   **is a fill.** It is ``OrderFillCompleted`` carrying every sign of a fill
+   and no sign of anything else, one per execution; the docstring below lists
+   the rules. ``ExecutionCreated`` is
    :attr:`~schwaby.contrib.account_activity.AccountActivityKind.EXECUTION`
    whatever it carries, since a cancel emits one with a non-zero quantity.
    Anything doubtful is
@@ -1485,8 +1486,9 @@ The rules that keep an item off ``FILL`` were checked against 682 real fills
 one consumer recorded: each had one event block and one ``ExecutionInfo``,
 every ``EventType`` and ``ExecutionTransType`` was the fill's own, every
 quantity was above zero, none carried a cancel key, and every
-``LegSubStatus`` was filled or partially filled. Every one of them reads as
-a fill. A fill of an option order, or of an order of several legs, was not
+``LegSubStatus`` was filled or partially filled. Those are counts of the keys
+the rules read; the fills themselves have not been run through this
+function. A fill of an option order, or of an order of several legs, was not
 among them.
 
 .. autofunction:: schwaby.contrib.account_activity.read_account_activity

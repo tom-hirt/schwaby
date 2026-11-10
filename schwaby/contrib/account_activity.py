@@ -357,10 +357,10 @@ def _doubtful_fill(data, message_type, blocks):
     one, anywhere in it: so that a doubtful item is never a fill.
 
     Each rule held on every one of 682 real fills a consumer counted: one
-    event block and one ``ExecutionInfo`` each, every ``EventType`` (two per
-    item) the fill's own, every ``ExecutionTransType`` ``Fill``, a positive
-    ``ExecutionQuantity``, no cancel key, and a ``LegSubStatus`` of filled or
-    partially filled.'''
+    event block and one ``ExecutionInfo`` each, ``EventType`` present (twice)
+    and always the fill's own, ``ExecutionTransType`` present and ``Fill``, a
+    positive ``ExecutionQuantity``, no cancel key, and a ``LegSubStatus`` of
+    filled (616) or partially filled (66).'''
     if len(blocks) != 1 or not isinstance(_get(blocks[0], 'ExecutionInfo'),
                                          dict):
         return True
@@ -368,23 +368,39 @@ def _doubtful_fill(data, message_type, blocks):
     if quantity is None or quantity <= 0:
         return True
     own = _fold(message_type)
-    infos = 0
+    infos = events = trans = legs = 0
     for _, key, child in _walk(data):
         folded = key.casefold() if isinstance(key, str) else None
         if folded in _CANCEL_KEYS:
             return True
         if folded == 'executioninfo':
             infos += 1
-        elif folded == 'eventtype' and not (
-                isinstance(child, str) and _fold(child) == own):
-            return True
-        elif folded == 'executiontranstype' and not (
-                isinstance(child, str) and _fold(child) == 'FILL'):
-            return True
-        elif folded == 'legsubstatus' and isinstance(child, str) and (
-                'CANCEL' in _fold(child)):
-            return True
-    return infos != 1
+        elif folded == 'eventtype':
+            if not (isinstance(child, str) and _fold(child) == own):
+                return True
+            events += 1
+        elif folded == 'executiontranstype':
+            if not (isinstance(child, str) and _fold(child) == 'FILL'):
+                return True
+            trans += 1
+        elif folded == 'legsubstatus':
+            if not _filled_leg(child):
+                return True
+            legs += 1
+    # Each was present on every real fill counted: required, not just not
+    # contradicted, so that an item missing the one signal that tells a
+    # fill from a cancel is never a fill.
+    return infos != 1 or not events or not trans or not legs
+
+
+def _filled_leg(value):
+    '''Whether a ``LegSubStatus`` says filled or partially filled, the only
+    two seen on real fills, and nothing that ends an order otherwise.'''
+    if not isinstance(value, str):
+        return False
+    folded = _fold(value)
+    return folded.endswith('FILLED') and not any(
+            fragment in folded for fragment in _NOT_A_FILL)
 
 
 def _fold(text):
@@ -479,11 +495,16 @@ def read_account_activity(item):
     :attr:`AccountActivityKind.UNKNOWN`.
 
     **A fill is** ``OrderFillCompleted`` **and nothing else**, and then only
-    with no sign anywhere in the item that it is not one: exactly one event
-    block of that type, carrying an ``ExecutionInfo``; no ``EventType`` that
-    names another; every ``ExecutionTransType`` ``Fill``; and no
-    ``CancelType``, ``OutCancelType`` or ``CancelRequestType`` at all. A
-    fragment of a type never makes anything a fill, and ``ExecutionCreated``
+    with every sign of one and no sign anywhere in the item that it is not
+    one. It must have exactly one event block of that type, carrying an
+    ``ExecutionInfo`` with an ``ExecutionQuantity`` above zero, and exactly
+    one ``ExecutionInfo`` in the item. At least one ``EventType``,
+    ``ExecutionTransType`` and ``LegSubStatus`` must be present, and every one
+    of them must be the fill's own type, ``Fill``, and filled or partially
+    filled. No ``CancelType``, ``OutCancelType``, ``CancelRequestType``,
+    ``CancelQuantity`` or ``LegCancelRequestInfoList`` may appear at all. Keys
+    match whatever their case. A fragment of a type never makes anything a
+    fill, and ``ExecutionCreated``
     is :attr:`~AccountActivityKind.EXECUTION` whatever it carries, so summing
     ``execution.execution_quantity`` over fills counts each execution once.
 
@@ -495,10 +516,7 @@ def read_account_activity(item):
     leg need not be the leg that filled. ``symbols`` lists the symbols in the
     item, for a caller that must refuse an ambiguous one.
     '''
-    if isinstance(item, collections.abc.Mapping) and not isinstance(
-            item, dict):
-        item = dict(item)
-    if not isinstance(item, dict):
+    if not isinstance(item, collections.abc.Mapping):
         raise TypeError('an ACCT_ACTIVITY content item is a mapping, not '
                         '{}'.format(type(item).__name__))
     try:
