@@ -562,13 +562,17 @@ _SEVERING_CODES = frozenset({12, 30})
 
 #: The codes on a notice that a caller recovers from by reconnecting, or that
 #: report a success, by Schwab's streamer documentation: 30 (STOP_STREAMING,
-#: which Schwab sends for inactivity, slowness or its connection time limit),
-#: 20 (STREAM_CONN_NOT_FOUND), and 0 and 26 to 29. Such a notice is logged at
-#: INFO, and its caller, through the error handlers and last_close, decides
-#: whether it matters. Any other code, or none, is logged at WARNING: 12, a
-#: login used elsewhere, which reconnecting would only take back; 3, a
-#: refused login, which needs a new token; and a code nobody has documented.
-_ROUTINE_NOTICE_CODES = frozenset({0, 20, 26, 27, 28, 29, 30})
+#: which Schwab documents for administrator action, inactivity or slowness),
+#: and 0 and 26 to 29. Such a notice is logged at INFO, and its caller,
+#: through the error handlers and last_close, decides whether it matters. Any
+#: other code, or none, is logged at WARNING: 12, a login used elsewhere,
+#: which reconnecting would only take back; 3, a refused login, which needs a
+#: new token; 20, a connection Schwab cannot find, which it documents as
+#: caused by the client and to be investigated; and a code nobody documents.
+_ROUTINE_NOTICE_CODES = frozenset({0, 26, 27, 28, 29, 30})
+
+#: How much of a notice's message its log record's field keeps.
+_NOTICE_MSG_BOUND = 500
 
 
 class UnparsableMessage(SchwabError):
@@ -1325,15 +1329,21 @@ class StreamClient(EnumEnforcer):
 
     async def _report_notice(self, notice, element):
         self._last_notice = notice
-        level = (logging.INFO if notice.code in _ROUTINE_NOTICE_CODES
-                 else logging.WARNING)
+        try:
+            routine = notice.code in _ROUTINE_NOTICE_CODES
+        except Exception:
+            # A decoder's code whose hash raises is no code documented here.
+            routine = False
+        level = logging.INFO if routine else logging.WARNING
         # The code and message as fields of the record too, for a handler
-        # that sorts by them. The message is redacted here: the logger's
-        # filter redacts the record's message, not fields beside it.
+        # that sorts by them. The message is redacted, and bounded, here:
+        # the logger's filter redacts the record's message, not fields
+        # beside it.
+        msg = (None if notice.msg is None else _redact.before_cut(
+                notice.msg, _NOTICE_MSG_BOUND)[:_NOTICE_MSG_BOUND])
         self.logger.log(level, '%s', notice, extra={
                 'stream_notice_code': notice.code,
-                'stream_notice_msg': (None if notice.msg is None
-                                      else _redact.redact(notice.msg)),
+                'stream_notice_msg': msg,
                 'stream_notice_channel': notice.channel})
         await self._report_error(notice, service='ADMIN', message=element)
 

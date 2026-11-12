@@ -6271,7 +6271,8 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         import logging
         from schwaby import _redact
         _redact.register('NOTICE-SECRET-123', 'TEST_SECRET')
-        for code, level in ((30, logging.INFO), (20, logging.INFO),
+        for code, level in ((30, logging.INFO), (0, logging.INFO),
+                            (26, logging.INFO), (20, logging.WARNING),
                             (12, logging.WARNING), (3, logging.WARNING),
                             (99, logging.WARNING), (None, logging.WARNING)):
             with self.subTest(code=code):
