@@ -6719,8 +6719,8 @@ SUITE_CASES = [
     # where there are two threads per core.
     Case('suite/auto-workers-come-from-the-hook',
          'tests/conftest.py',
-         '    return min(cores, cap) if cap is not None else cores',
-         '    return None',
+         "    return cores if os.environ.get('REDPROOF_JOBS_ALL') else min(\n",
+         '    return None if True else min(\n',
          'tests/suite_config_test.py::AutoWorkersTest'
          '::test_auto_is_the_usable_core_count_not_the_machines',
          'did not start one worker per usable core'),
@@ -6738,19 +6738,35 @@ SUITE_CASES = [
          'tests/suite_config_test.py::AutoWorkersTest'
          '::test_before_3_13_the_affinity_mask_decides',
          'ignored the affinity mask'),
+    # A direct run, on a machine others share, uses two workers at most; a
+    # queued job uses every usable core (the engineering standard's §2.5).
+    Case('suite/a-direct-run-uses-two-workers',
+         'tests/conftest.py',
+         "    return cores if os.environ.get('REDPROOF_JOBS_ALL') else min(\n            cores, DIRECT_RUN_WORKERS)",
+         "    return cores",
+         'tests/suite_config_test.py::AutoWorkersTest'
+         '::test_a_direct_run_uses_two_workers',
+         'a direct run started more than two workers', subtest='usable=7'),
+    Case('suite/a-queued-job-uses-every-usable-core',
+         'tests/conftest.py',
+         "    return cores if os.environ.get('REDPROOF_JOBS_ALL') else min(\n            cores, DIRECT_RUN_WORKERS)",
+         "    return min(cores, DIRECT_RUN_WORKERS)",
+         'tests/suite_config_test.py::AutoWorkersTest'
+         '::test_auto_is_the_usable_core_count_not_the_machines',
+         'did not start one worker per usable core'),
     # Under a CPU quota, SUITE_CORES bounds the workers: process_cpu_count()
     # cannot see the quota.
     Case('suite/auto-workers-honour-the-core-cap',
          'tests/conftest.py',
-         '    return min(cores, cap) if cap is not None else cores',
-         '    return cores',
+         '        return min(cores, cap)\n',
+         '        return cores\n',
          'tests/suite_config_test.py::AutoWorkersTest'
          '::test_a_jobs_core_cap_bounds_the_workers',
          '4 != 7', subtest="SUITE_CORES='4'"),
     Case('suite/a-core-cap-only-lowers-the-workers',
          'tests/conftest.py',
-         '    return min(cores, cap) if cap is not None else cores',
-         '    return max(cores, cap) if cap is not None else cores',
+         '        return min(cores, cap)\n',
+         '        return max(cores, cap)\n',
          'tests/suite_config_test.py::AutoWorkersTest'
          '::test_a_jobs_core_cap_bounds_the_workers',
          '7 != 16', subtest="SUITE_CORES='16'"),

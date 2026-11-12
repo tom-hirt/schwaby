@@ -33,13 +33,22 @@ def job_cores():
 # that is half of what the suite can use, and it ignores an affinity mask, so
 # a run confined to four cores of a large machine starts too many. The
 # PYTEST_XDIST_AUTO_NUM_WORKERS override still wins, as it does in xdist.
-# Inside a job with a core cap, SUITE_CORES bounds it.
+# Inside a job with a core cap, SUITE_CORES bounds it. A queued job
+# (REDPROOF_JOBS_ALL set) uses every usable core; a direct run, on a machine
+# others share, uses at most DIRECT_RUN_WORKERS, as the engineering
+# standard's §2.5 says.
+DIRECT_RUN_WORKERS = 2
+
+
 @pytest.hookimpl(optionalhook=True)
 def pytest_xdist_auto_num_workers(config):
     if os.environ.get('PYTEST_XDIST_AUTO_NUM_WORKERS'):
         return None
     cores, cap = usable_cpus(), job_cores()
-    return min(cores, cap) if cap is not None else cores
+    if cap is not None:
+        return min(cores, cap)
+    return cores if os.environ.get('REDPROOF_JOBS_ALL') else min(
+            cores, DIRECT_RUN_WORKERS)
 
 
 # A fixed callback port makes two runs of the suite on one machine fail each

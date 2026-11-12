@@ -28,6 +28,10 @@ def fake_os(environ=None, **calls):
     return types.SimpleNamespace(environ=environ or {}, **calls)
 
 
+#: The environment of a queued job, which may use every usable core.
+JOB = {'REDPROOF_JOBS_ALL': '1'}
+
+
 class AutoWorkersTest(unittest.TestCase):
 
     def setUp(self):
@@ -39,14 +43,24 @@ class AutoWorkersTest(unittest.TestCase):
 
     def test_auto_is_the_usable_core_count_not_the_machines(self):
         self.assertEqual(7, self.workers(fake_os(
-            process_cpu_count=lambda: 7, sched_getaffinity=lambda pid: {0},
-            cpu_count=lambda: 99)),
+            environ=JOB, process_cpu_count=lambda: 7,
+            sched_getaffinity=lambda pid: {0}, cpu_count=lambda: 99)),
             '-n auto did not start one worker per usable core')
 
     def test_before_3_13_the_affinity_mask_decides(self):
         self.assertEqual(3, self.workers(fake_os(
-            sched_getaffinity=lambda pid: {0, 1, 2}, cpu_count=lambda: 99)),
+            environ=JOB, sched_getaffinity=lambda pid: {0, 1, 2},
+            cpu_count=lambda: 99)),
             '-n auto ignored the affinity mask')
+
+    def test_a_direct_run_uses_two_workers(self):
+        # Outside a queued job the machine is shared: two workers, or fewer
+        # where fewer cores are usable.
+        for usable, expected in ((7, 2), (1, 1)):
+            with self.subTest(usable=usable):
+                self.assertEqual(expected, self.workers(fake_os(
+                    process_cpu_count=lambda: usable)),
+                    'a direct run started more than two workers')
 
     def test_a_jobs_core_cap_bounds_the_workers(self):
         # A run under a CPU quota may use fewer cores than
@@ -58,7 +72,7 @@ class AutoWorkersTest(unittest.TestCase):
                                 ('-2', 7)):
             with self.subTest(SUITE_CORES=value):
                 self.assertEqual(expected, self.workers(fake_os(
-                    environ={'SUITE_CORES': value},
+                    environ=dict(JOB, SUITE_CORES=value),
                     process_cpu_count=lambda: 7)))
 
     def test_the_environment_override_still_wins(self):
