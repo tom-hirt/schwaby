@@ -550,14 +550,27 @@ class Result:
         self.killed = killed        # why it has no exit status
 
 
-def run_tests(workdir, copy, nodes, audit_script, record,
-              limit=RUN_LIMIT):
+def test_env(workdir, environ=os.environ):
+    '''The environment a run of tests is given: a few variables, not the
+    caller's. A queued job's mark goes with it, REDPROOF_JOBS_ALL: the tests
+    that signal processes run only where it is set (tests/signals/
+    conftest.py), and queued_only lets their entries run only in such a job.
+    Left out, they would be skipped, and a skip passes, so every such entry's
+    mutation would read as unnoticed.'''
     env = {
-        'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
+        'PATH': environ.get('PATH', '/usr/bin:/bin'),
         'HOME': os.path.join(workdir, 'home'),
         'TMPDIR': os.path.join(workdir, 'tmp'),
         'LANG': 'C.UTF-8',
     }
+    if environ.get('REDPROOF_JOBS_ALL'):
+        env['REDPROOF_JOBS_ALL'] = environ['REDPROOF_JOBS_ALL']
+    return env
+
+
+def run_tests(workdir, copy, nodes, audit_script, record,
+              limit=RUN_LIMIT):
+    env = test_env(workdir)
     os.makedirs(env['HOME'], exist_ok=True)
     os.makedirs(env['TMPDIR'], exist_ok=True)
     env['REDPROOF_AUDIT'] = record

@@ -10592,6 +10592,17 @@ CASES += [
          subtest='code=30'),
 ]
 
+# The red-proof passes a queued job's mark to the tests it runs, so the
+# signal-sending ones run there rather than skip (5.8.0).
+CASES += [
+    Case('harness/a-queued-jobs-mark-reaches-the-tests',
+         'tools/redproof.py',
+         "    if environ.get('REDPROOF_JOBS_ALL'):\n        env['REDPROOF_JOBS_ALL'] = environ['REDPROOF_JOBS_ALL']\n",
+         '',
+         'tests/redproof_tool_test.py::QueuedOnlyTest::test_a_queued_jobs_mark_reaches_the_tests',
+         "a queued job's mark did not reach the tests"),
+]
+
 # Out of the release red-proof (2026-11-09): entries on tooling, test
 # scaffolding, docs and CI, which leave it while their tests stay in the
 # gate, run on every merge; entries already removed or declared GREEN; and

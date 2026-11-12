@@ -534,6 +534,17 @@ class RunRecordTest(unittest.TestCase):
 
 class QueuedOnlyTest(unittest.TestCase):
 
+    def test_a_queued_jobs_mark_reaches_the_tests(self):
+        # Without it the tests that signal processes are skipped, and a skip
+        # passes: their entries would all read as unnoticed.
+        self.assertEqual('1', redproof.test_env(
+                '/w', {'REDPROOF_JOBS_ALL': '1'}).get('REDPROOF_JOBS_ALL'),
+                "a queued job's mark did not reach the tests")
+        self.assertNotIn('REDPROOF_JOBS_ALL', redproof.test_env('/w', {}))
+        # Nothing else of the caller's goes with it.
+        self.assertNotIn('SECRET', redproof.test_env(
+                '/w', {'SECRET': 'x', 'REDPROOF_JOBS_ALL': '1'}))
+
     def test_an_entry_that_signals_runs_only_as_a_queued_job(self):
         signals = cases.Case('x/signals', 'tools/redproof.py', 'a', 'b',
                              'tests/signals/worker_test.py::WorkerTest::'
