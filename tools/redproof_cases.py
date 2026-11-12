@@ -10567,6 +10567,31 @@ CASES += [
          subtest='asyncio=True'),
 ]
 
+# A notice is logged at the level its code deserves, with redacted fields.
+CASES += [
+    Case('stream-notice/a-routine-notice-is-info',
+         'schwaby/streaming.py',
+         '_ROUTINE_NOTICE_CODES = frozenset({0, 20, 26, 27, 28, 29, 30})',
+         '_ROUTINE_NOTICE_CODES = frozenset()',
+         'tests/streaming_test.py::StreamClientTest::test_a_notice_is_logged_at_the_level_its_code_deserves',
+         'a notice was logged at the wrong level',
+         subtest='code=30'),
+    Case('stream-notice/a-notice-needing-a-person-is-a-warning',
+         'schwaby/streaming.py',
+         '        level = (logging.INFO if notice.code in _ROUTINE_NOTICE_CODES\n                 else logging.WARNING)\n',
+         '        level = logging.INFO\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_notice_is_logged_at_the_level_its_code_deserves',
+         'a notice was logged at the wrong level',
+         subtest='code=12'),
+    Case('stream-notice/a-notices-message-field-is-redacted',
+         'schwaby/streaming.py',
+         '                                      else _redact.redact(notice.msg)),\n',
+         '                                      else notice.msg),\n',
+         'tests/streaming_test.py::StreamClientTest::test_a_notice_is_logged_at_the_level_its_code_deserves',
+         "a notice's message field was not redacted",
+         subtest='code=30'),
+]
+
 # Out of the release red-proof (2026-11-09): entries on tooling, test
 # scaffolding, docs and CI, which leave it while their tests stay in the
 # gate, run on every merge; entries already removed or declared GREEN; and

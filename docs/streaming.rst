@@ -504,6 +504,15 @@ reported, so an ``except`` clause for it never runs. Every one inherits
 .. autoexception:: schwaby.streaming.UnparsableMessage
 .. autoexception:: schwaby.streaming.UnusableMessage
 
+A notice is logged on ``schwaby.streaming``, at INFO when its code is one a
+caller recovers from by reconnecting or a success (30, Schwab ending the
+stream for inactivity, slowness or its connection time limit; 20; 0 and 26 to
+29), and at WARNING otherwise: 12, a login used elsewhere, which reconnecting
+would only take back; 3, a refused login; any code not documented. The
+record carries ``stream_notice_code``, ``stream_notice_msg`` (redacted) and
+``stream_notice_channel``. Whatever its level, the notice reaches the error
+handlers, so the caller decides whether it matters.
+
 A notice's ``channel`` says where it came. ``'response'`` is an answer to no
 request the client is waiting on, with its ``requestid``: an ``ADMIN`` one
 other than to a login or logout, whatever its code, or one carrying a

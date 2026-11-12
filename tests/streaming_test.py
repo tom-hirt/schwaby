@@ -6266,6 +6266,43 @@ class StreamClientTest(IsolatedAsyncioTestCase):
 
     @no_duplicates
     @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_a_notice_is_logged_at_the_level_its_code_deserves(
+            self, ws_connect):
+        import logging
+        from schwaby import _redact
+        _redact.register('NOTICE-SECRET-123', 'TEST_SECRET')
+        for code, level in ((30, logging.INFO), (20, logging.INFO),
+                            (12, logging.WARNING), (3, logging.WARNING),
+                            (99, logging.WARNING), (None, logging.WARNING)):
+            with self.subTest(code=code):
+                self.setUp()
+                socket = await self.login_and_get_socket(ws_connect)
+                reported = []
+                self.client.add_error_handler(
+                        lambda service, exc, message: reported.append(exc))
+                content = {'msg': 'Stop streaming NOTICE-SECRET-123'}
+                if code is not None:
+                    content['code'] = code
+                socket.recv.side_effect = [json.dumps(
+                        {'notify': [{'service': 'ADMIN',
+                                     'content': content}]})]
+                with self.assertLogs('schwaby.streaming',
+                                     level=logging.DEBUG) as logs:
+                    await self.client.handle_message()
+                notices = [r for r in logs.records
+                           if hasattr(r, 'stream_notice_code')]
+                self.assertEqual([level], [r.levelno for r in notices],
+                                 'a notice was logged at the wrong level')
+                self.assertEqual(code, notices[0].stream_notice_code)
+                self.assertEqual('notify', notices[0].stream_notice_channel)
+                self.assertNotIn('NOTICE-SECRET-123',
+                                 notices[0].stream_notice_msg,
+                                 "a notice's message field was not redacted")
+                self.assertEqual(1, len(reported),
+                                 'the notice did not reach the caller')
+
+    @no_duplicates
+    @patch('schwaby.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_an_admin_notice_is_reported_not_dropped(self, ws_connect):
         from schwaby.streaming import StreamNotice
         socket = await self.login_and_get_socket(ws_connect)
