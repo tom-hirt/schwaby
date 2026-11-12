@@ -26,6 +26,46 @@ what each entry says changed, is the same.
 
 ---
 
+## 5.8.0
+
+*2026-11-12*
+
+A minor release: stream notices are logged at the level their code
+deserves, with the code and message as fields of the log record, and one
+more fix to a shared token file's refresh. Nothing public is removed.
+
+### Changed: a stream notice's log level follows its code
+
+Every `StreamNotice` was logged at WARNING, so the stream ending with code
+30 (STOP_STREAMING), which a reconnect recovers from, read as a problem in a
+log. A notice is now logged on `schwaby.streaming` at INFO when its code is
+one a caller recovers from by reconnecting, or a success: 30, which Schwab
+documents for administrator action, inactivity or slowness; 0 and 26 to 29.
+Any other code, or none, stays at WARNING:
+- 12, a login used elsewhere, which reconnecting would only take back;
+- 3, a refused login;
+- 20, a connection Schwab cannot find, which it documents as the client's
+  to investigate;
+- any code not documented.
+
+**A handler or alert keyed on WARNING no longer sees code 30.** Whatever its
+level, the notice still reaches the error handlers and `last_close`, so a
+caller decides whether it matters.
+
+### Added: the notice's fields on its log record
+
+The record carries `stream_notice_code` (an int or `None`),
+`stream_notice_msg` (redacted, and cut to 500 characters) and
+`stream_notice_channel`.
+
+### Fixed: a shared token file's refresh
+
+`ensure_token_fresh` on a client sharing a token file compares with the
+token it found due, not the one the refresh saw on entering. So a request's
+refresh in another thread that lands between the two counts as a token
+taken, and no second refresh is sent. Its docstring now says when it can
+answer `FRESH` inside its margin.
+
 ## 5.7.0
 
 *2026-11-10*
