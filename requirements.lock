@@ -20,7 +20,7 @@ alabaster==1.0.0
     # via sphinx
 anyio==4.15.1 ; sys_platform != 'emscripten'
     # via httpx2
-authlib==1.9.1
+authlib==1.9.6
     # via schwaby (setup.py)
 autopep8==2.3.2
     # via schwaby (setup.py)
@@ -171,7 +171,7 @@ pycparser==3.11 ; python_full_version < '3.11' and implementation_name != 'PyPy'
     # via cffi
 pycparser==3.12 ; python_full_version >= '3.11' and implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
     # via cffi
-pyflakes==4.0.3
+pyflakes==4.1.0
     # via schwaby (setup.py)
 pygments==2.21.0
     # via
@@ -279,7 +279,7 @@ urllib3==2.8.0
     #   twine
 websockets==16.1.1 ; python_full_version < '3.11'
     # via schwaby (setup.py)
-websockets==17.3 ; python_full_version >= '3.11'
+websockets==17.4 ; python_full_version >= '3.11'
     # via schwaby (setup.py)
 werkzeug==3.1.9
     # via flask
