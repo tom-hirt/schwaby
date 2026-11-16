@@ -26,6 +26,71 @@ what each entry says changed, is the same.
 
 ---
 
+## 5.9.0
+
+*2026-11-16*
+
+A minor release: stream logins run one at a time, and a stream request
+belongs to the connection it was made on, with a new exception for one a
+login replaced. Nothing public is removed.
+
+### Fixed: two logins at once on one stream client
+
+Two `StreamClient.login()` calls running at once, from two tasks, could each
+open a socket. The first sent its LOGIN on its own socket but read for the
+answer on the other's, and raised `ResponseTimeoutError` after
+`response_timeout` (60 seconds by default); its socket was left open and
+logged in, and nothing closed it. A subscribe started as a relogin began was
+sent on the old socket, which the login then closed, and timed out the same
+way, holding the relogin up behind it. One started a moment later, while the
+new socket connected, raised `ValueError("Socket not open. Did you forget to
+call login()?")`.
+
+Now:
+- `login()` and `logout()` run one at a time on a client. A second waits for
+  the first to return, then replaces its connection, which closes.
+- A request belongs to the connection it was made on; one made while a login
+  runs waits for that login and is made on the connection it opens.
+- A login that replaces a connection fails the request waiting on it at
+  once, and refuses any still queued for it, with the new
+  `StreamConnectionReplacedError`. Neither is sent on the new connection,
+  since what it asked for belonged to the old one: subscribe again once the
+  login has returned.
+- A connection that closed still raises the close, as before.
+
+**A caller that logs in from more than one task may now see
+`StreamConnectionReplacedError`** from a subscribe, unsubscribe or other
+request where it used to see a timeout. Catch it beside the
+`ConnectionClosed` it already handles.
+
+A login made from inside the running one, as a close or error handler can,
+is part of that login and does not wait, whether the handler awaits it
+directly or through `asyncio.wait_for`, `gather` or `shield`. A task a
+handler detaches inside a login, and does not await, inherits that login's
+context and runs beside it: start such a task after the login has
+returned. The streaming docs' "Logging in again while requests run" has the
+rules.
+
+### Fixed: a refused login and a handler's login
+
+A refused login whose error handler had logged in again meanwhile closed
+the handler's new connection, and recorded the refusal over it. It now
+closes, and records the refusal for, only its own socket.
+
+The same class of race was found and fixed in
+[Schwab-py-NG](https://github.com/neusse/Schwab-py-NG/commit/6ec1c508) and in
+[TalkToChuck](https://github.com/yoshishima/TalkToChuck/commit/44c0bd1f5f3c60407329d2617e70f98ece4ba63a);
+no code is taken from either.
+
+### Also
+
+- The docs warn that a fill notice can carry no execution and be the only
+  word of its order: one that reads as `UNKNOWN` and names an order is a
+  reason to fetch that order from the REST API.
+- The test lock moves to websockets 17.4, authlib 1.9.6 and pyflakes 4.1.0.
+  schwaby's requirements are unchanged.
+- The red-proof tool refuses to run outside a queued job.
+
 ## 5.8.0
 
 *2026-11-12*
