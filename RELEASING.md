@@ -108,6 +108,14 @@ tidying along.
 **Run the suite after merging into `main`, not just on the branch.** Two branches
 that each pass can still fail together. It costs four seconds.
 
+**Then read `main`'s CI for that commit, every leg, before the next merge.**
+A local run covers the Pythons installed here, not the matrix. A lock that
+pinned a package needing a newer Python than the oldest supported one failed
+every 3.10 leg at installing dependencies, on every commit to `main` for a
+day, while each branch's own tests passed. When a lock moves, check each
+pinned package's `Requires-Python` against the oldest supported Python, and
+give that Python its own pin where it needs one.
+
 ## Dependencies
 
 Nothing opens update pull requests on a timer: CI runs when code it tests
