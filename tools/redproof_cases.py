@@ -10626,7 +10626,7 @@ CASES += [
     Case('stream-login/a-logins-own-request-does-not-wait-for-it',
          'schwaby/streaming.py',
          "                and not self._in_the_running_login()):\n            await running.wait()\n",
-         "                and False):\n            await running.wait()\n",
+         "                and True):\n            await running.wait()\n",
          'tests/streaming_test.py::StreamConnectionBindingTest::test_concurrent_logins_leave_one_connection_open',
          'concurrent logins did not run one at a time'),
     Case('stream-request/a-request-made-during-a-login-waits-for-it',
