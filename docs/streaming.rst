@@ -1493,6 +1493,13 @@ before, and call it on each item of ``msg['content']`` if they want it.
    read ``execution.cumulative_quantity`` as the running total; never sum the
    cumulative quantities, since one order can fill in many executions.
 
+   **An** ``OrderFillCompleted`` **can carry no execution, and be the only
+   word of its order.** Two of 733 in one consumer's recorded stream had no
+   ``ExecutionInfo``, quantity or leg status, and no other item in it named
+   their orders. They read as ``UNKNOWN``, so a caller that counts only
+   ``FILL`` books nothing for them. Read an ``UNKNOWN`` that names an order
+   as a reason to fetch that order from the REST API, not as noise.
+
 It neither logs nor keeps state, and it never raises on what an item holds.
 Every number is a :class:`~decimal.Decimal` or ``None``, never a float, and
 ``None`` means Schwab sent nothing or an empty object. It does not mean zero:
@@ -1507,10 +1514,12 @@ every ``EventType`` and ``ExecutionTransType`` was the fill's own, the
 ``ExecutionQuantity``, ``ExecutionPrice``, ``AveragePrice`` and
 ``CumulativeQuantity`` were all above zero, no execution exceeded its
 cumulative quantity, none carried a cancel key, and every
-``LegSubStatus`` was filled or partially filled. Those are counts of the keys
-the rules read; the fills themselves have not been run through this
-function. A fill of an option order, or of an order of several legs, was not
-among them.
+``LegSubStatus`` was filled or partially filled. The released function was
+then run over that consumer's whole recorded stream: 731 of its 733
+``OrderFillCompleted`` items read as ``FILL``. The other two carried no
+execution at all and read as ``UNKNOWN``; whether their orders filled, and
+for how much, is not known. All of these were equity orders: a fill of an
+option order, or of an order of several legs, was not among them.
 
 .. autofunction:: schwaby.contrib.account_activity.read_account_activity
 .. autoclass:: schwaby.contrib.account_activity.AccountActivityKind
