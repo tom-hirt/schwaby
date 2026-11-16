@@ -1233,7 +1233,8 @@ class StreamClient(EnumEnforcer):
         for each connection that ends: whichever call finds the close, and
         before that call raises. A coroutine it returns is awaited. Its own
         exception is logged and reported through the error handlers, and
-        does not stop the others. It may log in again: no lock is held.'''
+        does not stop the others. It may log in again: no lock is held, and
+        a login already running in another task is waited for.'''
         self._close_handlers.append(handler)
 
     def add_heartbeat_handler(self, handler):

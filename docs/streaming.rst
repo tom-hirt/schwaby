@@ -172,9 +172,11 @@ be waiting to log in.
 .. note::
 
    **A task you create from a handler inside a login, and do not await, is
-   part of that login too**: it inherits the login's context, so a login or a
-   request it makes runs beside the login rather than waiting for it. Start
-   such a task after the login has returned. And let one thing reconnect:
+   part of that login too**: it inherits the login's context, so a login it
+   makes runs beside that login, and beside one that follows, rather than
+   waiting; and a request it makes does not wait either, so it can be refused
+   as replaced, or raise "Socket not open" while the new socket connects.
+   Start such a task after the login has returned. And let one thing reconnect:
    a caller that retries a login which raised a close, while its close
    handler logs in as well, gets two logins, the second replacing the first's
    connection.
