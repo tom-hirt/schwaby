@@ -6,6 +6,7 @@ ever notice.'''
 
 import argparse
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -545,34 +546,26 @@ class QueuedOnlyTest(unittest.TestCase):
         self.assertNotIn('SECRET', redproof.test_env(
                 '/w', {'SECRET': 'x', 'REDPROOF_JOBS_ALL': '1'}))
 
-    def test_an_entry_that_signals_runs_only_as_a_queued_job(self):
-        signals = cases.Case('x/signals', 'tools/redproof.py', 'a', 'b',
-                             'tests/signals/worker_test.py::WorkerTest::'
-                             'test_x', 'expected')
-        quiet = case()
-        self.assertEqual(['x/signals'],
-                         redproof.queued_only([signals, quiet], {}),
-                         'an entry that signals processes ran directly')
-        self.assertEqual([], redproof.queued_only(
-            [signals, quiet], {'REDPROOF_JOBS_ALL': '1'}),
-            'an entry that signals processes was held from a queued job')
-        # Positive control: one that signals nothing runs either way.
-        self.assertEqual([], redproof.queued_only([quiet], {}))
-
-    def test_a_test_that_runs_the_signalling_class_is_one(self):
-        for test, runs in (
-                ('tests/signals/worker_test.py::WorkerTest', True),
-                ('tests/signals/worker_test.py::WorkerTest::test_x', True),
-                ('./tests/signals/worker_test.py::WorkerTest', True),
-                ('tests/signals/worker_test.py', True),
-                ('tests/signals', True), ('tests/', True), ('tests', True),
-                ('.', True),
-                ('tests/redproof_tool_test.py', False),
-                ('tests/signals/worker_test.py::JudgeTest', False),
-                ('tests/signals/worker_test.py::WorkerTestX', False),
-                ('tests/light_check_test.py', False)):
-            with self.subTest(test=test):
-                self.assertEqual(runs, redproof.runs_signalling(test))
+    def test_the_tool_runs_only_as_a_queued_job(self):
+        # Refused before anything is copied or run, saying why, however few
+        # entries are named and whatever else the variable holds.
+        began = AssertionError('a run began outside a queued job')
+        for env in ({}, {'REDPROOF_JOBS_ALL': ''},
+                    {'REDPROOF_JOBS_ALL': '0'}, {'REDPROOF_JOBS_ALL': 'yes'}):
+            with self.subTest(env=env), \
+                    patch.dict(os.environ, env, clear=True), \
+                    patch.object(redproof, 'Run', side_effect=began), \
+                    patch('sys.stdout', new_callable=io.StringIO) as out:
+                self.assertEqual(2, redproof.main(['--name', 'one']))
+                self.assertIn('runs only as a queued job, which sets '
+                              'REDPROOF_JOBS_ALL=1', out.getvalue(),
+                              'the refusal did not say why')
+        # Positive control: a queued job goes on to the run.
+        with patch.dict(os.environ, {'REDPROOF_JOBS_ALL': '1'}), \
+                patch.object(redproof, 'Run',
+                             side_effect=RuntimeError('the run began')):
+            with self.assertRaisesRegex(RuntimeError, 'the run began'):
+                redproof.main(['--name', 'one'])
 
 
 class ReportTest(unittest.TestCase):
@@ -1015,11 +1008,12 @@ class ChangedSetTest(unittest.TestCase):
         git('commit', '-q', '-m', 'start')
 
         def run(*args):
+            # As a queued job, which the tool must be to start at all.
             out = subprocess.run(
                 [sys.executable, '-I', '-B',
                  os.path.join(repo, 'tools', 'redproof.py'), *args],
-                cwd=repo, env=env, capture_output=True, text=True,
-                timeout=120)
+                cwd=repo, env=dict(env, REDPROOF_JOBS_ALL='1'),
+                capture_output=True, text=True, timeout=120)
             return out.returncode, out.stdout + out.stderr
 
         code, out = run('--touching', 'main')

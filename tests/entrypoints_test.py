@@ -115,8 +115,10 @@ class EntrypointTest(unittest.TestCase):
         # From a checkout of its own, since it snapshots the git checkout it
         # sits in: a red-proof's copy of this one is not a checkout. Past its
         # imports, the snapshot and the cases file, to the first thing it
-        # can refuse without running an entry.
+        # can refuse without running an entry. As a queued job, which it
+        # must be to start at all.
         checkout, env = self.redproof_checkout()
+        env['REDPROOF_JOBS_ALL'] = '1'
         run = self.run_tool(os.path.join(checkout, 'tools', 'redproof.py'),
                             '--name', 'no-entry-is-called-this', env=env)
         self.assertEqual(2, run.returncode, run.stdout + run.stderr)
@@ -124,19 +126,19 @@ class EntrypointTest(unittest.TestCase):
                       run.stdout, run.stderr)
 
     @unittest.skipIf(os.name == 'nt', 'redproof.py runs on POSIX only')
-    def test_redproof_refuses_a_signalling_entry_run_directly(self):
-        # Refused before anything runs. The checkout holds no schwaby, so
-        # were the refusal gone the run would stop at the copy's import
-        # check, exit 1, and still run no entry.
+    def test_redproof_refuses_to_run_outside_a_queued_job(self):
+        # Refused before anything runs, even one entry that signals nothing.
+        # The checkout holds no schwaby, so were the refusal gone the run
+        # would stop at the copy's import check, exit 1, and still run no
+        # entry.
         checkout, env = self.redproof_checkout()
         env.pop('REDPROOF_JOBS_ALL', None)
         run = self.run_tool(os.path.join(checkout, 'tools', 'redproof.py'),
-                            '--name', 'harness/a-dead-workers-tests-are-killed',
+                            '--name', 'harness/a-queued-jobs-mark-reaches',
                             env=env)
         self.assertEqual(2, run.returncode, run.stdout + run.stderr)
-        self.assertIn('signal processes, so they run only as a queued job',
-                      run.stdout, run.stderr)
-        self.assertIn('harness/a-dead-workers-tests-are-killed', run.stdout)
+        self.assertIn('a red-proof runs only as a queued job', run.stdout,
+                      run.stderr)
 
     def test_redproof_audit_runs_as_a_script(self):
         # Run from the root of a copy, as the harness runs it: the copy's

@@ -10603,14 +10603,23 @@ CASES += [
          "a queued job's mark did not reach the tests"),
 ]
 
+# A red-proof of any size runs only as a queued job (STANDARD 1.35.0).
+CASES += [
+    Case('harness/a-red-proof-runs-only-as-a-queued-job',
+         'tools/redproof.py',
+         "    if environ.get('REDPROOF_JOBS_ALL') == '1':\n        return None\n    return ('redproof: a red-proof runs",
+         "    if True:\n        return None\n    return ('redproof: a red-proof runs",
+         'tests/redproof_tool_test.py::QueuedOnlyTest::test_the_tool_runs_only_as_a_queued_job',
+         'a run began outside a queued job'),
+]
+
 # Out of the release red-proof (2026-11-09): entries on tooling, test
 # scaffolding, docs and CI, which leave it while their tests stay in the
 # gate, run on every merge; entries already removed or declared GREEN; and
 # one of each pair making the same mutation. Each was judged by its own
 # entry; an entry added since is in. Kept here by name, so that what left
 # is on record and one can be put back by deleting its line. One entry
-# that signals processes stays in, harness/a-dead-workers-tests-are-killed,
-# so the refusal of such an entry outside a queued job has one to refuse.
+# that signals processes stays in, harness/a-dead-workers-tests-are-killed.
 OUT_OF_THE_RELEASE_PROOF = frozenset({
     'api-index/callables-marked',
     'api-index/enum-members-counted-not-listed',

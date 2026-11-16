@@ -65,9 +65,13 @@ Exit status 0 only when every selected entry is RED, GREEN (declared),
 RED (declared GREEN) or REMOVED, and no run wrote to a tracked file or went
 unchecked for one; 1 otherwise, and when the copy does not import its own
 schwaby or the suite cannot be collected; 2 when --name matches nothing, the
-arguments are wrong, or an entry whose test signals processes is selected
-outside a queued job (SIGNALLING says which; a queued job sets
-REDPROOF_JOBS_ALL=1).
+arguments are wrong, or the run is not a queued job.
+
+ONLY AS A QUEUED JOB. A red-proof of any size runs only as a queued job,
+which sets REDPROOF_JOBS_ALL=1, and the tool refuses to start without it,
+saying why. A mutant can signal processes or widen a kill, so no entry runs
+directly on a machine someone is using, not even one; to debug entries,
+queue one job naming them.
 
 Every run judges every selected entry. Verdicts are not kept from one run to
 the next: the whole set takes about a minute and a half on 20 cores, and a
@@ -89,9 +93,8 @@ tools/redproof_audit.py, which puts the copy first on sys.path; before judging
 anything the run proves that `import schwaby` in a copy resolves inside it,
 because an import from anywhere else makes every verdict a false GREEN.
 
-PARALLEL. Every usable core with REDPROOF_JOBS_ALL=1, for a machine the run
-has to itself; two at a time otherwise, since a run on a machine someone is
-using should stay modest. No more than memory holds, beyond the
+PARALLEL. Every usable core, since a queued job (REDPROOF_JOBS_ALL=1) has
+the machine to itself. No more than memory holds, beyond the
 one run that always goes ahead: the pool is min(cores, (available memory -
 FLOOR) / the largest run measured so far), at least one, printed with its
 reason. Available memory is MemAvailable, or the memory cap SUITE_MEMORY_GB
@@ -273,38 +276,16 @@ def load_cases(snapshot):
     return module.CASES
 
 
-#: The tests that signal processes. Each signals only what it started and
-#: recorded, and no entry's mutation widens what it signals; still, an entry
-#: whose test is one of these runs only as a queued job, never as a direct
-#: run on a shared machine, where a defect in the code it mutates could
-#: reach other processes. A queued job is told apart as the core count
-#: tells it: REDPROOF_JOBS_ALL=1.
-SIGNALLING = ('tests/signals/worker_test.py::WorkerTest',)
-
-
-def runs_signalling(test):
-    '''Whether pytest, given test, runs one of SIGNALLING: the class or a
-    test in it, its module whole, or a directory holding the module.'''
-    test = test[2:] if test.startswith('./') else test
-    path, _, inner = test.partition('::')
-    for s in SIGNALLING:
-        s_path, _, s_class = s.partition('::')
-        if path == s_path and (not inner or inner == s_class
-                               or inner.startswith(s_class + '::')):
-            return True
-        if not inner and s_path.startswith(path.rstrip('/') + '/'):
-            return True
-        if not inner and path in ('', '.'):
-            return True
-    return False
-
-
-def queued_only(cases, environ=os.environ):
-    '''The names of the entries among cases that signal processes, when
-    this is not a queued job; none when it is.'''
+def not_queued(environ=os.environ):
+    '''Why a run may not start here: None in a queued job, which sets
+    REDPROOF_JOBS_ALL=1, and the reason anywhere else.'''
     if environ.get('REDPROOF_JOBS_ALL') == '1':
-        return []
-    return [c.name for c in cases if any(map(runs_signalling, tests_of(c)))]
+        return None
+    return ('redproof: a red-proof runs only as a queued job, which sets '
+            'REDPROOF_JOBS_ALL=1, and this is not one. A mutant can signal '
+            'processes or widen a kill, so no entry runs directly, however '
+            'few are named (the engineering standard\'s §1.1). To debug '
+            'entries, queue one job naming them.')
 
 
 def tests_of(case):
@@ -554,7 +535,7 @@ def test_env(workdir, environ=os.environ):
     '''The environment a run of tests is given: a few variables, not the
     caller's. A queued job's mark goes with it, REDPROOF_JOBS_ALL: the tests
     that signal processes run only where it is set (tests/signals/
-    conftest.py), and queued_only lets their entries run only in such a job.
+    conftest.py), and a red-proof runs only in such a job (not_queued).
     Left out, they would be skipped, and a skip passes, so every such entry's
     mutation would read as unnoticed.'''
     env = {
@@ -808,14 +789,18 @@ def main(argv):
                         help='only entries whose name contains this '
                         '(repeatable)')
     parser.add_argument('--jobs', type=int,
-                        help='entries at once (default: every usable core '
-                        'with REDPROOF_JOBS_ALL=1, two otherwise)')
+                        help='entries at once (default: every usable '
+                        'core)')
     parser.add_argument('--shard', type=shard_arg, metavar='K/N',
                         help='judge only shard K of N (K from 1)')
     parser.add_argument('--touching', metavar='BASE',
                         help='only the entries whose run reads a test file '
                         'changed since the branch left BASE')
     args = parser.parse_args(argv)
+    refusal = not_queued()
+    if refusal:
+        print(refusal, flush=True)
+        return 2
 
     started = time.monotonic()
     run = Run(args)
@@ -1038,12 +1023,6 @@ def judge_all(run, args, started):
 
     removed = [c for c in selected if c.removed]
     live = [c for c in selected if not c.removed]
-    held = queued_only(live)
-    if held:
-        print('redproof: %d of these entries signal processes, so they run '
-              'only as a queued job (REDPROOF_JOBS_ALL=1), never directly: '
-              '%s' % (len(held), ', '.join(held)))
-        return 2
     # 'to run' is the machine-readable count on this line.
     print('redproof: %d selected, %d removed, %d to run%s' % (
         len(selected), len(removed), len(live),
