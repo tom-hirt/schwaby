@@ -3,6 +3,7 @@ from collections import defaultdict, deque
 from enum import Enum
 
 import asyncio
+import contextlib
 import copy
 import httpx2
 import inspect
@@ -557,6 +558,12 @@ def _text_or_none(value):
 _in_close_handlers = contextvars.ContextVar('schwaby_in_close_handlers',
                                             default=None)
 
+# The login running in this task: a call it makes itself, through a handler
+# it awaits, is part of it, and neither waits for it nor queues behind it. A
+# handler's task does not inherit it (_run_handler clears it), so a task a
+# login started waits for the next login like any other caller.
+_in_login = contextvars.ContextVar('schwaby_in_login', default=None)
+
 #: The codes Schwab documents as severing the stream, which a notice carries.
 _SEVERING_CODES = frozenset({12, 30})
 
@@ -737,6 +744,26 @@ def _prepare_connect_args(websocket_connect_args):
     args = dict(websocket_connect_args)
     args['logger'] = _redact.websocket_logger(args.get('logger'))
     return args
+
+
+class StreamConnectionReplacedError(SchwabError):
+    '''
+    Raised by a stream request whose connection a login replaced: while the
+    request waited for its answer, or before its turn to be sent came. It is
+    never sent on the new connection, since what it asked for belonged to
+    the old one. Make it again once the login has returned.
+    '''
+    def __init__(self, service, command, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.service = service
+        self.command = command
+
+
+def _replaced(service, command):
+    return StreamConnectionReplacedError(
+            service, command,
+            'a login replaced the connection {}/{} was made on'.format(
+                service, command))
 
 
 class ResponseTimeoutError(SchwabError):
@@ -982,6 +1009,16 @@ class StreamClient(EnumEnforcer):
         # against the request it answers without ambiguity.
         self._request_lock = asyncio.Lock()
 
+        # One login, or logout, at a time. Taken outside _request_lock, never
+        # inside it: a login sends its own request. _login_running is set when
+        # the one holding it returns, for the requests waiting on it.
+        self._login_lock = asyncio.Lock()
+        self._login_running = None
+        # How many times a login has replaced the socket. A request belongs to
+        # the connection it was made on, and a change here means that
+        # connection is gone.
+        self._generation = 0
+
         # (request_id, service, command, future) for the request currently
         # awaiting a response, or None. Whoever is reading routes the matching
         # response here rather than the reader having to be the requester.
@@ -1147,6 +1184,13 @@ class StreamClient(EnumEnforcer):
         # with nothing closing it. Failure to close is logged, not raised: the
         # login is the operation the caller asked for.
         previous, self._socket = self._socket, None
+        # Gone for every request made on it: the one waiting for its answer
+        # is failed now, rather than at its timeout, and any still queued is
+        # refused when its turn comes.
+        self._generation += 1
+        pending = self._pending_request
+        if pending is not None:
+            self._fail_pending_request(_replaced(pending[1], pending[2]))
         # A notice is its connection's: cleared here, not when the login
         # starts, so a login that fails first keeps a bump said as one; and
         # again once the new socket is open, for one the old socket gave a
@@ -1985,16 +2029,32 @@ class StreamClient(EnumEnforcer):
         lets a single pending slot be enough and keeps the response validation
         unambiguous. Note it does not cover reading, so message handling
         continues while a request is in flight.
+
+        A request belongs to the connection it was made on, or, made while a
+        login runs, to the one that login opens. If a login replaces that
+        connection, it raises :class:`StreamConnectionReplacedError` and is
+        not sent on the new one.
         '''
         cancelled = False
+        await self._wait_for_a_login_in_progress()
+        generation = self._generation
 
         try:
             async with self._request_lock:
+                if self._generation != generation:
+                    raise _replaced(service, command)
                 future = asyncio.get_running_loop().create_future()
                 self._pending_request = (request_id, service, command, future)
                 try:
                     await self._send({'requests': [request]})
                     await self._await_response(request_id, service, command)
+                except (ConnectionClosed, ResponseTimeoutError,
+                        ValueError) as exc:
+                    # Decided before any close handler runs: the read that
+                    # failed was on a socket a login has since replaced.
+                    if self._generation == generation:
+                        raise
+                    raise _replaced(service, command) from exc
                 finally:
                     self._pending_request = None
                     # Nobody will look at this future again. Cancel it if it is
@@ -2075,6 +2135,35 @@ class StreamClient(EnumEnforcer):
                     self.logger.exception(
                             'Error handler raised while reporting a rejection '
                             'carried alongside a response. Ignoring it.')
+
+    async def _wait_for_a_login_in_progress(self):
+        '''Holds a request made while a login runs until it returns, so the
+        request is made on the connection that login opens. One the login
+        makes itself does not wait.'''
+        running = self._login_running
+        if (running is not None and not running.is_set()
+                and _in_login.get() is not running):
+            await running.wait()
+
+    @contextlib.asynccontextmanager
+    async def _one_login_at_a_time(self):
+        '''Runs a login or logout alone: a second waits for the first to
+        return, then replaces its connection as a login again does. One a
+        handler makes from inside a running login is part of that login,
+        and runs inside it rather than waiting on itself.'''
+        running = self._login_running
+        if (running is not None and not running.is_set()
+                and _in_login.get() is running):
+            yield
+            return
+        async with self._login_lock:
+            running = self._login_running = asyncio.Event()
+            token = _in_login.set(running)
+            try:
+                yield
+            finally:
+                _in_login.reset(token)
+                running.set()
 
     async def _service_op(self, symbols, service, command, field_type=None,
                           *, fields=None, keys_per_request=None):
@@ -2419,6 +2508,9 @@ class StreamClient(EnumEnforcer):
         keeps the report inside the task the caller can already see and wait
         for.
         '''
+        # Its own task, not part of a login that may have started it: a login
+        # it calls waits for that one.
+        _in_login.set(None)
         try:
             await awaitable
         except asyncio.CancelledError:
@@ -2805,7 +2897,18 @@ class StreamClient(EnumEnforcer):
                                        ``ValueError``: for ``extra_headers``
                                        naming the replacement, and for the
                                        other two saying there is none.
+
+        Logins on one client run one at a time: a second waits for the
+        first to return, then replaces its connection. A request made
+        meanwhile waits for the login and is made on the new connection; one
+        made on the connection a login replaces raises
+        :class:`StreamConnectionReplacedError`.
         '''
+        async with self._one_login_at_a_time():
+            await self._login(websocket_connect_args)
+
+    async def _login(self, websocket_connect_args):
+        '''The login itself: login() runs one at a time.'''
 
         # What the connection being replaced set aside is delivered, not
         # dropped; then nothing has closed on the new one yet. last_close
@@ -2875,9 +2978,13 @@ class StreamClient(EnumEnforcer):
             await self._request_response(request, request_id, 'ADMIN',
                                          'LOGIN')
         except UnexpectedResponseCode as e:
-            # Any refusal of the LOGIN: the socket is closed first.
+            # Any refusal of the LOGIN: the socket is closed first. Only this
+            # login's: a handler that logged in again meanwhile has replaced
+            # it, and closed it, and its own connection is not this one's to
+            # close.
             try:
-                await self.close()
+                if self._socket is opened:
+                    await self.close()
             except Exception:
                 self.logger.exception('Closing a refused login\'s socket '
                                       'failed. Ignoring it.')
@@ -2902,7 +3009,15 @@ class StreamClient(EnumEnforcer):
         connection. After this method is called, no further stream operations
         are possible. The client must be re-initialized with :meth:`login` to
         perform further operations.
+
+        It waits for a login in progress to return, and logs out of the
+        connection that login opened.
         '''
+        async with self._one_login_at_a_time():
+            await self._logout()
+
+    async def _logout(self):
+        '''The logout itself: logout() runs one at a time with login().'''
         request, request_id = self._make_request(
             service='ADMIN', command='LOGOUT',
             parameters={})

@@ -126,6 +126,37 @@ Pass ``None`` to wait indefinitely. Note that the websockets keepalive does not
 cover this case: a connection which is alive but simply not answering keeps
 replying to pings, so without a timeout such a request would wait forever.
 
+.. _logging_in_again:
+
+**Logging in again while requests run.** Logins on one client run one at a
+time, from whichever tasks call them: a second waits for the first to return,
+then replaces its connection, which closes. :meth:`~schwaby.streaming.StreamClient.logout`
+waits its turn the same way. A request belongs to the connection it was made
+on:
+
+* made while a login runs, it waits for that login and is made on the
+  connection it opens;
+* made on a connection that a login then replaces, it raises
+  :class:`~schwaby.streaming.StreamConnectionReplacedError`, at once rather
+  than at its timeout, and is not sent on the new connection.
+
+What was subscribed belonged to the replaced connection too, so the usual
+reaction is the one a reconnect already needs: once the login has returned,
+subscribe again.
+
+.. code-block:: python
+
+  from schwaby.streaming import StreamConnectionReplacedError
+
+  try:
+      await stream_client.level_one_equity_subs(['GOOG'])
+  except StreamConnectionReplacedError:
+      pass  # the task that logged in again subscribes on the new connection
+
+A handler that logs in again from inside a login, as a close handler can when
+the login's own connection closes, runs inside that login rather than waiting
+on it.
+
 
 -----------------------
 Logging Out and Closing
@@ -486,7 +517,7 @@ Streaming exceptions
 
 The exceptions a stream raises, and the ones it hands to
 :meth:`~schwaby.streaming.StreamClient.add_error_handler` instead. The first
-three are raised by a request --- a login, a subscribe, a logout ---
+four are raised by a request --- a login, a subscribe, a logout ---
 and :class:`~schwaby.streaming.UnexpectedResponseCode` also reaches the error
 handler when Schwab refuses a request that had already been abandoned.
 :class:`~schwaby.streaming.UnparsableMessage` is raised by
@@ -497,6 +528,7 @@ reported, so an ``except`` clause for it never runs. Every one inherits
 :class:`~schwaby.utils.SchwabError`.
 
 .. autoexception:: schwaby.streaming.ResponseTimeoutError
+.. autoexception:: schwaby.streaming.StreamConnectionReplacedError
 .. autoexception:: schwaby.streaming.UnexpectedResponse
 .. autoexception:: schwaby.streaming.UnexpectedResponseCode
 .. autoexception:: schwaby.streaming.StreamLoginRefused
