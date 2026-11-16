@@ -8,8 +8,12 @@ compatibility to preserve with anything but its own published releases.
 
 **Write a test that fails before the fix.** Every defect found so far sat in code
 with 100% line coverage. Coverage measures which lines ran, not whether the
-result was right. Before accepting a test, revert the fix and watch it fail — a
+result was right. Before accepting a test, prove it fails without the fix — a
 test that passes both ways is worse than none, because it looks like protection.
+The proof is a red-proof entry whose mutation undoes the fix, named (`--name`)
+in the change's one queued red-proof job at its pushed head: never a fix
+reverted by hand, on any branch. `CONTRIBUTING.rst` gives a contributor, who
+has no queue, the by-hand form of the same check.
 
 **A negative result about an installed package is not a result until you know
 which directory produced it.** `sys.path[0]` is the current directory, so
@@ -60,6 +64,8 @@ matches nothing, so the mutant never runs and the test stays green. A restore
 within the same second can reuse the mutant's bytecode (CPython invalidates on
 mtime and size), so a passing test looks failed.
 Clear `__pycache__`, and confirm the file changed before believing the result.
+The red-proof does both for its entries: it refuses one whose text is not in
+its file exactly once, and runs each mutant with `-B` on a fresh copy.
 
 **The suite mocks the network.** It proves the library builds the request it
 intended and says nothing about whether Schwab accepts it. Anything asserting
