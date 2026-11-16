@@ -558,12 +558,6 @@ def _text_or_none(value):
 _in_close_handlers = contextvars.ContextVar('schwaby_in_close_handlers',
                                             default=None)
 
-# The login running in this task: a call it makes itself, through a handler
-# it awaits, is part of it, and neither waits for it nor queues behind it. A
-# handler's task does not inherit it (_run_handler clears it), so a task a
-# login started waits for the next login like any other caller.
-_in_login = contextvars.ContextVar('schwaby_in_login', default=None)
-
 #: The codes Schwab documents as severing the stream, which a notice carries.
 _SEVERING_CODES = frozenset({12, 30})
 
@@ -1014,6 +1008,10 @@ class StreamClient(EnumEnforcer):
         # the one holding it returns, for the requests waiting on it.
         self._login_lock = asyncio.Lock()
         self._login_running = None
+        # The task running it. A call that task makes through a handler it
+        # awaits is part of that login; any other task's, one the login or a
+        # handler started included, is not.
+        self._login_task = None
         # How many times a login has replaced the socket. A request belongs to
         # the connection it was made on, and a change here means that
         # connection is gone.
@@ -1289,13 +1287,18 @@ class StreamClient(EnumEnforcer):
         The close is claimed before them, so an error handler that logs in
         again while they go out cannot cancel it: the handlers still run,
         given this close, though ``last_close`` then says how that login
-        went.'''
+        went. A login or logout that found it too does not wait for a run in
+        another task: it raises at once, since that run may be waiting for
+        it.'''
         if not self._close_due:
             if drain_first:
                 await self._drain_pending_reports()
             running = self._close_running
+            # Not a login or logout, which holds the login lock: those
+            # handlers may be waiting for it, to log in or make a request.
             if (running is not None and not running.is_set()
-                    and _in_close_handlers.get() is not running):
+                    and _in_close_handlers.get() is not running
+                    and not self._in_the_running_login()):
                 await running.wait()
             return
         self._close_due = False
@@ -2050,9 +2053,14 @@ class StreamClient(EnumEnforcer):
                     await self._await_response(request_id, service, command)
                 except (ConnectionClosed, ResponseTimeoutError,
                         ValueError) as exc:
-                    # Decided before any close handler runs: the read that
-                    # failed was on a socket a login has since replaced.
-                    if self._generation == generation:
+                    # Replaced only if the connection was replaced first: a
+                    # failure a reader handed this request before the swap
+                    # (the future already held it, so the swap did not
+                    # replace it) is that connection's own, whatever a close
+                    # handler has done since.
+                    if (self._generation == generation
+                            or (future.done() and not future.cancelled()
+                                and future.exception() is exc)):
                         raise
                     raise _replaced(service, command) from exc
                 finally:
@@ -2136,13 +2144,22 @@ class StreamClient(EnumEnforcer):
                             'Error handler raised while reporting a rejection '
                             'carried alongside a response. Ignoring it.')
 
+    def _in_the_running_login(self):
+        '''Whether this task is running a login or logout now: what it calls
+        through a handler it awaits is part of that one.'''
+        running = self._login_running
+        return (running is not None and not running.is_set()
+                and self._login_task is asyncio.current_task())
+
     async def _wait_for_a_login_in_progress(self):
         '''Holds a request made while a login runs until it returns, so the
         request is made on the connection that login opens. One the login
-        makes itself does not wait.'''
+        makes itself does not wait. Nor is there a deadline: the wait is the
+        login's, whose steps have their own (the HTTP client's timeout, the
+        websocket's open timeout, and response_timeout for its LOGIN).'''
         running = self._login_running
         if (running is not None and not running.is_set()
-                and _in_login.get() is not running):
+                and not self._in_the_running_login()):
             await running.wait()
 
     @contextlib.asynccontextmanager
@@ -2151,18 +2168,16 @@ class StreamClient(EnumEnforcer):
         return, then replaces its connection as a login again does. One a
         handler makes from inside a running login is part of that login,
         and runs inside it rather than waiting on itself.'''
-        running = self._login_running
-        if (running is not None and not running.is_set()
-                and _in_login.get() is running):
+        if self._in_the_running_login():
             yield
             return
         async with self._login_lock:
             running = self._login_running = asyncio.Event()
-            token = _in_login.set(running)
+            self._login_task = asyncio.current_task()
             try:
                 yield
             finally:
-                _in_login.reset(token)
+                self._login_task = None
                 running.set()
 
     async def _service_op(self, symbols, service, command, field_type=None,
@@ -2508,9 +2523,6 @@ class StreamClient(EnumEnforcer):
         keeps the report inside the task the caller can already see and wait
         for.
         '''
-        # Its own task, not part of a login that may have started it: a login
-        # it calls waits for that one.
-        _in_login.set(None)
         try:
             await awaitable
         except asyncio.CancelledError:
@@ -2982,13 +2994,15 @@ class StreamClient(EnumEnforcer):
             # login's: a handler that logged in again meanwhile has replaced
             # it, and closed it, and its own connection is not this one's to
             # close.
+            mine = self._socket is opened
             try:
-                if self._socket is opened:
+                if mine:
                     await self.close()
             except Exception:
                 self.logger.exception('Closing a refused login\'s socket '
                                       'failed. Ignoring it.')
-            await self._login_failed(StreamCloseKind.LOGIN_REFUSED)
+            if mine:
+                await self._login_failed(StreamCloseKind.LOGIN_REFUSED)
             raise StreamLoginRefused(
                     e.response, *e.args, service=e.service,
                     command=e.command, code=e.code, msg=e.msg) from None

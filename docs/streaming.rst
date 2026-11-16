@@ -134,11 +134,18 @@ then replaces its connection, which closes. :meth:`~schwaby.streaming.StreamClie
 waits its turn the same way. A request belongs to the connection it was made
 on:
 
-* made while a login runs, it waits for that login and is made on the
-  connection it opens;
+* made while a login runs, it waits for that login, however long the login
+  takes, and is made on the connection it opens (``response_timeout`` does
+  not bound that wait, only the request once it is sent);
 * made on a connection that a login then replaces, it raises
   :class:`~schwaby.streaming.StreamConnectionReplacedError`, at once rather
-  than at its timeout, and is not sent on the new connection.
+  than at its timeout, and is not sent on the new connection. That includes
+  a request that waited for one login when a second, queued behind it,
+  replaces the connection the first opened.
+
+A connection that closed is not one that was replaced: a request it ends
+raises the close (a ``websockets`` ``ConnectionClosed``), even if a close
+handler has logged in again by the time the request sees it.
 
 What was subscribed belonged to the replaced connection too, so the usual
 reaction is the one a reconnect already needs: once the login has returned,
@@ -155,7 +162,10 @@ subscribe again.
 
 A handler that logs in again from inside a login, as a close handler can when
 the login's own connection closes, runs inside that login rather than waiting
-on it.
+on it; a task that handler starts is not part of it, and waits. A login whose
+new connection closes while another task is running the close handlers for
+it raises the close at once, rather than waiting for those handlers, which
+may themselves be waiting to log in.
 
 
 -----------------------

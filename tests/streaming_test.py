@@ -12268,14 +12268,16 @@ class _Fakes:
 
     ``hold``: commands socket 0 leaves unanswered. ``hold_close``: an event
     socket 0's close waits for before it closes. ``answer``: socket index ->
-    a function from the request to the frame that answers it.'''
+    a function from the request to the frame that answers it.
+    ``close_on_login``: the sockets that close instead of answering their
+    LOGIN.'''
 
     def __init__(self, *, hold=(), hold_close=None, answer=None,
-                 close_on_first_login=False):
+                 close_on_login=()):
         self.sockets = []
         self.hold, self.hold_close = hold, hold_close
         self.answer = answer or {}
-        self.close_on_first_login = close_on_first_login
+        self.close_on_login = close_on_login
 
     async def connect(self, *args, **kwargs):
         from websockets.exceptions import ConnectionClosedOK
@@ -12301,7 +12303,7 @@ class _Fakes:
                 sock.sent.append('%s/%s' % (r['service'], r['command']))
                 if number == 0 and r['command'] in self.hold:
                     continue
-                if (number == 0 and self.close_on_first_login
+                if (number in self.close_on_login
                         and r['command'] == 'LOGIN'):
                     await close()
                     continue
@@ -12332,14 +12334,18 @@ class StreamConnectionBindingTest(IsolatedAsyncioTestCase):
     # out fails the test rather than passing late.
     PROMPT = 2
 
-    def client(self):
+    def client(self, *, preferences_yield=True):
         http = MagicMock()
         http.token_metadata.token = {'access_token': ACCESS_TOKEN}
 
         async def preferences(*a, **k):
             await asyncio.sleep(0)
             return MockResponse(account_preferences(), 200)
-        http.get_user_preferences.side_effect = preferences
+        if preferences_yield:
+            http.get_user_preferences.side_effect = preferences
+        else:
+            http.get_user_preferences.return_value = MockResponse(
+                    account_preferences(), 200)
         return StreamClient(http, response_timeout=30)
 
     async def settle(self, *tasks, timeout=PROMPT):
@@ -12510,7 +12516,7 @@ class StreamConnectionBindingTest(IsolatedAsyncioTestCase):
         # The first socket closes on its LOGIN, and a close handler logs in
         # again from inside that login: it runs, rather than waiting on the
         # login that called it.
-        fakes = _Fakes(close_on_first_login=True)
+        fakes = _Fakes(close_on_login={0})
         with patch('schwaby.streaming.ws_client.connect', fakes.connect):
             c = self.client()
             nested = []
@@ -12554,9 +12560,10 @@ class StreamConnectionBindingTest(IsolatedAsyncioTestCase):
             c.add_error_handler(log_in_again)
             refused_login, = await self.settle(asyncio.create_task(c.login()))
         self.assertEqual(
-                ('StreamLoginRefused', ['started', 'ok'], [], 'socket2'),
+                ('StreamLoginRefused', ['started', 'ok'], [], 'socket2',
+                 None),
                 (refused_login, again, self.problems(c, fakes),
-                 getattr(c._socket, '_mock_name', None)),
+                 getattr(c._socket, '_mock_name', None), c.last_close),
                 'a refused login closed a connection not its own')
 
     @no_duplicates
@@ -12645,3 +12652,114 @@ class StreamConnectionBindingTest(IsolatedAsyncioTestCase):
                 (outcomes, done, self.problems(c, fakes)),
                 'the handler task\'s login ran beside the login that '
                 'started it')
+
+    @no_duplicates
+    async def test_a_login_does_not_wait_for_close_handlers_waiting_for_it(
+            self):
+        # Another task reads in a loop, and its close handler logs in, or
+        # subscribes. A relogin's new socket closes on its LOGIN: whoever
+        # finds that close, the relogin raises it rather than waiting for
+        # handlers that wait for the relogin, and the handler's call then
+        # goes through.
+        from websockets.exceptions import ConnectionClosed
+        for action, k in itertools.product(('login', 'subscribe'), range(6)):
+            with self.subTest(action=action, k=k):
+                fakes = _Fakes(close_on_login={1})
+                with patch('schwaby.streaming.ws_client.connect',
+                           fakes.connect):
+                    c = self.client()
+                    await c.login()
+                    acted = []
+
+                    async def on_close(close):
+                        if action == 'login':
+                            await c.login()
+                        else:
+                            try:
+                                await c.level_one_equity_subs(['GOOG'])
+                            except (ConnectionClosed, ValueError,
+                                    streaming.StreamConnectionReplacedError):
+                                pass
+                        acted.append('ok')
+                    c.add_close_handler(on_close)
+
+                    async def reader():
+                        while True:
+                            try:
+                                await c.handle_message()
+                            except ConnectionClosed:
+                                pass
+                            except ValueError:
+                                await asyncio.sleep(0)
+                    reading = asyncio.create_task(reader())
+                    for _ in range(k):
+                        await asyncio.sleep(0)
+                    relogin, = await self.settle(
+                            asyncio.create_task(c.login()))
+                    for _ in range(50):
+                        if acted:
+                            break
+                        await asyncio.sleep(0.01)
+                    reading.cancel()
+                    await asyncio.gather(reading, return_exceptions=True)
+                self.assertEqual(
+                        ('ConnectionClosedOK', ['ok'], False),
+                        (relogin, acted, c._login_lock.locked()),
+                        'a login waited for close handlers waiting for it')
+
+    @no_duplicates
+    async def test_a_task_created_inside_a_login_waits_for_it(self):
+        # A close handler that runs inside a login, as one does when that
+        # login's socket closes on its LOGIN, starts a task that logs in.
+        # The task is not part of the login: its login waits for it.
+        fakes = _Fakes(close_on_login={0})
+        with patch('schwaby.streaming.ws_client.connect', fakes.connect):
+            c = self.client()
+            spawned = []
+
+            async def on_close(close):
+                spawned.append(asyncio.create_task(c.login()))
+                for _ in range(10):
+                    await asyncio.sleep(0)
+            c.add_close_handler(on_close)
+            outer, = await self.settle(asyncio.create_task(c.login()))
+            later, = await self.settle(*spawned)
+        self.assertEqual(
+                ('ConnectionClosedOK', 'ok', [], 'socket1'),
+                (outer, later, self.problems(c, fakes),
+                 getattr(c._socket, '_mock_name', None)),
+                'a task created inside a login logged in beside it')
+
+    @no_duplicates
+    async def test_a_close_a_reader_hands_a_request_is_kept(self):
+        # Another task is the reader when the connection closes: it hands
+        # the waiting subscribe the close, and its close handler logs in
+        # again before the subscribe resumes. The subscribe still raises the
+        # close, not a replacement: the connection closed first.
+        from websockets.exceptions import ConnectionClosed
+        fakes = _Fakes(hold=('SUBS',))
+        with patch('schwaby.streaming.ws_client.connect', fakes.connect):
+            c = self.client(preferences_yield=False)
+            await c.login()
+            relogged = []
+
+            async def on_close(close):
+                await c.login()
+                relogged.append('ok')
+            c.add_close_handler(on_close)
+
+            async def read_once():
+                with contextlib.suppress(ConnectionClosed):
+                    await c.handle_message()
+            reading = asyncio.create_task(read_once())
+            await asyncio.sleep(0)
+            sub = asyncio.create_task(c.level_one_equity_subs(['GOOG']))
+            while 'LEVELONE_EQUITIES/SUBS' not in fakes.sockets[0].sent:
+                await asyncio.sleep(0)
+            await fakes.sockets[0].close()
+            outcome, read = await self.settle(sub, reading)
+        self.assertEqual(
+                ('ConnectionClosedOK', 'ok', ['ok']),
+                (outcome, read, relogged),
+                'a close a reader handed a request came back as a '
+                'replacement')
