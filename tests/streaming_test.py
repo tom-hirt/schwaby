@@ -12515,22 +12515,34 @@ class StreamConnectionBindingTest(IsolatedAsyncioTestCase):
     async def test_a_close_handler_may_log_in_from_inside_login(self):
         # The first socket closes on its LOGIN, and a close handler logs in
         # again from inside that login: it runs, rather than waiting on the
-        # login that called it.
-        fakes = _Fakes(close_on_login={0})
-        with patch('schwaby.streaming.ws_client.connect', fakes.connect):
-            c = self.client()
-            nested = []
+        # login that called it, however the handler awaits it. wait_for
+        # (before Python 3.12), gather and shield run it in a task of its
+        # own, which the login awaits.
+        wrappers = {
+            'await': lambda aw: aw,
+            'wait_for': lambda aw: asyncio.wait_for(aw, self.PROMPT / 2),
+            'gather': lambda aw: asyncio.gather(aw),
+            'shield': lambda aw: asyncio.shield(aw),
+            'awaited task': lambda aw: asyncio.ensure_future(aw),
+        }
+        for how, wrap in wrappers.items():
+            with self.subTest(how=how):
+                fakes = _Fakes(close_on_login={0})
+                with patch('schwaby.streaming.ws_client.connect',
+                           fakes.connect):
+                    c = self.client()
+                    nested = []
 
-            async def reconnect(close):
-                await asyncio.wait_for(c.login(), self.PROMPT / 2)
-                nested.append('ok')
-            c.add_close_handler(reconnect)
-            outer, = await self.settle(asyncio.create_task(c.login()))
-        self.assertEqual(
-                ('ConnectionClosedOK', ['ok'], [], 'socket1'),
-                (outer, nested, self.problems(c, fakes),
-                 getattr(c._socket, '_mock_name', None)),
-                'a close handler could not log in from inside login')
+                    async def reconnect(close):
+                        await wrap(c.login())
+                        nested.append('ok')
+                    c.add_close_handler(reconnect)
+                    outer, = await self.settle(asyncio.create_task(c.login()))
+                self.assertEqual(
+                        ('ConnectionClosedOK', ['ok'], [], 'socket1'),
+                        (outer, nested, self.problems(c, fakes),
+                         getattr(c._socket, '_mock_name', None)),
+                        'a close handler could not log in from inside login')
 
     @no_duplicates
     async def test_a_refused_login_closes_only_its_own_socket(self):
@@ -12706,29 +12718,6 @@ class StreamConnectionBindingTest(IsolatedAsyncioTestCase):
                         ('ConnectionClosedOK', ['ok'], False),
                         (relogin, acted, c._login_lock.locked()),
                         'a login waited for close handlers waiting for it')
-
-    @no_duplicates
-    async def test_a_task_created_inside_a_login_waits_for_it(self):
-        # A close handler that runs inside a login, as one does when that
-        # login's socket closes on its LOGIN, starts a task that logs in.
-        # The task is not part of the login: its login waits for it.
-        fakes = _Fakes(close_on_login={0})
-        with patch('schwaby.streaming.ws_client.connect', fakes.connect):
-            c = self.client()
-            spawned = []
-
-            async def on_close(close):
-                spawned.append(asyncio.create_task(c.login()))
-                for _ in range(10):
-                    await asyncio.sleep(0)
-            c.add_close_handler(on_close)
-            outer, = await self.settle(asyncio.create_task(c.login()))
-            later, = await self.settle(*spawned)
-        self.assertEqual(
-                ('ConnectionClosedOK', 'ok', [], 'socket1'),
-                (outer, later, self.problems(c, fakes),
-                 getattr(c._socket, '_mock_name', None)),
-                'a task created inside a login logged in beside it')
 
     @no_duplicates
     async def test_a_close_a_reader_hands_a_request_is_kept(self):

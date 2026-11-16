@@ -162,10 +162,22 @@ subscribe again.
 
 A handler that logs in again from inside a login, as a close handler can when
 the login's own connection closes, runs inside that login rather than waiting
-on it; a task that handler starts is not part of it, and waits. A login whose
-new connection closes while another task is running the close handlers for
-it raises the close at once, rather than waiting for those handlers, which
-may themselves be waiting to log in.
+on it, and so does what it awaits through ``asyncio.wait_for``, ``gather`` or
+``shield``, which may run in a task of their own. A stream handler's task, which
+the client starts, is not part of it, and waits. A login whose new connection
+closes while another task is running the close handlers for it raises the
+close at once, rather than waiting for those handlers, which may themselves
+be waiting to log in.
+
+.. note::
+
+   **A task you create from a handler inside a login, and do not await, is
+   part of that login too**: it inherits the login's context, so a login or a
+   request it makes runs beside the login rather than waiting for it. Start
+   such a task after the login has returned. And let one thing reconnect:
+   a caller that retries a login which raised a close, while its close
+   handler logs in as well, gets two logins, the second replacing the first's
+   connection.
 
 
 -----------------------
@@ -587,7 +599,8 @@ flight, or cancelled, leaves it as it was. A handler registered with
 once for each connection that ends, before that raise, whichever call found
 the close; a second call that found it too waits for the handlers before
 raising, unless it is that close's own handlers, or a task they started,
-finding it again. A failed :meth:`login
+finding it again, or a login or logout, which raises at once since those
+handlers may be waiting to log in themselves. A failed :meth:`login
 <schwaby.streaming.StreamClient.login>` sets ``last_close`` but calls no close
 handler: no connection ended, and its caller has the error. One whose
 preferences do not read leaves the connection, and ``last_close``, as they

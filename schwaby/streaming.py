@@ -558,6 +558,15 @@ def _text_or_none(value):
 _in_close_handlers = contextvars.ContextVar('schwaby_in_close_handlers',
                                             default=None)
 
+# The login running in this context: what it calls through a handler it
+# awaits is part of it, and neither waits for it nor queues behind it. A
+# context, not a task, since asyncio.wait_for (before Python 3.12), gather
+# and shield run what they are given in a task of its own, which the login
+# awaits; that task inherits the context. A stream handler's task does not
+# (_run_handler clears it), so a task the library starts waits like any
+# caller.
+_in_login = contextvars.ContextVar('schwaby_in_login', default=None)
+
 #: The codes Schwab documents as severing the stream, which a notice carries.
 _SEVERING_CODES = frozenset({12, 30})
 
@@ -1008,10 +1017,6 @@ class StreamClient(EnumEnforcer):
         # the one holding it returns, for the requests waiting on it.
         self._login_lock = asyncio.Lock()
         self._login_running = None
-        # The task running it. A call that task makes through a handler it
-        # awaits is part of that login; any other task's, one the login or a
-        # handler started included, is not.
-        self._login_task = None
         # How many times a login has replaced the socket. A request belongs to
         # the connection it was made on, and a change here means that
         # connection is gone.
@@ -2145,11 +2150,11 @@ class StreamClient(EnumEnforcer):
                             'carried alongside a response. Ignoring it.')
 
     def _in_the_running_login(self):
-        '''Whether this task is running a login or logout now: what it calls
-        through a handler it awaits is part of that one.'''
+        '''Whether this is the running login or logout, or something it
+        awaits through a handler: that is part of it.'''
         running = self._login_running
         return (running is not None and not running.is_set()
-                and self._login_task is asyncio.current_task())
+                and _in_login.get() is running)
 
     async def _wait_for_a_login_in_progress(self):
         '''Holds a request made while a login runs until it returns, so the
@@ -2173,11 +2178,11 @@ class StreamClient(EnumEnforcer):
             return
         async with self._login_lock:
             running = self._login_running = asyncio.Event()
-            self._login_task = asyncio.current_task()
+            token = _in_login.set(running)
             try:
                 yield
             finally:
-                self._login_task = None
+                _in_login.reset(token)
                 running.set()
 
     async def _service_op(self, symbols, service, command, field_type=None,
@@ -2523,6 +2528,9 @@ class StreamClient(EnumEnforcer):
         keeps the report inside the task the caller can already see and wait
         for.
         '''
+        # Its own task, not part of a login that may have started it: a login
+        # it calls waits for that one.
+        _in_login.set(None)
         try:
             await awaitable
         except asyncio.CancelledError:
