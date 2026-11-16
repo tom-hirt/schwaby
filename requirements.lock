@@ -171,7 +171,9 @@ pycparser==3.11 ; python_full_version < '3.11' and implementation_name != 'PyPy'
     # via cffi
 pycparser==3.12 ; python_full_version >= '3.11' and implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
     # via cffi
-pyflakes==4.1.0
+pyflakes==4.0.3 ; python_full_version < '3.11'
+    # via schwaby (setup.py)
+pyflakes==4.1.0 ; python_full_version >= '3.11'
     # via schwaby (setup.py)
 pygments==2.21.0
     # via
