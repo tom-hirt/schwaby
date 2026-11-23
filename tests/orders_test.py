@@ -203,6 +203,8 @@ class BuilderTemplates(unittest.TestCase):
             'stopPriceLinkBasis': 'LAST',
             'stopPriceLinkType': 'VALUE',
             'stopPriceOffset': 2.5,
+            'stopType': 'STANDARD',
+            'priceLinkBasis': 'MANUAL',
             'price': '199.99',
             'orderStrategyType': 'SINGLE',
             'orderLegCollection': [{
@@ -310,6 +312,8 @@ class BuilderTemplates(unittest.TestCase):
             'stopPriceLinkBasis': 'LAST',
             'stopPriceLinkType': 'VALUE',
             'stopPriceOffset': 2.5,
+            'stopType': 'STANDARD',
+            'priceLinkBasis': 'MANUAL',
             'price': '199.99',
             'orderStrategyType': 'SINGLE',
             'orderLegCollection': [{
@@ -417,6 +421,8 @@ class BuilderTemplates(unittest.TestCase):
             'stopPriceLinkBasis': 'LAST',
             'stopPriceLinkType': 'VALUE',
             'stopPriceOffset': 2.5,
+            'stopType': 'STANDARD',
+            'priceLinkBasis': 'MANUAL',
             'price': '199.99',
             'orderStrategyType': 'SINGLE',
             'orderLegCollection': [{
@@ -524,6 +530,8 @@ class BuilderTemplates(unittest.TestCase):
             'stopPriceLinkBasis': 'LAST',
             'stopPriceLinkType': 'VALUE',
             'stopPriceOffset': 2.5,
+            'stopType': 'STANDARD',
+            'priceLinkBasis': 'MANUAL',
             'price': '199.99',
             'orderStrategyType': 'SINGLE',
             'orderLegCollection': [{
