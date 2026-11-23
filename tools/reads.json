@@ -110,6 +110,7 @@
  ],
  "tests/light_check_test.py": [
   "*",
+  "CHANGELOG.md",
   "schwaby/client/base.py",
   "setup.cfg",
   "tests/",

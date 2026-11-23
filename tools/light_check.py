@@ -33,6 +33,12 @@ commit will contain:
    delete in shared /tmp or the temp root itself. tests/testdata/
    blind_kill_shapes.txt is the list of shapes the check is tested on, and
    it and this file, whose patterns name every shape, are not judged;
+ * a staged CHANGELOG.md leaves every released section as it shipped:
+   equal to its own tag's text of it, or the newest release tag's. The
+   "## Unreleased" section and a version not yet tagged are free; a
+   correction goes under "Unreleased" as "Corrected: vX.Y.Z's ...", and
+   lines may be deleted from a released section, for privacy, only when
+   "Unreleased" says "Removed from vX.Y.Z's notes:" and why;
  * no staged file, by its name or its content, carries a word on this
    clone's forbidden list, `git config --add lightcheck.forbidden WORD`.
    The list lives in the clone's own configuration, so the repository
@@ -764,6 +770,118 @@ def changed_entries():
     return [c.name for c in selected], helpers
 
 
+#: The release notes, whose released sections stay as they shipped.
+CHANGELOG = 'CHANGELOG.md'
+
+_VERSION_HEADING = re.compile(r'## (\d+\.\d+\.\d+)\s*')
+_UNRELEASED_HEADING = re.compile(r'## unreleased\s*', re.IGNORECASE)
+
+
+def changelog_sections(text):
+    '''{version: its lines} for each "## X.Y.Z" section of a changelog, and
+    the "## Unreleased" section's under 'unreleased': from the heading to
+    the line before the next "## " heading, without trailing blank lines.'''
+    sections, current = {}, None
+    for line in text.split('\n'):
+        if line.startswith('## '):
+            version = _VERSION_HEADING.fullmatch(line)
+            current = (version.group(1) if version else
+                       'unreleased' if _UNRELEASED_HEADING.fullmatch(line)
+                       else None)
+            if current is not None:
+                sections[current] = []
+        if current is not None:
+            sections[current].append(line)
+    for lines in sections.values():
+        while lines and not lines[-1].strip():
+            lines.pop()
+    return sections
+
+
+def _version_key(tag):
+    return tuple(int(n) for n in tag[1:].split('.'))
+
+
+def release_tags():
+    '''This repository's release tags, vX.Y.Z, newest last.'''
+    out = git('tag', '--list', 'v*', check=False)
+    tags = [t for t in out.stdout.decode('utf-8', 'replace').split()
+            if re.fullmatch(r'v\d+\.\d+\.\d+', t)]
+    return sorted(tags, key=_version_key)
+
+
+def _only_deletions(lines, reference):
+    '''Whether lines are reference with lines deleted and none changed or
+    added: a subsequence of it.'''
+    rest = iter(reference)
+    return all(any(line == r for r in rest) for line in lines)
+
+
+def _first_difference(lines, reference):
+    for n, (a, b) in enumerate(zip(lines, reference)):
+        if a != b:
+            return n, a
+    n = min(len(lines), len(reference))
+    return n, lines[n] if n < len(lines) else '(the section ends here)'
+
+
+def changelog_changes():
+    '''What the staged changelog does to a released section, one message
+    each. A released section, one whose version has a tag, must equal that
+    tag's text of it or the newest release tag's (which carries every
+    deletion already made). The "Unreleased" section, and a version with no
+    tag yet, are free. A correction goes under "Unreleased", as "Corrected:
+    vX.Y.Z's ...", never into the old section. Lines may be deleted from one,
+    for privacy, when "Unreleased" says "Removed from vX.Y.Z's notes:" and
+    why; a changed or added line never may.'''
+    if CHANGELOG not in staged_paths():
+        return []
+    staged = blob(':0:' + CHANGELOG)
+    if staged is None:
+        return []
+    sections = changelog_sections(staged.decode('utf-8', 'replace'))
+    unreleased = '\n'.join(sections.get('unreleased', []))
+    tags = release_tags()
+    newest = None
+    if tags:
+        text = blob('%s:%s' % (tags[-1], CHANGELOG))
+        newest = (changelog_sections(text.decode('utf-8', 'replace'))
+                  if text is not None else None)
+    start = {}
+    for n, line in enumerate(staged.decode('utf-8', 'replace').split('\n')):
+        version = _VERSION_HEADING.fullmatch(line)
+        if version:
+            start.setdefault(version.group(1), n + 1)
+    messages = []
+    for version, lines in sections.items():
+        tag = 'v' + version
+        if version == 'unreleased' or tag not in tags:
+            continue
+        latest = newest.get(version) if newest else None
+        if lines == latest:
+            # The usual case, and one read of git for every section.
+            continue
+        text = blob('%s:%s' % (tag, CHANGELOG))
+        own = (changelog_sections(text.decode('utf-8', 'replace')).get(version)
+               if text is not None else None)
+        references = [r for r in (own, latest) if r is not None]
+        if not references or lines in references:
+            continue
+        removal = re.search(r"Removed from %s's notes: *\S" % re.escape(tag),
+                            unreleased)
+        if removal and any(_only_deletions(lines, r) for r in references):
+            continue
+        n, line = _first_difference(lines, references[0])
+        messages.append(
+            '%s:%d: the released %s section differs from its text at %s: '
+            '%r. A released section stays as it shipped: a correction goes '
+            'under "## Unreleased", as "Corrected: %s\'s ...", and a line '
+            'deleted for privacy needs "Removed from %s\'s notes: <why>" '
+            'there' % (CHANGELOG, start.get(version, 0) + n, version,
+                       tag if own is not None else tags[-1], line, tag, tag))
+    return messages
+
+
 def _load(path):
     spec = importlib.util.spec_from_file_location(
         os.path.basename(path)[:-3], path)
@@ -824,6 +942,9 @@ def main():
                   'temp root; signal only a pid or group it started and '
                   'recorded, and delete only its own temp' % (path, line))
             failed = True
+    for message in changelog_changes():
+        print('light check: ' + message)
+        failed = True
     check = git('diff', '--cached', '--check', check=False)
     if check.returncode != 0:
         sys.stdout.write(re.sub(r'(?m)^(?=.)', 'light check: ',

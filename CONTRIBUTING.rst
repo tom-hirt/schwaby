@@ -73,7 +73,13 @@ later, and a call or command over several lines, are judged too. Reading the
 parent's pid without signalling it, and signal 0, are let through. Nor may a
 staged line delete in shared ``/tmp`` or the temp root itself; delete only
 your own run's temp directory. ``tests/testdata/blind_kill_shapes.txt``
-lists every shape the check is tested on, refused and let through. Signal
+lists every shape the check is tested on, refused and let through. A staged
+``CHANGELOG.md`` must leave each released section, one whose version has a
+tag, as it shipped: equal to its own tag's text or the newest release tag's.
+The ``## Unreleased`` section and an untagged version are free. A correction
+goes under ``## Unreleased`` as "Corrected: vX.Y.Z's ...", and lines may be
+deleted from a released section, for privacy, only when ``## Unreleased``
+says "Removed from vX.Y.Z's notes:" and why. Signal
 only a pid or a process group you started and recorded, and put a test that
 signals at all in ``tests/signals/``: its conftest skips those tests, saying
 why, unless ``REDPROOF_JOBS_ALL`` is set, as it is in a queued job, and a

@@ -363,6 +363,72 @@ class LightCheckTest(unittest.TestCase):
         self.write(name, text)
         self.git('add', name)
 
+    #: A changelog as two releases left it: 1.0.0 tagged first, then 1.1.0.
+    LOG_1_0 = '# Changelog\n\n---\n\n## 1.0.0\n\nOne.\nTwo.\nThree.\n'
+    LOG_1_1 = ('# Changelog\n\n---\n\n## 1.1.0\n\nNew.\n\n'
+               '## 1.0.0\n\nOne.\nTwo.\nThree.\n')
+
+    def released(self):
+        '''Two tagged releases, v1.0.0 and v1.1.0, of LOG_1_0 and LOG_1_1.'''
+        self.stage('CHANGELOG.md', self.LOG_1_0)
+        self.git('commit', '-q', '-m', '1.0.0')
+        self.git('tag', 'v1.0.0')
+        self.stage('CHANGELOG.md', self.LOG_1_1)
+        self.git('commit', '-q', '-m', '1.1.0')
+        self.git('tag', 'v1.1.0')
+
+    def test_a_released_changelog_section_stays_as_it_shipped(self):
+        self.released()
+        self.stage('CHANGELOG.md', self.LOG_1_1.replace('Two.', 'Two, mended.'))
+        code, out = self.check()
+        self.assertEqual(1, code, 'an edit of a released section was let '
+                         'through: ' + out)
+        self.assertIn("CHANGELOG.md:12: the released 1.0.0 section differs "
+                      "from its text at v1.0.0: 'Two, mended.'", out)
+        # Positive control: a new Unreleased section, a correction under it,
+        # and an untagged version's section are all free.
+        self.stage('CHANGELOG.md', self.LOG_1_1.replace(
+                '---\n\n', "---\n\n## Unreleased\n\nCorrected: v1.0.0's "
+                'second line.\n\n## 1.2.0\n\nNot tagged yet.\n\n'))
+        code, out = self.check()
+        self.assertEqual(0, code, 'an Unreleased or untagged section was '
+                         'refused: ' + out)
+
+    def test_a_released_section_may_match_the_newest_tag(self):
+        # A deletion an earlier release made, and its notes recorded, is in
+        # the newest tag: the section is held to that text, not re-refused.
+        self.stage('CHANGELOG.md', self.LOG_1_0)
+        self.git('commit', '-q', '-m', '1.0.0')
+        self.git('tag', 'v1.0.0')
+        self.stage('CHANGELOG.md', self.LOG_1_1.replace('Two.\n', ''))
+        self.git('commit', '-q', '-m', '1.1.0')
+        self.git('tag', 'v1.1.0')
+        self.stage('CHANGELOG.md', self.LOG_1_1.replace('Two.\n', '').replace(
+                'New.', 'New, and more.'))
+        code, out = self.check()
+        self.assertEqual(1, code, 'an edit of the newest release was let '
+                         'through: ' + out)
+        self.assertIn('the released 1.1.0 section differs', out)
+        self.assertNotIn('1.0.0', out, 'a section matching the newest tag '
+                         'was refused')
+
+    def test_a_deletion_passes_only_with_its_reason(self):
+        self.released()
+        removed = self.LOG_1_1.replace('Two.\n', '')
+        noted = removed.replace('---\n\n', "---\n\n## Unreleased\n\nRemoved "
+                                "from v1.0.0's notes: a private detail.\n\n")
+        for log, passes, why in (
+                (removed, False, 'a deletion with no reason passed'),
+                (noted, True, 'a deletion with its reason was refused'),
+                (noted.replace('Three.', 'Three, changed.'), False,
+                 'a changed line passed as a deletion'),
+                (noted.replace('Three.', 'Three.\nFour.'), False,
+                 'an added line passed as a deletion')):
+            with self.subTest(why=why):
+                self.stage('CHANGELOG.md', log)
+                code, out = self.check()
+                self.assertEqual(0 if passes else 1, code, why + ': ' + out)
+
     def test_a_new_warning_is_refused_and_named(self):
         self.stage('mod.py', 'import os\nimport sys\n\n\ndef f():\n'
                    '    return 1\n')

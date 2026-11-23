@@ -17,12 +17,18 @@ because at the time it did; none of that has been rewritten to agree with how
 things work now, because a changelog edited to match the present is not a
 record of anything.
 
-Getting a fact wrong is the exception. Where an entry says something that was
-untrue when it was written, it gets corrected and the correction says so.
+Getting a fact wrong is not mended in place. Where an entry says something that
+was untrue when it was written, the next release's notes correct it, as
+"Corrected: vX.Y.Z's ...", and the entry stays as it shipped.
 
-The other exception is privacy. Some wording and the example values in older
+The one exception is privacy. Some wording and the example values in older
 entries were later edited to remove private details. What was measured, and
-what each entry says changed, is the same.
+what each entry says changed, is the same. From here on, such an edit only
+deletes lines, and the next release's notes say so, as "Removed from vX.Y.Z's
+notes:" and why.
+
+The commit check holds a released section to its tag's text: see
+`CONTRIBUTING.rst`.
 
 ---
 
