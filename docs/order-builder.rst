@@ -713,14 +713,15 @@ these fields at their own risk.
 .. note::
 
    **A trailing stop-limit with a fixed limit price needs** ``priceLinkBasis``
-   ``MANUAL``. Schwab refuses a ``TRAILING_STOP_LIMIT`` carrying a bare
-   ``price``, with "Price link basis must be populated for trailing ...", and
-   accepts one that adds ``priceLinkBasis`` ``MANUAL``. With ``MANUAL`` it
-   then refuses a ``priceLinkType`` or ``priceOffset`` as misplaced. This was
-   measured with a live order preview in `schwab-py pull request #321
-   <https://github.com/alexgolec/schwab-py/pull/321>`__, not by this project.
-   The trailing stop-limit templates send that shape, with ``stopType``
-   ``STANDARD`` as in the preview. Built by hand:
+   ``MANUAL``. Schwab refused a ``TRAILING_STOP_LIMIT`` sell carrying a fixed
+   ``price`` and no ``priceLinkBasis``, with "Price link basis must be
+   populated for trailing ...", and accepted it with ``priceLinkBasis``
+   ``MANUAL``. With ``MANUAL`` it then refused a ``priceLinkType`` or
+   ``priceOffset`` as misplaced. Both requests carried ``stopType``
+   ``STANDARD``. This was measured with live order previews in `schwab-py pull
+   request #321 <https://github.com/alexgolec/schwab-py/pull/321>`__, of a sell
+   only, not by this project. The trailing stop-limit templates send that
+   shape for every instruction. Built by hand:
 
    .. code-block:: python
 

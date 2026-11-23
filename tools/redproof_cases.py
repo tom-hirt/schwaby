@@ -10700,7 +10700,7 @@ CASES += [
          "            builder.set_price_link_basis(PriceLinkBasis.MANUAL)\n",
          '',
          'tests/orders_test.py::BuilderTemplates::test_equity_buy_trailing_stop_limit',
-         'True is not false'),
+         '"priceLinkBasis": "MANUAL"'),
 ]
 
 # Out of the release red-proof (2026-11-09): entries on tooling, test
