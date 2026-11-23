@@ -10691,6 +10691,18 @@ CASES += [
          'a logout raced a login'),
 ]
 
+# A trailing stop-limit template's fixed limit carries priceLinkBasis MANUAL
+# and stopType STANDARD, the shape schwab-py PR #321's live preview of a sell
+# accepted, where a bare fixed price was refused.
+CASES += [
+    Case('orders/a-trailing-stop-limits-fixed-price-is-manual',
+         'schwaby/orders/equities.py',
+         "            builder.set_price_link_basis(PriceLinkBasis.MANUAL)\n",
+         '',
+         'tests/orders_test.py::BuilderTemplates::test_equity_buy_trailing_stop_limit',
+         '"priceLinkBasis": "MANUAL"'),
+]
+
 # Out of the release red-proof (2026-11-09): entries on tooling, test
 # scaffolding, docs and CI, which leave it while their tests stay in the
 # gate, run on every merge; entries already removed or declared GREEN; and

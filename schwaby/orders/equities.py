@@ -12,7 +12,8 @@ def _equity_order(instruction, order_type, symbol, quantity, *, price=None,
     This is an implementation detail of the templates below. It exists so the
     required fields for each order type are expressed in exactly one place.
     '''
-    from schwaby.orders.common import OrderStrategyType
+    from schwaby.orders.common import (
+            OrderStrategyType, OrderType, PriceLinkBasis, StopType)
     from schwaby.orders.generic import OrderBuilder
 
     builder = (OrderBuilder()
@@ -24,6 +25,16 @@ def _equity_order(instruction, order_type, symbol, quantity, *, price=None,
 
     if price is not None:
         builder.set_price(price)
+        if order_type == OrderType.TRAILING_STOP_LIMIT:
+            # A trailing stop-limit's fixed limit. In schwab-py PR #321's live
+            # previews, a sell's fixed price without a priceLinkBasis was
+            # refused ("Price link basis must be populated for trailing
+            # ...") and accepted with priceLinkBasis MANUAL, no
+            # priceLinkType and no priceOffset; stopType STANDARD was in both
+            # requests. The other three instructions were not previewed with
+            # a fixed price.
+            builder.set_stop_type(StopType.STANDARD)
+            builder.set_price_link_basis(PriceLinkBasis.MANUAL)
     if stop_price is not None:
         builder.set_stop_price(stop_price)
     if stop_price_offset is not None:
@@ -134,7 +145,10 @@ def equity_buy_trailing_stop_limit(
     '''
     Returns a pre-filled :class:`~schwaby.orders.generic.OrderBuilder` for an equity
     buy trailing stop-limit order. Places a limit order at ``price`` once the
-    trailing stop condition is met.
+    trailing stop condition is met. The fixed limit is sent with
+    ``priceLinkBasis`` ``MANUAL`` and ``stopType`` ``STANDARD``: a bare one
+    was refused when previewed for a sell (see :ref:`the note on stop orders
+    <stop_order_configuration>`).
 
     See :func:`equity_buy_trailing_stop` for a description of the trailing
     parameters.
@@ -267,7 +281,10 @@ def equity_sell_trailing_stop_limit(
     '''
     Returns a pre-filled :class:`~schwaby.orders.generic.OrderBuilder` for an equity
     sell trailing stop-limit order. Places a limit order at ``price`` once the
-    trailing stop condition is met.
+    trailing stop condition is met. The fixed limit is sent with
+    ``priceLinkBasis`` ``MANUAL`` and ``stopType`` ``STANDARD``: a bare one
+    was refused when previewed for a sell (see :ref:`the note on stop orders
+    <stop_order_configuration>`).
 
     See :func:`equity_sell_trailing_stop` for a description of the trailing
     parameters.
@@ -400,7 +417,10 @@ def equity_sell_short_trailing_stop_limit(
     '''
     Returns a pre-filled :class:`~schwaby.orders.generic.OrderBuilder` for an equity
     short sell trailing stop-limit order. Places a limit order at ``price`` once the
-    trailing stop condition is met.
+    trailing stop condition is met. The fixed limit is sent with
+    ``priceLinkBasis`` ``MANUAL`` and ``stopType`` ``STANDARD``: a bare one
+    was refused when previewed for a sell (see :ref:`the note on stop orders
+    <stop_order_configuration>`).
 
     See :func:`equity_sell_short_trailing_stop` for a description of the trailing
     parameters.
@@ -534,7 +554,10 @@ def equity_buy_to_cover_trailing_stop_limit(
     '''
     Returns a pre-filled :class:`~schwaby.orders.generic.OrderBuilder` for an equity
     buy-to-cover trailing stop-limit order. Places a limit order at ``price`` once the
-    trailing stop condition is met.
+    trailing stop condition is met. The fixed limit is sent with
+    ``priceLinkBasis`` ``MANUAL`` and ``stopType`` ``STANDARD``: a bare one
+    was refused when previewed for a sell (see :ref:`the note on stop orders
+    <stop_order_configuration>`).
 
     See :func:`equity_buy_to_cover_trailing_stop` for a description of the trailing
     parameters.

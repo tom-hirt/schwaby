@@ -691,6 +691,8 @@ verify that.
 .. automethod:: schwaby.orders.generic.OrderBuilder.clear_quantity
 
 
+.. _stop_order_configuration:
+
 ~~~~~~~~~~~~~~~~~~~~~~~~
 Stop Order Configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -707,6 +709,28 @@ have we made the effort to make it simple and easy. While we're *pretty* sure we
 understand how these fields work, they've been temporarily placed into the
 "undocumented" section, pending a followup. Users are invited to experiment with
 these fields at their own risk.
+
+.. note::
+
+   **A trailing stop-limit with a fixed limit price needs** ``priceLinkBasis``
+   ``MANUAL``. Schwab refused a ``TRAILING_STOP_LIMIT`` sell carrying a fixed
+   ``price`` and no ``priceLinkBasis``, with "Price link basis must be
+   populated for trailing ...", and accepted it with ``priceLinkBasis``
+   ``MANUAL``. With ``MANUAL`` it then refused a ``priceLinkType`` or
+   ``priceOffset`` as misplaced. Both requests carried ``stopType``
+   ``STANDARD``. This was measured with live order previews in `schwab-py pull
+   request #321 <https://github.com/alexgolec/schwab-py/pull/321>`__, of a sell
+   only, not by this project. The trailing stop-limit templates send that
+   shape for every instruction. Built by hand:
+
+   .. code-block:: python
+
+     from schwaby.orders.common import OrderType, PriceLinkBasis, StopType
+
+     builder.set_order_type(OrderType.TRAILING_STOP_LIMIT)
+     builder.set_price('299.50')
+     builder.set_price_link_basis(PriceLinkBasis.MANUAL)
+     builder.set_stop_type(StopType.STANDARD)
 
 
 .. automethod:: schwaby.orders.generic.OrderBuilder.set_stop_price
