@@ -31,7 +31,8 @@ def _equity_order(instruction, order_type, symbol, quantity, *, price=None,
             # refused ("Price link basis must be populated for trailing
             # ...") and accepted with priceLinkBasis MANUAL, no
             # priceLinkType and no priceOffset; stopType STANDARD was in both
-            # requests. The other three instructions were not previewed.
+            # requests. The other three instructions were not previewed with
+            # a fixed price.
             builder.set_stop_type(StopType.STANDARD)
             builder.set_price_link_basis(PriceLinkBasis.MANUAL)
     if stop_price is not None:
@@ -146,7 +147,7 @@ def equity_buy_trailing_stop_limit(
     buy trailing stop-limit order. Places a limit order at ``price`` once the
     trailing stop condition is met. The fixed limit is sent with
     ``priceLinkBasis`` ``MANUAL`` and ``stopType`` ``STANDARD``: a bare one
-    was refused when previewed (see :ref:`the note on stop orders
+    was refused when previewed for a sell (see :ref:`the note on stop orders
     <stop_order_configuration>`).
 
     See :func:`equity_buy_trailing_stop` for a description of the trailing
@@ -282,7 +283,7 @@ def equity_sell_trailing_stop_limit(
     sell trailing stop-limit order. Places a limit order at ``price`` once the
     trailing stop condition is met. The fixed limit is sent with
     ``priceLinkBasis`` ``MANUAL`` and ``stopType`` ``STANDARD``: a bare one
-    was refused when previewed (see :ref:`the note on stop orders
+    was refused when previewed for a sell (see :ref:`the note on stop orders
     <stop_order_configuration>`).
 
     See :func:`equity_sell_trailing_stop` for a description of the trailing
@@ -418,7 +419,7 @@ def equity_sell_short_trailing_stop_limit(
     short sell trailing stop-limit order. Places a limit order at ``price`` once the
     trailing stop condition is met. The fixed limit is sent with
     ``priceLinkBasis`` ``MANUAL`` and ``stopType`` ``STANDARD``: a bare one
-    was refused when previewed (see :ref:`the note on stop orders
+    was refused when previewed for a sell (see :ref:`the note on stop orders
     <stop_order_configuration>`).
 
     See :func:`equity_sell_short_trailing_stop` for a description of the trailing
@@ -555,7 +556,7 @@ def equity_buy_to_cover_trailing_stop_limit(
     buy-to-cover trailing stop-limit order. Places a limit order at ``price`` once the
     trailing stop condition is met. The fixed limit is sent with
     ``priceLinkBasis`` ``MANUAL`` and ``stopType`` ``STANDARD``: a bare one
-    was refused when previewed (see :ref:`the note on stop orders
+    was refused when previewed for a sell (see :ref:`the note on stop orders
     <stop_order_configuration>`).
 
     See :func:`equity_buy_to_cover_trailing_stop` for a description of the trailing

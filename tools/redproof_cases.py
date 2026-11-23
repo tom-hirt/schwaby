@@ -10692,8 +10692,8 @@ CASES += [
 ]
 
 # A trailing stop-limit template's fixed limit carries priceLinkBasis MANUAL
-# and stopType STANDARD, which Schwab requires of a fixed price there (as
-# previewed in schwab-py PR #321).
+# and stopType STANDARD, the shape schwab-py PR #321's live preview of a sell
+# accepted, where a bare fixed price was refused.
 CASES += [
     Case('orders/a-trailing-stop-limits-fixed-price-is-manual',
          'schwaby/orders/equities.py',
