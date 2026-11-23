@@ -32,6 +32,42 @@ The commit check holds a released section to its tag's text: see
 
 ---
 
+## 5.9.1
+
+*2026-11-23*
+
+A patch release: one fix to the trailing stop-limit order templates. Nothing
+public is added or removed.
+
+### Fixed: a trailing stop-limit template's fixed limit
+
+`equity_buy_trailing_stop_limit`, `equity_sell_trailing_stop_limit`,
+`equity_sell_short_trailing_stop_limit` and
+`equity_buy_to_cover_trailing_stop_limit` sent their fixed limit as a bare
+`price`. In the live order previews of
+[schwab-py pull request #321](https://github.com/alexgolec/schwab-py/pull/321),
+Schwab refused a trailing stop-limit sell built that way ("Price link basis
+must be populated for trailing ...") and accepted it with `priceLinkBasis`
+`MANUAL` and no `priceLinkType` or `priceOffset`, `stopType` `STANDARD`
+present in both. The templates now send that shape, for every instruction.
+The order failed safe before: refused, never placed.
+
+That measurement is upstream's, of a sell; this project made no live call,
+and the buy, short and cover instructions were not previewed with a fixed
+price. An order built by hand with `OrderBuilder` needs the same fields: the
+order-builder docs' stop-order section has a note and a sample.
+[Schwab-py-NG](https://github.com/neusse/Schwab-py-NG/commit/0955d982) made
+the same change; no code is taken from it.
+
+### Also
+
+- The commit check refuses an edit of a released section of this file. A
+  correction goes in a later release's notes, and a deletion for privacy
+  says why there; this file's preamble has the rule.
+- The maintainer's notes say to read `main`'s CI on every leg after each
+  merge, and to prove a fix's test with a queued red-proof entry rather
+  than by reverting the fix by hand.
+
 ## 5.9.0
 
 *2026-11-16*
