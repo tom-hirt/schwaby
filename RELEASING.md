@@ -357,8 +357,9 @@ red-proof of only the entries whose code changed, keep each one cheap.
    **A fix the release needs goes onto the release branch, and nothing
    else does.** Push it at once, so CI's full matrix runs on the new head.
    Re-prove only the fix's own scope there: the sentinels it touches and,
-   for a FULL release, the red-proof entries whose reads it changes and the
-   release gate once more if it changes anything under `schwaby/`. A proof
+   for a FULL release, the red-proof entries whose reads it changes, as
+   queued jobs at the new head. The release gate and the release red-proof
+   are never run again from scratch, whatever the fix touches. A proof
    that fails re-proves only what failed, never the whole run. The new head, with its CI
    run passed, is the commit that is signed off and tagged. Work on `main`
    goes on meanwhile and is not taken in: the base stays fixed.
