@@ -122,6 +122,12 @@ day, while each branch's own tests passed. When a lock moves, check each
 pinned package's `Requires-Python` against the oldest supported Python, and
 give that Python its own pin where it needs one.
 
+**A pull request merges through GitHub, with a merge commit.**
+`gh pr merge <number> -R tom-hirt/schwaby --merge` keeps the reviewed commits
+in `main`'s history, never squashed or rebased, and GitHub deletes the head
+branch as it merges, so nothing pushes a branch deletion or rewrites a ref by
+hand. A release branch merges back the same way (step 10).
+
 ## Dependencies
 
 Nothing opens update pull requests on a timer: CI runs when code it tests
@@ -362,32 +368,32 @@ red-proof of only the entries whose code changed, keep each one cheap.
    message from a file — backticks in `git tag -m` are executed as command
    substitution, which silently swallows words from the message.
 
-10. **Push the tag, then merge the release branch back into `main`,** in a
-    local merge, never a squash or a rebase, which would leave `main`
-    without the tagged commit and the release unable to publish:
+10. **Push the tag, then merge the release branch back into `main` through
+    its pull request,** with a merge commit, never a squash or a rebase,
+    which would leave `main` without the tagged commit and the release unable
+    to publish:
 
     ```shell
     git push origin vX.Y.Z
-    git switch main && git pull --ff-only origin main
-    git merge release/vX.Y.Z    # a fast-forward if main has not moved
-    git push origin main
+    gh pr create -R tom-hirt/schwaby --base main --head release/vX.Y.Z \
+        --title 'release: vX.Y.Z' --body 'The release branch, merged back.'
+    gh pr merge <number> -R tom-hirt/schwaby --merge
     ```
 
-    If `main` moved since the base, this is a merge commit, made through the
-    hooks like any other, and the gate runs once more on the merged tree
-    before the push: two branches that each pass can still fail together. If
-    that gate fails, the fault is in the combination, not in the release:
-    the tag stays where it is, and the fix goes onto `main` as an ordinary
-    change before the merge is pushed. If the push is refused because `main`
-    moved again, pull, merge and run the gate again.
+    GitHub makes the merge commit, and deletes the release branch as it
+    merges (the repository deletes head branches on merge), so no branch is
+    deleted by hand. The pull request's CI runs on the merged tree: if `main`
+    moved since the base, two branches that each pass can still fail
+    together. If it fails, the fault is in the combination, not in the
+    release: the tag stays where it is, and the fix goes onto `main` as an
+    ordinary change before the merge.
 
-    The tag stays on the release branch's head, which `main` now holds.
-    Delete the release branch only once that is so:
+    The tag stays on the release branch's head, which `main` now holds;
+    confirm it, then read `main`'s CI for the merge commit, every leg:
 
     ```shell
     git fetch origin
-    git merge-base --is-ancestor vX.Y.Z origin/main \
-        && git push origin --delete release/vX.Y.Z
+    git merge-base --is-ancestor vX.Y.Z origin/main
     ```
 
 11. Create the release, only once `main` on GitHub holds the commit GitHub's
@@ -400,9 +406,10 @@ red-proof of only the entries whose code changed, keep each one cheap.
         && gh release create vX.Y.Z -R tom-hirt/schwaby --notes-file ...
     ```
 
-    GitHub's tag, not the local one: the release is made from GitHub's, and
-    step 12 says why the two can differ. A tag made without `-a` has no
-    `^{}` line and is refused here; re-make it as step 9 does.
+    GitHub's tag, not the local one: the release is made from GitHub's. A
+    tag made without `-a` has no `^{}` line and is refused here; since a
+    pushed tag is never moved (step 12), the release goes out as the next
+    patch version, tagged as step 9 says.
 
     A tag can name a commit `main` does not hold: a release branch not yet
     merged back, or a tag pushed apart from either. The publish workflow
@@ -414,8 +421,9 @@ red-proof of only the entries whose code changed, keep each one cheap.
     on all five Pythons, checks `main` holds the commit, runs `twine check
     --strict`, verifies the built version matches the tag, and uploads via
     trusted publishing. Pushing a tag alone
-    publishes nothing, so a tag can be moved before the release is created. After
-    it, the version is permanent: PyPI refuses a re-upload even after a delete.
+    publishes nothing; still, a pushed tag is never moved (step 12). Once the
+    release is created, the version is permanent: PyPI refuses a re-upload
+    even after a delete.
 
     If the publish fails, retry it without cutting another release, on the
     release's tag itself:
@@ -432,25 +440,13 @@ red-proof of only the entries whose code changed, keep each one cheap.
     tags carry a workflow without these checks, and every version they name
     is already on PyPI, which refuses a re-upload.
 
-12. **If you move a tag, say so — a normal `git fetch` will not follow it.**
-
-    Deleting and re-creating a pushed tag is sometimes right, for instance to
-    fold a late documentation change into a release before it is published. But
-    git will not move a
-    tag ref a client already holds, and says nothing while declining to. So
-    anyone who fetched the old one keeps it silently, and the check most likely
-    to care — does this artifact match the tag I audited — is exactly the one
-    that gets a confident wrong answer.
-
-    Anyone who audited the old tag will conclude, confidently and wrongly, that
-    the published wheel does not match its own git tag. The fetch that fixes it:
-
-    ```shell
-    git fetch origin --prune-tags --force --tags
-    ```
-
-    Tell anyone downstream when a tag moves. A stale ref plus a confident tool is
-    worse than a wrong answer, because a wrong answer invites a second look.
+12. **A pushed tag is never moved.** A late change, a documentation fix
+    included, goes into the next patch release, cut from `main` like any
+    other. git will not move a tag ref a client already holds, and says
+    nothing while declining to, so anyone who fetched the old one keeps it
+    silently, and the check most likely to care, whether this artifact
+    matches the tag I audited, is exactly the one that gets a confident wrong
+    answer. A new version number costs nothing and misleads no one.
 
 13. **Re-check any claim about the release against the tag, after tagging.**
 
